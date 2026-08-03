@@ -19,6 +19,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Accept one-shot iterables in `thread_messages`.
 - Add `message_from_email` and `thread_email_messages` adapters for Python's
   standard-library email objects while retaining each source object as payload.
+- Decode RFC 2047 encoded words under both modern and legacy parser policies,
+  recover unknown character sets best-effort, and retain malformed values
+  instead of aborting mailbox ingestion.
 - Preserve decoded Unicode header values, including internationalized subjects,
   through the standard-library adapter.
 - Require 100% production statement and branch coverage in CI and verify that
