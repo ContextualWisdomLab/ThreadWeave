@@ -177,3 +177,30 @@ def test_subject_grouping_preserves_first_appearance_order():
     )
 
     assert [_ids(thread) for thread in grouped] == [{"a", "b"}, {"c"}]
+
+
+def test_message_without_id_preserves_first_appearance_order():
+    threads = thread_messages(
+        [
+            Message(payload="first"),
+            Message(message_id="a", payload="second"),
+        ]
+    )
+
+    assert [thread.message.payload for thread in threads] == ["first", "second"]
+
+
+def test_duplicate_message_id_preserves_first_appearance_order():
+    threads = thread_messages(
+        [
+            Message(message_id="dup", payload="first"),
+            Message(message_id="dup", payload="second"),
+            Message(message_id="later", payload="third"),
+        ]
+    )
+
+    assert [thread.message.payload for thread in threads] == [
+        "first",
+        "second",
+        "third",
+    ]
