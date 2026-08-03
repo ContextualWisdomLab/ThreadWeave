@@ -8,6 +8,7 @@ source object as the default payload.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from email.errors import HeaderParseError
 from email.header import decode_header
 from email.message import Message as EmailMessage
 from typing import Any
@@ -23,8 +24,14 @@ _PAYLOAD_MISSING = object()
 
 def _decode_header_text(value: object) -> str:
     """Decode RFC 2047 encoded words with a safe unknown-charset fallback."""
+    text = str(value)
+    try:
+        decoded_header = decode_header(text)
+    except HeaderParseError:
+        return text
+
     decoded_parts: list[str] = []
-    for part, charset in decode_header(str(value)):
+    for part, charset in decoded_header:
         if isinstance(part, str):
             decoded_parts.append(part)
             continue
