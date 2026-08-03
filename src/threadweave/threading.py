@@ -189,12 +189,14 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
         if owner is None or owner is container:
             continue
 
-        # The first pass guarantees that an owner is concrete whenever any
-        # concrete container exists for the base subject, and non-reply whenever
-        # any non-reply exists. Only the cases below can therefore remain.
+        # The subject-table owner can change while this pass reparents roots.
+        # In particular, an empty grouping container can become the owner after
+        # a concrete root was tentatively selected during the first pass.
         if owner.message is None and container.message is None:
             for grandchild in list(container.children):
                 owner.add_child(grandchild)
+        elif owner.message is None:
+            owner.add_child(container)
         elif container.message is None:
             container.add_child(owner)
             subject_table[base] = container
