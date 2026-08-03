@@ -37,6 +37,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every authored production callable carries a docstring.
 - Build and smoke-test wheel/source distributions in CI, including verification
   that the PEP 561 `py.typed` marker is packaged.
+- Add staggered hourly workflows for centrally governed PR review/fix/merge and
+  single-flight product-gap development, with supported user-token agent-task
+  authentication and fail-closed duplicate prevention.
 
 ## [0.1.0] - 2026-07-12
 
