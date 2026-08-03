@@ -5,8 +5,8 @@ from email.message import EmailMessage
 from threadweave import message_from_email, thread_email_messages
 
 
-def test_message_from_email_carries_date_internaldate_and_sequence_metadata():
-    """Mailbox metadata needed for RFC 5256 sorting reaches the core model."""
+def test_message_from_email_carries_date_and_mailbox_metadata():
+    """Ordering and protocol identifiers reach the transport-neutral model."""
     source = EmailMessage()
     source["Message-ID"] = "<message@example.com>"
     source["Date"] = "Tue, 06 Jun 2017 07:39:33 +0600"
@@ -15,11 +15,13 @@ def test_message_from_email_carries_date_internaldate_and_sequence_metadata():
         source,
         internal_date="06-Jun-2017 02:00:00 +0000",
         sequence_number=7,
+        uid=70,
     )
 
     assert converted.sent_date == "Tue, 06 Jun 2017 07:39:33 +0600"
     assert converted.internal_date == "06-Jun-2017 02:00:00 +0000"
     assert converted.sequence_number == 7
+    assert converted.uid == 70
 
 
 def test_thread_email_messages_uses_iterable_order_as_sequence_number():
