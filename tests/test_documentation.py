@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 
 import threadweave.adapters
+import threadweave.collation
 import threadweave.container
 import threadweave.encoded_words
 import threadweave.headers
@@ -13,6 +14,7 @@ import threadweave.threading
 
 MODULES = (
     threadweave.adapters,
+    threadweave.collation,
     threadweave.container,
     threadweave.encoded_words,
     threadweave.headers,
