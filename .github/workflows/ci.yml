@@ -26,7 +26,13 @@ jobs:
       - run: python -m pip install -e ".[test]" ruff
       - run: ruff check .
       - run: python -m compileall -q src tests
-      - run: python -m doctest src/threadweave/headers.py src/threadweave/subject.py
+      - name: Run production doctests
+        run: |
+          python -m doctest \
+            src/threadweave/collation.py \
+            src/threadweave/dates.py \
+            src/threadweave/headers.py \
+            src/threadweave/subject.py
       - run: coverage run -m pytest -q
       - run: coverage report
       - run: python -m pip check
@@ -73,15 +79,21 @@ jobs:
 
           roots = thread_messages(
               [
-                  Message(message_id="root@example.com"),
                   Message(
-                      message_id="child@example.com",
-                      references="<root@example.com>",
+                      message_id="later@example.com",
+                      sent_date="2 Jan 2026 00:00:00 +0000",
                   ),
-              ]
+                  Message(
+                      message_id="earlier@example.com",
+                      sent_date="1 Jan 2026 00:00:00 +0000",
+                  ),
+              ],
+              sort_by_sent_date=True,
           )
-          assert len(roots) == 1
-          assert roots[0].message.message_id == "root@example.com"
+          assert [root.message.message_id for root in roots] == [
+              "earlier@example.com",
+              "later@example.com",
+          ]
           PY
       - uses: actions/upload-artifact@v4
         with:
