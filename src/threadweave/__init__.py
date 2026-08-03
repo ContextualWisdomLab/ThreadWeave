@@ -2,7 +2,8 @@
 
 Assemble flat iterables of email messages into conversation trees using Jamie
 Zawinski's container algorithm and RFC 5256 REFERENCES semantics, on top of RFC
-5322 identification-field parsing and exact RFC 5256 base-subject extraction.
+5322 identification-field parsing, RFC 5051 Unicode casemap comparison, and
+exact RFC 5256 base-subject extraction.
 
     from threadweave import Message, thread_messages
 
@@ -15,10 +16,11 @@ Zawinski's container algorithm and RFC 5256 REFERENCES semantics, on top of RFC
 
 The RFC 5322 header primitives (:mod:`threadweave.headers`) are extracted
 behaviour-preserving from the naruon control plane; the threading assembly is a
-fresh implementation grounded in JWZ and RFC 5256.
+fresh implementation grounded in JWZ, RFC 5256, and RFC 5051.
 """
 
 from threadweave.adapters import message_from_email, thread_email_messages
+from threadweave.collation import unicode_casemap_key
 from threadweave.container import Container
 from threadweave.encoded_words import decode_header_text
 from threadweave.headers import (
@@ -50,4 +52,5 @@ __all__ = [
     "normalize_subject",
     "thread_email_messages",
     "thread_messages",
+    "unicode_casemap_key",
 ]
