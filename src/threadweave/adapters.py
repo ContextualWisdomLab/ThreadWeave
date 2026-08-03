@@ -8,12 +8,11 @@ source object as the default payload.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from email.errors import HeaderParseError
-from email.header import decode_header
 from email.message import Message as EmailMessage
 from typing import Any
 
 from threadweave.container import Container
+from threadweave.encoded_words import decode_header_text
 from threadweave.headers import extract_reference_ids, normalize_message_id
 from threadweave.threading import Message, thread_messages
 
@@ -22,32 +21,10 @@ __all__ = ["message_from_email", "thread_email_messages"]
 _PAYLOAD_MISSING = object()
 
 
-def _decode_header_text(value: object) -> str:
-    """Decode RFC 2047 encoded words with a safe unknown-charset fallback."""
-    text = str(value)
-    try:
-        decoded_header = decode_header(text)
-    except HeaderParseError:
-        return text
-
-    decoded_parts: list[str] = []
-    for part, charset in decoded_header:
-        if isinstance(part, str):
-            decoded_parts.append(part)
-            continue
-
-        encoding = charset or "ascii"
-        try:
-            decoded_parts.append(part.decode(encoding, errors="replace"))
-        except LookupError:
-            decoded_parts.append(part.decode("utf-8", errors="replace"))
-    return "".join(decoded_parts)
-
-
 def _header_text(message: EmailMessage, name: str) -> str | None:
     """Return one decoded header value as text, or ``None`` when absent."""
     value = message.get(name)
-    return None if value is None else _decode_header_text(value)
+    return None if value is None else decode_header_text(value)
 
 
 def message_from_email(
