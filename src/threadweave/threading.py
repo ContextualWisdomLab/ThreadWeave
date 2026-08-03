@@ -8,7 +8,8 @@ existing parents, gather the root set, prune empty containers, and optionally
 group the root set by base subject.
 
 The RFC 5322 identification-field primitives it consumes live in
-:mod:`threadweave.headers`.
+:mod:`threadweave.headers`; subject-table keys use RFC 5051
+``i;unicode-casemap`` preparation.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from threadweave.collation import unicode_casemap_key
 from threadweave.container import Container
 from threadweave.headers import extract_reference_ids, normalize_message_id
 from threadweave.subject import is_reply_or_forward_subject, normalize_subject
@@ -168,6 +170,11 @@ def _prune(holder: Container) -> None:
         node.children = kept
 
 
+def _subject_key(container: Container) -> str:
+    """Return the RFC 5256/5051 subject-table key for ``container``."""
+    return unicode_casemap_key(normalize_subject(_subject_of(container)))
+
+
 def _group_by_subject(root_set: list[Container]) -> list[Container]:
     """RFC 5256 step 5: merge root threads that share a base subject."""
     subject_table: dict[str, Container] = {}
@@ -175,7 +182,7 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
     # RFC 5256 5.B keeps a dummy owner whenever one exists. Otherwise it prefers
     # a non-reply/non-forward concrete owner over a reply/forward owner.
     for container in root_set:
-        base = normalize_subject(_subject_of(container)).casefold()
+        base = _subject_key(container)
         if not base:
             continue
         existing = subject_table.get(base)
@@ -194,7 +201,7 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
 
     created: list[Container] = []
     for container in root_set:
-        base = normalize_subject(_subject_of(container)).casefold()
+        base = _subject_key(container)
         if not base:
             continue
         owner = subject_table.get(base)
