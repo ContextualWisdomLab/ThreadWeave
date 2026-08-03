@@ -12,6 +12,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Preserve insertion order during depth-first container traversal, exclude the
   traversal root from malformed cycles, and make re-adding a direct child
   idempotent.
+- Parse `In-Reply-To` as a message-ID field and use its first valid ID when
+  `References` is absent, as required by the RFC 5256 REFERENCES algorithm.
 
 ## [0.1.0] - 2026-07-12
 
