@@ -6,6 +6,7 @@ import inspect
 
 import threadweave.adapters
 import threadweave.container
+import threadweave.encoded_words
 import threadweave.headers
 import threadweave.subject
 import threadweave.threading
@@ -13,6 +14,7 @@ import threadweave.threading
 MODULES = (
     threadweave.adapters,
     threadweave.container,
+    threadweave.encoded_words,
     threadweave.headers,
     threadweave.subject,
     threadweave.threading,

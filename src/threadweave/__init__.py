@@ -1,8 +1,8 @@
-"""threadweave — the canonical JWZ message-threading algorithm for Python.
+"""threadweave — standards-grounded email message threading for Python.
 
-Assemble flat lists of email messages into conversation trees using Jamie
-Zawinski's threading algorithm (https://www.jwz.org/doc/threading.html), on top
-of RFC 5322 §3.6.4 identification-field parsing.
+Assemble flat iterables of email messages into conversation trees using Jamie
+Zawinski's container algorithm and RFC 5256 REFERENCES semantics, on top of RFC
+5322 identification-field parsing and exact RFC 5256 base-subject extraction.
 
     from threadweave import Message, thread_messages
 
@@ -14,18 +14,23 @@ of RFC 5322 §3.6.4 identification-field parsing.
     # -> one root Container; a is an ancestor of b, b of c.
 
 The RFC 5322 header primitives (:mod:`threadweave.headers`) are extracted
-behaviour-preserving from the naruon control plane; the JWZ assembly
-(:mod:`threadweave.threading`) is a fresh canonical implementation.
+behaviour-preserving from the naruon control plane; the threading assembly is a
+fresh implementation grounded in JWZ and RFC 5256.
 """
 
 from threadweave.adapters import message_from_email, thread_email_messages
 from threadweave.container import Container
+from threadweave.encoded_words import decode_header_text
 from threadweave.headers import (
     extract_reference_ids,
     generate_email_fingerprint,
     normalize_message_id,
 )
-from threadweave.subject import is_reply_subject, normalize_subject
+from threadweave.subject import (
+    is_reply_or_forward_subject,
+    is_reply_subject,
+    normalize_subject,
+)
 from threadweave.threading import Message, thread_messages
 
 __version__ = "0.1.0"
@@ -35,8 +40,10 @@ __version__ = "0.1.0"
 __all__ = [
     "Container",
     "Message",
+    "decode_header_text",
     "extract_reference_ids",
     "generate_email_fingerprint",
+    "is_reply_or_forward_subject",
     "is_reply_subject",
     "message_from_email",
     "normalize_message_id",

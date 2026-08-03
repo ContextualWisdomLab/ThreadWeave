@@ -19,7 +19,7 @@ from typing import Any
 
 from threadweave.container import Container
 from threadweave.headers import extract_reference_ids, normalize_message_id
-from threadweave.subject import is_reply_subject, normalize_subject
+from threadweave.subject import is_reply_or_forward_subject, normalize_subject
 
 __all__ = ["Message", "thread_messages"]
 
@@ -100,8 +100,8 @@ def _subject_of(container: Container) -> str | None:
 def _link(parent: Container, child: Container) -> None:
     """Link ``child`` under ``parent`` if it neither loops nor steals a parent.
 
-    Mirrors RFC 5256 step 1.A: skip when ``child`` already has a parent, and skip
-    any link that would introduce a cycle.
+    Mirrors RFC 5256 step 1.A: skip when ``child`` already has a parent, and skip any
+    link that would introduce a cycle.
     """
     if child.parent is not None:
         return
@@ -185,8 +185,8 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
         replace = existing.message is not None and (
             container.message is None
             or (
-                is_reply_subject(_subject_of(existing))
-                and not is_reply_subject(_subject_of(container))
+                is_reply_or_forward_subject(_subject_of(existing))
+                and not is_reply_or_forward_subject(_subject_of(container))
             )
         )
         if replace:
@@ -206,8 +206,9 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
                 owner.add_child(grandchild)
         elif owner.message is None:
             owner.add_child(container)
-        elif is_reply_subject(_subject_of(container)) and not is_reply_subject(
-            _subject_of(owner)
+        elif (
+            is_reply_or_forward_subject(_subject_of(container))
+            and not is_reply_or_forward_subject(_subject_of(owner))
         ):
             owner.add_child(container)
         else:

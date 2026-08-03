@@ -21,9 +21,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Accept one-shot iterables in `thread_messages`.
 - Add `message_from_email` and `thread_email_messages` adapters for Python's
   standard-library email objects while retaining each source object as payload.
+- Add reusable `decode_header_text` RFC 2047 decoding for adapters and subject
+  extraction.
 - Decode RFC 2047 encoded words under both modern and legacy parser policies,
   recover unknown character sets best-effort, and retain malformed values
   instead of aborting mailbox ingestion.
+- Implement exact RFC 5256 base-subject extraction, including mailing-list
+  blobs, reply/forward leaders, `(fwd)` trailers, `[fwd: ...]` wrappers, and RFC
+  whitespace normalization.
+- Add explicit `is_reply_or_forward_subject` classification and retain
+  `is_reply_subject` as a compatibility name with the standardized semantics.
 - Preserve decoded Unicode header values, including internationalized subjects,
   through the standard-library adapter.
 - Require 100% production statement and branch coverage in CI and verify that

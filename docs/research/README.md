@@ -30,6 +30,28 @@ than an ad-hoc heuristic. The primary sources are listed below.
      response algorithm is intentionally outside the current transport-agnostic
      API because `Message` does not yet require a sent-date field.
 
+## Base-subject extraction — RFC 5256 §2.1 and §5
+
+RFC 5256 requires one exact seven-step procedure so connected and disconnected
+clients produce consistent base subjects. `normalize_subject` implements it:
+
+1. Decode RFC 2047 encoded words to Unicode; convert tabs and folded lines to
+   spaces; collapse multiple ASCII spaces.
+2. Repeatedly remove trailing whitespace and `(fwd)` trailers.
+3. Remove a leading `subj-leader`: optional mailing-list blobs followed by a
+   case-insensitive `Re:`, `Fw:`, or `Fwd:` token, including the optional blob
+   permitted between the token and colon.
+4. Remove a leading `subj-blob` such as `[project]` only when a non-empty base
+   subject remains. This preserves a final blob when it is the entire subject.
+5. Repeat leader and blob removal until stable.
+6. Unwrap a surrounding `[fwd: ...]` form and restart from trailer removal.
+7. Return the resulting text as the base subject.
+
+RFC 5256 separately defines a message as a reply or forward when extraction
+removes a `subj-refwd`, a `(fwd)` trailer, or a `[fwd: ...]` wrapper.
+`is_reply_or_forward_subject` reports that classification. Removing a mailing-
+list blob alone does not classify a message as a reply or forward.
+
 ## Identification fields — RFC 5322 §3.6.4
 
 - **RFC 5322, “Internet Message Format”, §3.6.4 (Identification Fields)**
@@ -52,11 +74,14 @@ than an ad-hoc heuristic. The primary sources are listed below.
   (<https://www.rfc-editor.org/rfc/rfc2047>) defines MIME encoded words such as
   `=?utf-8?b?...?=` for non-ASCII header text.
 - Modern `EmailMessage` policies decode these values transparently, while the
-  legacy `compat32` policy can expose the transport representation. The adapter
-  therefore decodes RFC 2047 parts explicitly, preserves ordinary text between
-  encoded words, recovers unknown character-set labels with replacement
-  decoding, and retains a malformed encoded word verbatim rather than rejecting
-  the whole message.
+  legacy `compat32` policy can expose the transport representation. The shared
+  `decode_header_text` primitive decodes RFC 2047 parts explicitly, preserves
+  ordinary text between encoded words, recovers unknown character-set labels
+  with replacement decoding, and retains a malformed encoded word verbatim
+  rather than rejecting the whole message.
+- The same primitive is used by both the standard-library email adapter and base-
+  subject extraction, preventing parser-policy differences from changing thread
+  grouping.
 
 ## Internationalized headers — RFC 6532
 
@@ -76,12 +101,11 @@ than an ad-hoc heuristic. The primary sources are listed below.
 ## A note on base-subject grouping
 
 Subject grouping is a **heuristic**, not part of the reference-based threading
-guarantee. Distinct conversations can share a subject, and localized
-reply/forward syntax varies, so it is off by default
-(`group_by_subject=False`). The current lightweight base-subject parser handles
-common `Re:`, `Fwd:`, and `Fw:` prefixes; a future strict RFC 5256 mode can add
-the full internationalized base-subject extraction grammar and sent-date
-ordering without changing the reference-linking core.
+guarantee. Distinct conversations can share the exact same base subject, so it
+is off by default (`group_by_subject=False`). The extraction procedure itself is
+RFC 5256 compliant; the remaining transport-layer boundary is sent-date sorting
+and IMAP response serialization, which require metadata the core `Message` model
+does not yet mandate.
 
 ## Provenance
 
