@@ -29,10 +29,12 @@ def _find(roots, message_id) -> Container:
 
 
 def _is_ancestor(roots, ancestor_id, descendant_id) -> bool:
+    """Return whether one message container is an ancestor of another."""
     node = _find(roots, ancestor_id)
     return any(
-        d.message is not None and d.message.message_id == descendant_id
-        for d in node.iter_descendants()
+        descendant.message is not None
+        and descendant.message.message_id == descendant_id
+        for descendant in node.iter_descendants()
     )
 
 
@@ -53,7 +55,10 @@ def test_linear_chain():
 def test_two_independents():
     threads = thread_messages([Message(message_id="x"), Message(message_id="y")])
     assert len(threads) == 2
-    assert {frozenset(_ids(t)) for t in threads} == {frozenset({"x"}), frozenset({"y"})}
+    assert {frozenset(_ids(thread)) for thread in threads} == {
+        frozenset({"x"}),
+        frozenset({"y"}),
+    }
 
 
 def test_missing_root_becomes_placeholder():
@@ -64,7 +69,6 @@ def test_missing_root_becomes_placeholder():
         ]
     )
     assert len(threads) == 1
-    # "a" was never supplied; b and c must still co-thread under a placeholder.
     assert _ids(threads[0]) == {"b", "c"}
     assert _is_ancestor(threads, "b", "c")
 
@@ -84,15 +88,15 @@ def test_fork():
 
 
 def test_subject_grouping_toggle():
-    msgs = [
+    messages = [
         Message(message_id="p", subject="Hello"),
         Message(message_id="q", subject="Re: Hello"),
     ]
-    grouped = thread_messages(msgs, group_by_subject=True)
+    grouped = thread_messages(messages, group_by_subject=True)
     assert len(grouped) == 1
     assert _ids(grouped[0]) == {"p", "q"}
 
-    ungrouped = thread_messages(msgs, group_by_subject=False)
+    ungrouped = thread_messages(messages, group_by_subject=False)
     assert len(ungrouped) == 2
 
 
@@ -109,7 +113,6 @@ def test_mutual_reference_terminates():
             Message(message_id="b", references=["a"]),
         ]
     )
-    # Must terminate without a loop and keep both messages in one thread.
     assert len(threads) == 1
     assert _ids(threads[0]) == {"a", "b"}
 
@@ -121,11 +124,10 @@ def test_duplicate_message_ids_not_destructive():
             Message(message_id="dup", subject="second", payload=2),
         ]
     )
-    # Two distinct messages sharing an ID must both survive.
     payloads = {
         node.message.payload
-        for t in threads
-        for node in [t, *t.iter_descendants()]
+        for thread in threads
+        for node in [thread, *thread.iter_descendants()]
         if node.message is not None
     }
     assert payloads == {1, 2}
@@ -133,22 +135,23 @@ def test_duplicate_message_ids_not_destructive():
 
 def test_returns_containers():
     threads = thread_messages([Message(message_id="a")])
-    assert all(isinstance(t, Container) for t in threads)
+    assert all(isinstance(thread, Container) for thread in threads)
     assert threads[0].parent is None
 
 
 def test_deep_linear_chain_does_not_recurse():
-    # A long linear reply chain must thread without RecursionError — regression
-    # for the previously-recursive prune step. Depth is well past the default
-    # sys.getrecursionlimit() (1000).
     n = 3000
-    msgs = [Message(message_id="m0")]
-    for i in range(1, n):
-        parent = f"m{i - 1}"
-        msgs.append(
-            Message(message_id=f"m{i}", in_reply_to=parent, references=[parent])
+    messages = [Message(message_id="m0")]
+    for index in range(1, n):
+        parent = f"m{index - 1}"
+        messages.append(
+            Message(
+                message_id=f"m{index}",
+                in_reply_to=parent,
+                references=[parent],
+            )
         )
-    threads = thread_messages(msgs)
+    threads = thread_messages(messages)
     assert len(threads) == 1
     assert len(_ids(threads[0])) == n
     assert _is_ancestor(threads, "m0", f"m{n - 1}")
@@ -204,3 +207,37 @@ def test_duplicate_message_id_preserves_first_appearance_order():
         "second",
         "third",
     ]
+
+
+def test_raw_references_header_is_parsed_as_message_ids():
+    threads = thread_messages(
+        [
+            Message(message_id="a@example.com"),
+            Message(message_id="b@example.com"),
+            Message(
+                message_id="c@example.com",
+                references="<a@example.com> <b@example.com>",
+            ),
+        ]
+    )
+
+    assert len(threads) == 1
+    assert _is_ancestor(threads, "a@example.com", "b@example.com")
+    assert _is_ancestor(threads, "b@example.com", "c@example.com")
+
+
+def test_raw_in_reply_to_header_supports_multiple_message_ids():
+    threads = thread_messages(
+        [
+            Message(message_id="a@example.com"),
+            Message(message_id="b@example.com"),
+            Message(
+                message_id="c@example.com",
+                in_reply_to="<a@example.com> <b@example.com>",
+            ),
+        ]
+    )
+
+    assert len(threads) == 1
+    assert _is_ancestor(threads, "a@example.com", "b@example.com")
+    assert _is_ancestor(threads, "b@example.com", "c@example.com")
