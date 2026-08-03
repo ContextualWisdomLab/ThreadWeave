@@ -14,6 +14,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   idempotent.
 - Compare mutable `Container` graph nodes by identity so cyclic structures are
   equality-safe and reparenting always removes the exact child instance.
+- Accept raw `References` and `In-Reply-To` header strings, including multiple
+  identifiers, in addition to already-split sequences.
+- Accept one-shot iterables in `thread_messages`.
+- Add `message_from_email` and `thread_email_messages` adapters for Python's
+  standard-library email objects while retaining each source object as payload.
+- Preserve decoded Unicode header values, including internationalized subjects,
+  through the standard-library adapter.
 
 ## [0.1.0] - 2026-07-12
 
