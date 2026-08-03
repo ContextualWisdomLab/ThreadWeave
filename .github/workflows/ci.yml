@@ -75,17 +75,23 @@ jobs:
           temp_dir="$(mktemp -d)"
           cd "$temp_dir"
           python - <<'PY'
-          from threadweave import Message, thread_messages
+          from threadweave import (
+              Message,
+              serialize_thread_response,
+              thread_messages,
+          )
 
           roots = thread_messages(
               [
                   Message(
                       message_id="later@example.com",
                       sent_date="2 Jan 2026 00:00:00 +0000",
+                      sequence_number=2,
                   ),
                   Message(
                       message_id="earlier@example.com",
                       sent_date="1 Jan 2026 00:00:00 +0000",
+                      sequence_number=1,
                   ),
               ],
               sort_by_sent_date=True,
@@ -94,6 +100,7 @@ jobs:
               "earlier@example.com",
               "later@example.com",
           ]
+          assert serialize_thread_response(roots) == "* THREAD (1)(2)\r\n"
           PY
       - uses: actions/upload-artifact@v4
         with:
