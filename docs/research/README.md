@@ -61,17 +61,23 @@ Collation Algorithm”** (<https://www.rfc-editor.org/rfc/rfc5051>) defines the
 required preparation and comparison:
 
 1. Read one Unicode code point.
-2. Apply its Unicode titlecase mapping.
+2. Apply its **simple titlecase mapping** from `UnicodeData.txt`. If no simple
+   titlecase mapping exists, use its simple uppercase mapping; if neither exists,
+   leave the code point unchanged.
 3. Recursively apply canonical or compatibility decomposition to the resulting
-   code points — effectively Normalization Form KD.
+   code point — effectively Normalization Form KD.
 4. Append the result and repeat for the remaining input.
 5. Compare the prepared strings with octet equality/order semantics.
 
-`unicode_casemap_key` performs steps 2-4 independently per Python code point
-using `str.title()` and `unicodedata.normalize("NFKD", ...)`. RFC 5051 explicitly
-permits an equivalent UTF-32 representation when all input is Unicode; Python
-string comparison therefore provides a practical key representation after
-preparation.
+Python's `str.title()` exposes the *full* titlecase mapping and can expand one
+code point through `SpecialCasing.txt`; that is not the RFC 5051 operation. The
+internal `_simple_titlecase` helper accepts a one-code-point `str.title()` result
+but keeps the original code point when Python returns an expansion. For the
+Unicode databases used by supported Python 3.10-3.13 runtimes, expanding full
+mappings have no simple `UnicodeData.txt` titlecase/uppercase mapping.
+`unicode_casemap_key` then applies `unicodedata.normalize("NFKD", ...)` to the
+simple result. RFC 5051 permits an equivalent Unicode code-point representation,
+so the prepared Python string is a practical equality and ordering key.
 
 Consequences covered by tests include:
 
@@ -80,6 +86,9 @@ Consequences covered by tests include:
 - Precomposed and decomposed accents compare equally.
 - RFC 5051's U+01C4/U+01C5/U+01C6 DZ-with-caron example produces
   `U+0044 U+007A U+030C` for every case form.
+- Multi-code-point full case expansions are deliberately not substituted for
+  simple mappings: `ß` remains `ß`, and the `ﬀ` ligature decomposes to lowercase
+  `ff` rather than titlecase `Ff`.
 - Visual confusables from unrelated scripts remain different. For example,
   Latin `A` and Greek `Α` are not interchangeable.
 
