@@ -1,6 +1,8 @@
 """Tests for standard-library email message integration."""
 
+from email import policy
 from email.message import EmailMessage
+from email.parser import BytesParser
 
 from threadweave import message_from_email, thread_email_messages
 
@@ -39,6 +41,32 @@ def test_message_from_email_normalizes_threading_headers_and_preserves_payload()
     assert converted.in_reply_to == ["parent@example.com"]
     assert converted.subject == "Re: 안녕하세요"
     assert converted.payload is source
+
+
+def test_message_from_email_decodes_encoded_words_under_compat32_policy():
+    """Legacy parser policies still produce decoded Unicode header text."""
+    source = BytesParser(policy=policy.compat32).parsebytes(
+        b"Message-ID: <message@example.com>\r\n"
+        b"Subject: =?utf-8?b?UmU6IOyViOuFle2VmOyEuOyalA==?=\r\n"
+        b"\r\n"
+    )
+
+    converted = message_from_email(source)
+
+    assert converted.subject == "Re: 안녕하세요"
+
+
+def test_message_from_email_decodes_unknown_charset_best_effort():
+    """Unknown encoded-word charsets do not leak transport syntax to callers."""
+    source = BytesParser(policy=policy.compat32).parsebytes(
+        b"Message-ID: <message@example.com>\r\n"
+        b"Subject: =?x-unknown?b?SGVsbG8=?=\r\n"
+        b"\r\n"
+    )
+
+    converted = message_from_email(source)
+
+    assert converted.subject == "Hello"
 
 
 def test_message_from_email_allows_explicit_none_payload():
