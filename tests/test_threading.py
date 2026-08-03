@@ -226,7 +226,7 @@ def test_raw_references_header_is_parsed_as_message_ids():
     assert _is_ancestor(threads, "b@example.com", "c@example.com")
 
 
-def test_raw_in_reply_to_header_supports_multiple_message_ids():
+def test_raw_in_reply_to_header_uses_only_first_valid_message_id():
     threads = thread_messages(
         [
             Message(message_id="a@example.com"),
@@ -238,6 +238,23 @@ def test_raw_in_reply_to_header_supports_multiple_message_ids():
         ]
     )
 
+    assert [_ids(thread) for thread in threads] == [
+        {"a@example.com", "c@example.com"},
+        {"b@example.com"},
+    ]
+    assert _is_ancestor(threads, "a@example.com", "c@example.com")
+
+
+def test_raw_in_reply_to_ignores_non_id_text_after_first_identifier():
+    threads = thread_messages(
+        [
+            Message(message_id="root@example.com"),
+            Message(
+                message_id="child@example.com",
+                in_reply_to="<root@example.com> sender@example.net",
+            ),
+        ]
+    )
+
     assert len(threads) == 1
-    assert _is_ancestor(threads, "a@example.com", "b@example.com")
-    assert _is_ancestor(threads, "b@example.com", "c@example.com")
+    assert _is_ancestor(threads, "root@example.com", "child@example.com")
