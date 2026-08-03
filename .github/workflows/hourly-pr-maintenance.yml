@@ -1,0 +1,58 @@
+name: Hourly PR Maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print planned actions without mutating pull requests
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "11 * * * *"
+
+concurrency:
+  group: hourly-pr-maintenance-${{ github.repository }}
+  cancel-in-progress: false
+
+# Reusable workflows cannot elevate the caller token. Grant the union of the
+# central review-fix and merge-scheduler permissions here; each called workflow
+# narrows them again at its job boundary.
+permissions:
+  actions: write
+  checks: read
+  contents: write
+  id-token: write
+  issues: write
+  pull-requests: write
+  statuses: read
+
+jobs:
+  review-fix:
+    uses: ContextualWisdomLab/.github/.github/workflows/pr-review-fix-scheduler.yml@main
+    with:
+      base_branch: "main"
+      dry_run: ${{ inputs.dry_run || false }}
+      max_dispatches: "1"
+      max_prs: "20"
+      retry_hours: "1"
+      target_repository: "ContextualWisdomLab/ThreadWeave"
+    secrets: inherit
+
+  review-merge:
+    needs: review-fix
+    if: ${{ always() }}
+    uses: ContextualWisdomLab/.github/.github/workflows/pr-review-merge-scheduler.yml@main
+    with:
+      base_branch: "main"
+      branch_update_limit: "1"
+      dry_run: ${{ inputs.dry_run || false }}
+      enable_auto_merge: true
+      max_prs: "20"
+      merge_mode: "direct_or_auto"
+      project_flow: "github-flow"
+      review_dispatch_limit: "1"
+      stale_opencode_minutes: "60"
+      trigger_reviews: true
+      update_branches: true
+    secrets: inherit
