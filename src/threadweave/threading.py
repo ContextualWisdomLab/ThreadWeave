@@ -1,12 +1,14 @@
 """The canonical JWZ message-threading algorithm.
 
 This is a fresh, faithful implementation of Jamie Zawinski's threading
-algorithm (https://www.jwz.org/doc/threading.html): build an id-table of
+algorithm (https://www.jwz.org/doc/threading.html), aligned with the
+``REFERENCES`` algorithm standardized by RFC 5256: build an id-table of
 containers, link ``References`` chains without creating loops or overriding good
 existing parents, gather the root set, prune empty containers, and optionally
 group the root set by base subject.
 
-The RFC 5322 header primitives it consumes live in :mod:`threadweave.headers`.
+The RFC 5322 identification-field primitives it consumes live in
+:mod:`threadweave.headers`.
 """
 
 from __future__ import annotations
@@ -29,7 +31,8 @@ class Message:
     Attributes:
         message_id: This message's ``Message-ID`` (brackets optional).
         in_reply_to: The raw ``In-Reply-To`` header or a sequence of message
-            identifiers. Used only when ``references`` is empty.
+            identifiers. When ``references`` is empty, only its first valid
+            identifier is used as the parent, as required by RFC 5256.
         references: The raw ``References`` header or its message identifiers,
             oldest first. Angle brackets and duplicate IDs are normalized away.
         subject: The ``Subject`` header, used for optional subject grouping.
@@ -60,20 +63,24 @@ def _reference_ids(value: str | Sequence[str] | None) -> list[str]:
 
 
 def _effective_references(message: Message) -> list[str]:
-    """Normalized, de-duplicated reference chain for ``message``.
+    """Return the normalized ancestry references used for ``message``.
 
-    Falls back to ``In-Reply-To`` when ``References`` is absent, per JWZ. Both
-    fields may be supplied as raw RFC 5322 header strings containing multiple
-    message identifiers or as already-split sequences.
+    A valid ``References`` chain is used in full. When that field is absent or
+    contains no valid identifiers, RFC 5256 requires the first valid identifier
+    in ``In-Reply-To`` to be used as the *only* reference. Limiting the fallback
+    prevents addresses or additional identifiers found in malformed historical
+    ``In-Reply-To`` fields from becoming a fabricated ancestry chain.
     """
     references = _reference_ids(message.references)
-    return references or _reference_ids(message.in_reply_to)
+    if references:
+        return references
+    return _reference_ids(message.in_reply_to)[:1]
 
 
 def _subject_of(container: Container) -> str | None:
     """Best-effort subject for a container: its own, else its first child's.
 
-    JWZ step 5.B: an empty container takes the subject of its *first* child
+    RFC 5256 step 5.B: an empty container takes the subject of its *first* child
     message. Implemented as a first-child-first DFS (iterative + id()-guarded, so
     it is loop-safe and never recurses on deep trees).
     """
@@ -93,8 +100,8 @@ def _subject_of(container: Container) -> str | None:
 def _link(parent: Container, child: Container) -> None:
     """Link ``child`` under ``parent`` if it neither loops nor steals a parent.
 
-    Mirrors JWZ step 1.B: skip when ``child`` already has a parent, and skip any
-    link that would introduce a cycle.
+    Mirrors RFC 5256 step 1.A: skip when ``child`` already has a parent, and skip
+    any link that would introduce a cycle.
     """
     if child.parent is not None:
         return
@@ -105,7 +112,7 @@ def _link(parent: Container, child: Container) -> None:
 
 
 def _set_parent(child: Container, parent: Container) -> None:
-    """JWZ step 1.C: (re)parent ``child`` to ``parent``, loop-safely.
+    """RFC 5256 step 1.B: (re)parent ``child`` to ``parent``, loop-safely.
 
     A definitive parent from the message's own ``References`` overrides a parent
     that was only presumed from another message's chain — unless doing so would
@@ -123,7 +130,7 @@ def _set_parent(child: Container, parent: Container) -> None:
 
 
 def _prune(holder: Container) -> None:
-    """JWZ step 4: prune empty containers under ``holder``.
+    """RFC 5256 step 3: prune empty containers under ``holder``.
 
     ``holder`` is a synthetic node whose ``children`` are the root set; an empty
     container with more than one child at that top level is preserved as a
@@ -162,9 +169,11 @@ def _prune(holder: Container) -> None:
 
 
 def _group_by_subject(root_set: list[Container]) -> list[Container]:
-    """JWZ step 5: merge root-set threads that share a base subject."""
+    """RFC 5256 step 5: merge root threads that share a base subject."""
     subject_table: dict[str, Container] = {}
 
+    # RFC 5256 5.B keeps a dummy owner whenever one exists. Otherwise it prefers
+    # a non-reply/non-forward concrete owner over a reply/forward owner.
     for container in root_set:
         base = normalize_subject(_subject_of(container)).casefold()
         if not base:
@@ -173,9 +182,12 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
         if existing is None:
             subject_table[base] = container
             continue
-        replace = (existing.message is None and container.message is not None) or (
-            is_reply_subject(_subject_of(existing))
-            and not is_reply_subject(_subject_of(container))
+        replace = existing.message is not None and (
+            container.message is None
+            or (
+                is_reply_subject(_subject_of(existing))
+                and not is_reply_subject(_subject_of(container))
+            )
         )
         if replace:
             subject_table[base] = container
@@ -189,17 +201,11 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
         if owner is None or owner is container:
             continue
 
-        # The subject-table owner can change while this pass reparents roots.
-        # In particular, an empty grouping container can become the owner after
-        # a concrete root was tentatively selected during the first pass.
         if owner.message is None and container.message is None:
             for grandchild in list(container.children):
                 owner.add_child(grandchild)
         elif owner.message is None:
             owner.add_child(container)
-        elif container.message is None:
-            container.add_child(owner)
-            subject_table[base] = container
         elif is_reply_subject(_subject_of(container)) and not is_reply_subject(
             _subject_of(owner)
         ):
@@ -232,7 +238,7 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
 def thread_messages(
     messages: Iterable[Message], *, group_by_subject: bool = False
 ) -> list[Container]:
-    """Thread ``messages`` into conversation trees via the JWZ algorithm.
+    """Thread ``messages`` into conversation trees via the JWZ/RFC 5256 algorithm.
 
     Args:
         messages: The messages to thread, consumed once in iteration order.
