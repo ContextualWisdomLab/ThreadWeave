@@ -37,6 +37,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every authored production callable carries a docstring.
 - Build and smoke-test wheel/source distributions in CI, including verification
   that the PEP 561 `py.typed` marker is packaged.
+- Add an hourly centralized review-fix/check-revalidation/merge workflow that
+  delegates policy to the organization `.github` repository.
+- Add a pull-request-first, single-flight hourly product-development dispatcher
+  for the GitHub Agent Tasks public-preview API. It uses a supported fine-
+  grained user token, the current API version, fail-closed task inventory, and
+  contract tests that prevent self-merging or duplicate autonomous work.
 
 ## [0.1.0] - 2026-07-12
 

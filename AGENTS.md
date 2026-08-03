@@ -2,47 +2,82 @@
 
 Operating guide for automated agents working on this repository.
 
-`threadweave` is a faithful implementation of the JWZ message-threading
-algorithm (https://www.jwz.org/doc/threading.html). Its value is *correctness* —
-mail clients rely on threading being right and never hanging. Treat every change
-to `threading.py` and `container.py` as behaviour-sensitive.
+`threadweave` implements the JWZ container model with RFC 5256 `REFERENCES`
+threading semantics, RFC 5322 identification-field parsing, RFC 2047 encoded-word
+decoding, and RFC 5256 base-subject extraction. Its value is correctness: mail
+clients and ingestion systems rely on threading being deterministic, standards-
+grounded, and impossible to hang on malformed input. Treat changes to
+`threading.py`, `container.py`, `subject.py`, and `headers.py` as behavior-
+sensitive.
 
 ## Invariants that must not regress
 
-1. **Loop-safety.** No input may cause an infinite loop or crash. Self-links and
-   mutual reference cycles must terminate. `Container.has_descendant`,
-   `add_child`, and `iter_descendants` all guard with a visited set — do not
-   remove those guards. Before linking A as a parent of B, check that A is not
-   already a descendant of B.
-2. **Never reparent a container that already has a good parent.** In step 1.B,
-   only link a referenced container that is still parentless. A message's own
-   `References` (step 1.C) is the sole authority allowed to override a
-   *presumed* parent, and only when the new link would not create a loop.
-3. **Empty-container pruning correctness (step 4).** Nuke empty childless
-   containers; splice-promote the children of an empty container into its level.
-   At the **root level**, an empty container with more than one child is kept as
-   a grouping root; an empty root with exactly one child promotes that child.
-   Do not "simplify" this special case away.
-4. **Missing roots become placeholders.** A referenced-but-unseen `Message-ID`
+1. **Loop safety.** No input may cause an infinite loop or recursive crash.
+   Self-links, mutual reference cycles, malformed parent pointers, and cyclic
+   child lists must terminate. Keep visited-set guards in every graph traversal.
+2. **Reference-parent authority.** Link the complete valid `References` chain
+   without stealing an existing good parent. When that chain is unavailable,
+   RFC 5256 permits only the first valid `In-Reply-To` identifier as the parent.
+   Never fabricate ancestry from later addresses or identifiers.
+3. **Definitive reparenting is narrow.** A message's own effective references may
+   replace a presumed parent only when the new edge cannot create a cycle.
+4. **Empty-container pruning is exact.** Remove empty childless containers and
+   splice-promote empty internal containers. At the root level, retain an empty
+   container with multiple children as a missing-root grouping node; promote its
+   sole child when it has exactly one.
+5. **RFC 5256 subject behavior is exact.** Decode RFC 2047 first; normalize RFC
+   whitespace; handle reply/forward leaders, removable list blobs, `(fwd)`
+   trailers, and `[fwd: ...]` wrappers. A dummy root remains the subject-table
+   owner whenever one exists. A blob alone is not a reply or forward.
+6. **Missing roots become placeholders.** A referenced-but-unseen `Message-ID`
    yields an empty container that still co-threads its descendants.
-5. **Duplicate Message-IDs must not collide destructively.** A second distinct
-   message with an already-seen ID gets its own container; both survive.
-6. **Determinism.** Output order derives from first appearance in the input.
-   `id_table` relies on dict insertion order — keep it.
+7. **Duplicate Message-IDs survive.** A later distinct message with an already-
+   seen identifier receives its own container; no payload is destroyed.
+8. **Determinism.** Root and descendant order derives from first appearance and
+   child insertion order. Do not replace ordered structures with sets.
+9. **Adapters preserve caller data.** The stdlib email adapter carries the source
+   message as payload by default, preserves Unicode, and tolerates damaged legacy
+   encoded words without aborting ingestion.
 
-## Maintenance notes
+## Architecture and dependency rules
 
-- Pure standard library only (`re`, `hashlib`, `dataclasses`, `typing`). Do not
-  add runtime dependencies.
-- The header primitives in `headers.py` are extracted behaviour-preserving from
-  naruon; port fixes in both directions and keep their behaviour identical.
-- TDD: add or update a test (thread count / co-threading membership are the most
-  robust assertions) before changing the algorithm.
+- Keep the runtime pure standard library unless a product requirement is both
+  unavoidable and documented. Test/build-only dependencies are acceptable when
+  justified.
+- Preserve the standalone package API and its use as a naruon module. The header
+  primitives originated in naruon; port behavioral fixes in both directions.
+- Public behavior, compatibility aliases, and typing markers are release
+  contracts. Record changes in `CHANGELOG.md` and update user/research docs.
+
+## Autonomous development loop
+
+1. Open pull requests always take priority: inspect review threads and checks,
+   make the smallest fixes, revalidate, merge only after the evidence is sound,
+   then search again until the queue is empty.
+2. When the queue is empty, select one highest-value buyer-visible gap. Work
+   test-first and create exactly one bounded pull request. The product task must
+   not merge or publish its own result; the maintenance loop owns that decision.
+3. Maintain 100% production statement and branch coverage and complete authored
+   production docstrings. Include adversarial and security-sensitive cases.
+4. Avoid unrelated refactors, generated noise, skipped tests, and assertions that
+   only duplicate implementation text. State standards sources and residual risk
+   in the pull-request description.
+5. Bump the semantic version and update `CHANGELOG.md` only when the package is
+   genuinely releasable as that version.
 
 ## Verify
 
 ```bash
-pip install -e ".[test]" ruff
+python -m pip install -e ".[test]" ruff build
 ruff check .
-pytest -q
+python -m compileall -q src tests
+python -m doctest src/threadweave/headers.py src/threadweave/subject.py
+coverage run -m pytest -q
+coverage report
+python -m build
+python -m pip check
 ```
+
+For workflow changes, also parse every YAML file and run `bash -n` over every
+shell `run` block. Built wheels must be installed and smoke-tested outside the
+source tree.
