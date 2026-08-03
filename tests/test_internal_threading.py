@@ -159,3 +159,19 @@ def test_group_by_subject_promotes_empty_container_over_concrete_owner():
     assert grouped == [grouping]
     assert grouping.children == [reply, original]
     assert original.parent is grouping
+
+
+def test_group_by_subject_keeps_dummy_owner_when_seen_first():
+    """RFC 5256 keeps an existing dummy as the subject-table owner."""
+    reply = Container(message=Message(message_id="reply", subject="Re: Topic"))
+    grouping = Container(children=[reply])
+    reply.parent = grouping
+    original = Container(
+        message=Message(message_id="original", subject="Topic")
+    )
+
+    grouped = _group_by_subject([grouping, original])
+
+    assert grouped == [grouping]
+    assert grouping.children == [reply, original]
+    assert original.parent is grouping
