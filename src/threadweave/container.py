@@ -54,10 +54,13 @@ class Container:
     def add_child(self, child: Container) -> None:
         """Attach ``child`` under this container, re-parenting it if needed.
 
-        No-op when the link would be a self-loop or when ``child`` is already an
-        ancestor of this container (which would create a cycle).
+        No-op when the link would be a self-loop, when ``child`` is already a
+        direct child, or when ``child`` is an ancestor of this container (which
+        would create a cycle).
         """
         if child is self or child.has_descendant(self):
+            return
+        if child.parent is self:
             return
         if child.parent is not None:
             try:
@@ -68,13 +71,13 @@ class Container:
         self.children.append(child)
 
     def iter_descendants(self) -> Iterator[Container]:
-        """Yield every descendant (depth-first). Loop-safe; each node once."""
-        seen: set[int] = set()
-        stack: list[Container] = list(self.children)
+        """Yield descendants depth-first in child insertion order, once each."""
+        seen: set[int] = {id(self)}
+        stack: list[Container] = list(reversed(self.children))
         while stack:
             node = stack.pop()
             if id(node) in seen:
                 continue
             seen.add(id(node))
             yield node
-            stack.extend(node.children)
+            stack.extend(reversed(node.children))
