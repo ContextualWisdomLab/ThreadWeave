@@ -39,7 +39,8 @@ pip install threadweave
 ```
 
 No runtime dependencies — only the standard library (`email`, `re`, `hashlib`,
-`dataclasses`, `typing`).
+`dataclasses`, `typing`). The distribution includes a PEP 561 `py.typed` marker,
+so type checkers consume its inline annotations directly.
 
 ## Quickstart
 
@@ -112,6 +113,17 @@ threads = thread_messages(messages, group_by_subject=True)
 `Container.iter_descendants` and the internal linking are loop-safe: traversal
 visits each node at most once, so a cyclic reference graph can never hang.
 
+## Quality guarantees
+
+- CI runs on Python 3.10, 3.11, 3.12, and 3.13.
+- Production statement and branch coverage are both required to remain at
+  **100%**.
+- Every production module, class, method, property, and function is required to
+  carry a docstring.
+- CI compiles the source, runs doctests, checks dependency consistency, builds
+  both wheel and source distributions, verifies the `py.typed` marker, and
+  smoke-tests the installed wheel outside the source tree.
+
 ## One source, multi use (OSMU)
 
 The RFC 5322 header primitives in
@@ -126,8 +138,9 @@ submodule.
 ## Research grounding
 
 See [`docs/research`](docs/research/README.md): Zawinski's threading algorithm,
-RFC 5322 §3.6.4 identification fields, and RFC 6532 internationalized email
-headers. Base-subject grouping is documented there as a heuristic fallback.
+RFC 5322 §3.6.4 identification fields, RFC 6532 internationalized email headers,
+and PEP 561 typed-package distribution. Base-subject grouping is documented
+there as a heuristic fallback.
 
 ## License
 
