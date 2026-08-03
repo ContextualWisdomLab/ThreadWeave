@@ -28,9 +28,12 @@ deterministically and **loop-safely**.
 - Recovers missing roots as empty placeholder containers, then **prunes** empty
   containers correctly (removing childless empties and splice-promoting the
   children of empty ones, with the root-level single-child special case).
-- Optionally groups the root set by a lightweight **base-subject** heuristic
-  (`Re:`/`Fwd:`/`Fw:` stripped), while preserving RFC 5256 dummy-container
-  ownership semantics. This heuristic is off by default.
+- Implements RFC 5256 base-subject extraction: RFC 2047 decoding, whitespace
+  normalization, `Re:`/`Fw:`/`Fwd:` leaders, mailing-list blobs, `(fwd)`
+  trailers, and `[fwd: ...]` wrappers.
+- Optionally groups the root set by base subject while preserving RFC 5256
+  dummy-container and reply-or-forward ownership semantics. This heuristic is
+  off by default because unrelated conversations can share a subject.
 - Threads parsed standard-library email objects without manual header mapping;
   each source object is retained as the default payload.
 - Decodes RFC 2047 encoded words even under the legacy `compat32` parser policy,
@@ -111,6 +114,16 @@ threads = thread_email_messages(parsed_messages)
 assert threads[0].message.payload is parsed_messages[0]
 ```
 
+Extract exact RFC 5256 base subjects directly:
+
+```python
+from threadweave import is_reply_or_forward_subject, normalize_subject
+
+subject = "[project] Re: [fwd: Release plan (fwd)]"
+assert normalize_subject(subject) == "Release plan"
+assert is_reply_or_forward_subject(subject)
+```
+
 Group unrelated-but-same-subject roots when references are missing:
 
 ```python
@@ -126,9 +139,12 @@ threads = thread_messages(messages, group_by_subject=True)
 | `message_from_email(message, *, payload=...)` | Convert a stdlib email message while retaining the source object by default. |
 | `thread_email_messages(messages, *, group_by_subject=False)` | Thread an iterable of stdlib email messages directly. |
 | `Container` | Thread-tree node: `message`, `parent`, `children`, `is_empty`, `add_child`, `iter_descendants`. |
+| `decode_header_text` | Decode RFC 2047 encoded words with tolerant charset and malformed-input handling. |
 | `normalize_message_id` / `extract_reference_ids` | RFC 5322 `Message-ID` / reference-header parsing. |
 | `generate_email_fingerprint` | Deterministic SHA-256 identity for messages lacking a usable `Message-ID`. |
-| `normalize_subject` / `is_reply_subject` | Lightweight base-subject stripping and reply detection. |
+| `normalize_subject` | Exact RFC 5256 base-subject extraction. |
+| `is_reply_or_forward_subject` | RFC 5256 reply-or-forward classification. |
+| `is_reply_subject` | Compatibility name for `is_reply_or_forward_subject`. |
 
 `Container.iter_descendants` and the internal linking are loop-safe: traversal
 visits each node at most once, so a cyclic reference graph can never hang.
@@ -146,12 +162,11 @@ visits each node at most once, so a cyclic reference graph can never hang.
 
 ## Standards boundary
 
-The reference-linking and dummy-container behavior follows RFC 5256. The optional
-subject parser intentionally implements only common `Re:`, `Fwd:`, and `Fw:`
-forms, and the transport-agnostic API does not yet require sent dates for RFC
-5256's IMAP response ordering steps. These boundaries are explicit so callers
-can rely on what is guaranteed without mistaking a lightweight fallback for the
-entire IMAP `THREAD` presentation algorithm.
+Reference linking, dummy-container ownership, and base-subject extraction follow
+RFC 5256. Optional subject grouping remains a heuristic because distinct
+conversations can legitimately share one base subject. The transport-agnostic
+`Message` API does not yet require sent dates, so RFC 5256's date-sorting steps
+and IMAP response serialization remain outside the current core.
 
 ## One source, multi use (OSMU)
 
@@ -166,9 +181,9 @@ a standalone dependency and as a git submodule.
 ## Research grounding
 
 See [`docs/research`](docs/research/README.md): Zawinski's container algorithm,
-RFC 5256 `REFERENCES` threading, RFC 5322 §3.6.4 identification fields, RFC 2047
-encoded words, RFC 6532 internationalized email headers, and PEP 561 typed-
-package distribution.
+RFC 5256 `REFERENCES` threading and base-subject extraction, RFC 5322 §3.6.4
+identification fields, RFC 2047 encoded words, RFC 6532 internationalized email
+headers, and PEP 561 typed-package distribution.
 
 ## License
 
