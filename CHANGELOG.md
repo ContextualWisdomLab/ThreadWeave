@@ -12,6 +12,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Preserve insertion order during depth-first container traversal, exclude the
   traversal root from malformed cycles, and make re-adding a direct child
   idempotent.
+- Compare mutable `Container` graph nodes by identity so cyclic structures are
+  equality-safe and reparenting always removes the exact child instance.
 
 ## [0.1.0] - 2026-07-12
 
