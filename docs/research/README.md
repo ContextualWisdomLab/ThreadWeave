@@ -10,37 +10,37 @@ mailbox heuristic. The primary sources and implemented boundaries are below.
   based algorithm used by mature mail clients.
 - **RFC 5256, “Internet Message Access Protocol — SORT and THREAD Extensions”**
   (<https://www.rfc-editor.org/rfc/rfc5256>) standardizes the `REFERENCES`
-  threading algorithm.
+  threading algorithm and `THREAD` response format.
 
-The implemented reference-threading steps are:
+The implemented tree-construction steps are:
 
 1. Build an `id_table` mapping normalized `Message-ID` values to containers.
    Link `References` entries into a parent chain without loops and without
    overriding a container that already has a good parent.
 2. When a usable `References` chain is absent, use the **first valid**
-   `In-Reply-To` identifier as the message's only reference. RFC 5256 restricts
-   the fallback because historical fields often contain addresses or ambiguous
-   material after the first identifier.
-3. Gather every container without a parent into the root set.
+   `In-Reply-To` identifier as the message's only reference. Historical fields
+   often contain addresses or ambiguous material after that first identifier.
+3. Gather every parentless container into the root set.
 4. Prune dummy containers: remove empty leaves, splice-promote empty internal
    containers, and retain a multi-child dummy at the root as a missing-thread-
    root grouping node.
-5. Optionally gather root threads by base subject. A dummy owner is retained
-   whenever one exists; otherwise a non-reply/non-forward owner is preferred.
-6. Optionally apply the RFC sent-date sorting stages described below.
-7. Return the resulting roots as transport-neutral `Container` objects.
+5. Optionally gather root threads by standardized base subject. A dummy owner is
+   retained whenever one exists; otherwise a non-reply/non-forward owner is
+   preferred.
+6. Optionally apply both sent-date sorting stages described below.
+7. Return transport-neutral `Container` trees.
 
 ## Base-subject extraction — RFC 5256 §2.1 and §5
 
-RFC 5256 requires a fixed seven-step procedure so clients produce consistent
-base subjects. `normalize_subject` implements it:
+`normalize_subject` implements the fixed seven-step procedure required by RFC
+5256:
 
-1. Decode RFC 2047 encoded words; convert tabs and folded lines to spaces; and
-   collapse repeated ASCII spaces.
+1. Decode RFC 2047 words; convert tabs and folded lines to spaces; collapse
+   repeated ASCII spaces.
 2. Repeatedly remove trailing whitespace and `(fwd)` trailers.
-3. Remove a leading `subj-leader`: optional mailing-list blobs followed by a
-   case-insensitive `Re:`, `Fw:`, or `Fwd:` token, including the optional blob
-   permitted between the token and colon.
+3. Remove a leading `subj-leader`: optional list blobs followed by a case-
+   insensitive `Re:`, `Fw:`, or `Fwd:` token, including the optional blob between
+   token and colon.
 4. Remove a leading `subj-blob` only when a non-empty base remains. A final blob
    may therefore be the complete subject.
 5. Repeat leader and blob removal until stable.
@@ -49,144 +49,176 @@ base subjects. `normalize_subject` implements it:
 
 RFC 5256 classifies a message as a reply or forward when extraction removes a
 `subj-refwd`, `(fwd)` trailer, or `[fwd: ...]` wrapper.
-`is_reply_or_forward_subject` exposes that result. Removing a mailing-list blob
-alone does not classify the message.
+`is_reply_or_forward_subject` exposes that result. Removing a list blob alone
+does not classify the message.
 
 ## Subject comparison — RFC 5051 i;unicode-casemap
 
-RFC 5256 says subject comparisons are case-insensitive under its
-internationalization rules. **RFC 5051, “i;unicode-casemap — Simple Unicode
-Collation Algorithm”** (<https://www.rfc-editor.org/rfc/rfc5051>) defines the
-required preparation and comparison:
+**RFC 5051, “i;unicode-casemap — Simple Unicode Collation Algorithm”**
+(<https://www.rfc-editor.org/rfc/rfc5051>) defines the preparation RFC 5256 uses
+for subject comparison:
 
 1. Read one Unicode code point.
-2. Apply its **simple titlecase mapping** from `UnicodeData.txt`. If no simple
-   titlecase mapping exists, use its simple uppercase mapping; if neither exists,
-   leave the code point unchanged.
-3. Recursively apply canonical or compatibility decomposition to the resulting
-   code point — effectively Normalization Form KD.
-4. Append the result and repeat for the remaining input.
-5. Compare the prepared strings with octet equality/order semantics.
+2. Apply its simple titlecase mapping from `UnicodeData.txt`; use simple uppercase
+   if no titlecase mapping exists, otherwise leave it unchanged.
+3. Recursively apply canonical or compatibility decomposition.
+4. Append the result and continue.
+5. Compare the prepared values with octet equality/order semantics.
 
-Python's `str.title()` exposes the *full* titlecase mapping and can expand one
-code point through `SpecialCasing.txt`; that is not the RFC 5051 operation. The
-internal `_simple_titlecase` helper accepts a one-code-point `str.title()` result
-but keeps the original code point when Python returns an expansion. For the
-Unicode databases used by supported Python 3.10-3.13 runtimes, expanding full
-mappings have no simple `UnicodeData.txt` titlecase/uppercase mapping.
-`unicode_casemap_key` then applies `unicodedata.normalize("NFKD", ...)` to the
-simple result. RFC 5051 permits an equivalent Unicode code-point representation,
-so the prepared Python string is a practical equality and ordering key.
+Python's `str.title()` exposes full titlecase mappings and can expand one code
+point through `SpecialCasing.txt`; that is not the RFC operation. The internal
+`_simple_titlecase` helper keeps only one-code-point mappings and retains the
+original code point when Python returns an expansion. `unicode_casemap_key` then
+applies NFKD. Tests cover ASCII case, full-width forms, canonical equivalents,
+RFC 5051's DZ-with-caron example, `ß`/`ﬀ` full-mapping boundaries, and unrelated-
+script confusables.
 
-Consequences covered by tests include:
-
-- ASCII case variants compare equally.
-- Full-width compatibility forms compare with their ASCII equivalents.
-- Precomposed and decomposed accents compare equally.
-- RFC 5051's U+01C4/U+01C5/U+01C6 DZ-with-caron example produces
-  `U+0044 U+007A U+030C` for every case form.
-- Multi-code-point full case expansions are deliberately not substituted for
-  simple mappings: `ß` remains `ß`, and the `ﬀ` ligature decomposes to lowercase
-  `ff` rather than titlecase `Ff`.
-- Visual confusables from unrelated scripts remain different. For example,
-  Latin `A` and Greek `Α` are not interchangeable.
-
-RFC 5051 notes that results can vary across Unicode revisions as new characters
-acquire titlecase or decomposition properties. `threadweave` therefore uses the
+RFC 5051 permits results to vary with the Unicode revision. ThreadWeave uses the
 Unicode Character Database bundled with the active supported Python runtime and
-documents the version boundary rather than hard-coding an obsolete table.
+documents that boundary rather than hard-coding an obsolete table.
 
-## Sent-date ordering — RFC 5256 §2.2 REFERENCES steps 4 and 6
+## Sent-date ordering — RFC 5256 §2.2 steps 4 and 6
 
-RFC 5256 does not leave date recovery or sibling ordering to implementation
-preference. `normalize_sent_date` and `sort_by_sent_date=True` implement these
-rules:
+`normalize_sent_date` and `sort_by_sent_date=True` implement the RFC rules:
 
-1. Parse the message's RFC 5322 `Date` and adjust a valid value to UTC.
+1. Parse the RFC 5322 `Date` and adjust a valid value to UTC.
 2. Treat an invalid or absent zone as UTC.
 3. Treat an invalid time as `00:00:00` in the recovered local zone.
-4. If `Date` is missing or cannot provide a calendar date, use mailbox
+4. If `Date` is missing or cannot provide a valid calendar date, use mailbox
    `INTERNALDATE`.
 5. If neither value is usable, use the earliest representable UTC instant.
 6. Break exact sent-date ties with the positive mailbox sequence number.
-7. Before subject grouping, sort top-level roots. For a top-level dummy, first
-   sort its children and use its first child's key as the dummy key.
-8. After subject grouping, sort every sibling set bottom-up so grandchildren are
-   ordered before their parent is compared as part of an ancestor sibling set.
+7. Before subject grouping, sort top-level roots. For a dummy root, sort its
+   children first and use the first child's key as the dummy key.
+8. After subject grouping, sort every sibling set bottom-up.
 
-`DateValue` accepts an already parsed `datetime` or RFC-style text. Naive
-`datetime` values follow the invalid-zone rule and are interpreted as UTC. RFC
-5322 permits a leap second value of `60`; Python's `datetime` cannot represent
-that second directly, so the implementation uses the final microsecond before
-the following minute, preserving its ordering after second `59` and before the
-next minute.
+Naive `datetime` values follow the invalid-zone rule and are interpreted as UTC.
+RFC 5322 permits leap-second value `60`; because Python cannot represent that
+second directly, ThreadWeave uses the final microsecond before the following
+minute, preserving order after second `59` and before the next minute.
 
-Ordering is opt-in to preserve the package's historical first-appearance order.
-When enabled, omitted sequence numbers use one-based input position. All
-effective sequence numbers must be unique positive integers; mixed explicit and
-implicit metadata that collides is rejected instead of producing a false RFC
-tie-break.
+Ordering is opt-in for source compatibility. Omitted sequence numbers use one-
+based input position. Every effective value must be a unique positive integer;
+explicit/implicit collisions are rejected.
 
-The stdlib adapter reads the decoded `Date` header. `message_from_email` also
-accepts server-provided `internal_date` and `sequence_number`; the convenience
-`thread_email_messages` adapter uses iterable order as sequence number when
-threading a mailbox directly.
+## IMAP THREAD response projection — RFC 5256 §3 and §5
+
+RFC 5256 defines a `THREAD` response as zero or more parenthesized thread lists.
+Within a list, successive numbers are parent and child. When a parent has more
+than one child, each sibling branch becomes a nested list. The RFC example is:
+
+```text
+* THREAD (2)(3 6 (4 23)(44 7 96))
+```
+
+A dummy parent has no identifier. Two matching children under a missing or
+excluded parent are therefore represented as:
+
+```text
+* THREAD ((3)(5))
+```
+
+The relevant ABNF is equivalent to:
+
+```text
+thread-data    = "THREAD" [SP 1*thread-list]
+thread-list    = "(" thread-members ")"
+thread-members = nz-number *(SP nz-number) *thread-nested
+thread-nested  = 2*thread-list
+```
+
+`serialize_thread_data` renders the data item. `serialize_thread_response` adds
+the untagged `"* "` prefix and CRLF. Parent-child chains use spaces; separate top-
+level threads and sibling lists are concatenated exactly as the grammar permits.
+
+### Search-result projection
+
+An IMAP server threads a search result while retaining relationships contributed
+by messages outside that result. ThreadWeave accepts an `include(Message)`
+predicate and performs a non-mutating projection:
+
+- an excluded leaf disappears;
+- an excluded internal message is splice-promoted so matching descendants remain
+  below the nearest included ancestor;
+- one promoted branch becomes a normal root;
+- two or more promoted top-level branches retain an identifier-less dummy root.
+
+Projection copies only protocol response nodes. It never changes source
+`Container.parent`, `children`, message objects, or ordering.
+
+### Sequence numbers, UIDs, and nz-number
+
+RFC 5256 uses message sequence numbers for `THREAD` and UIDs for UID `THREAD`.
+The serializer selects `Message.sequence_number`, `Message.uid`, or a caller-
+supplied resolver for external mailbox metadata.
+
+The IMAP base grammar in RFC 3501 and its successor RFC 9051 defines
+`nz-number` as a non-zero unsigned 32-bit integer. ThreadWeave accepts values
+from 1 through 4,294,967,295 and rejects zero, booleans, non-integers, larger
+values, missing UID metadata, and duplicate emitted identifiers.
+
+### Graph and response safety
+
+Serialization is iterative, so deep linear chains and deeply nested sibling
+splits do not hit Python's recursion limit. The protocol boundary rejects rather
+than truncates or guesses:
+
+- graph cycles;
+- a container reachable from multiple positions;
+- non-`Container` roots or children;
+- concrete containers not wrapping `threadweave.Message`;
+- identifier-less nodes outside the top-level dummy position;
+- dummy roots with fewer than two branches;
+- duplicate or out-of-range identifiers;
+- arbitrary response line endings that could enable response splitting.
+
+Only CRLF or an empty caller-owned suffix is accepted.
 
 ## Identification fields — RFC 5322 §3.6.4
 
-- **RFC 5322, “Internet Message Format”, §3.6.4 (Identification Fields)**
-  (<https://www.rfc-editor.org/rfc/rfc5322#section-3.6.4>) defines `Message-ID`,
-  `In-Reply-To`, `References`, and the `msg-id` grammar.
-- Both reply-reference fields can contain one or more identifiers. The public
-  model accepts either raw header text or already-split sequences. Parsing keeps
-  first appearance and removes duplicates; the threading layer applies RFC
-  5256's first-valid-only rule specifically to the `In-Reply-To` fallback.
-- Angle brackets are stripped and malformed-but-recoverable whitespace-delimited
-  values are tolerated at ingestion.
+**RFC 5322, “Internet Message Format”, §3.6.4**
+(<https://www.rfc-editor.org/rfc/rfc5322#section-3.6.4>) defines `Message-ID`,
+`In-Reply-To`, `References`, and `msg-id`. The public model accepts raw text or
+already-split sequences. Parsing preserves first appearance and removes
+duplicates; the threading layer then applies RFC 5256's first-valid-only rule to
+the `In-Reply-To` fallback. Angle brackets are stripped and recoverable
+whitespace-delimited historical values are tolerated.
 
-## Encoded words — RFC 2047
+## Encoded words and internationalized headers
 
-- **RFC 2047, “Message Header Extensions for Non-ASCII Text”**
-  (<https://www.rfc-editor.org/rfc/rfc2047>) defines MIME encoded words such as
-  `=?utf-8?b?...?=`.
-- Modern email policies often decode these transparently, while legacy
-  `compat32` can expose the transport representation. `decode_header_text`
-  explicitly decodes encoded words, preserves ordinary interstitial text,
-  recovers unknown character-set labels with replacement decoding, and retains
-  malformed encoded words verbatim rather than rejecting the whole message.
-- The same primitive feeds the stdlib adapter and base-subject extraction so
-  parser policy cannot alter grouping behavior.
+- **RFC 2047** (<https://www.rfc-editor.org/rfc/rfc2047>) defines MIME encoded
+  words. `decode_header_text` decodes them, preserves ordinary interstitial text,
+  recovers unknown charset labels with replacement decoding, and retains damaged
+  syntax verbatim rather than rejecting the message.
+- **RFC 6532** (<https://www.rfc-editor.org/rfc/rfc6532>) permits UTF-8 in most
+  header values. The stdlib adapter carries decoded Unicode without lossy ASCII
+  coercion.
 
-## Internationalized headers — RFC 6532
+The same decoder feeds the adapter and base-subject extraction, preventing email
+parser policy from changing thread grouping.
 
-- **RFC 6532, “Internationalized Email Headers”**
-  (<https://www.rfc-editor.org/rfc/rfc6532>) permits UTF-8 in most header values.
-  The adapter carries decoded Unicode text without lossy ASCII coercion.
+## Typed distribution — PEP 561
 
-## Typed-package distribution — PEP 561
+**PEP 561** (<https://peps.python.org/pep-0561/>) specifies the `py.typed` marker
+for inline type information. CI verifies it in wheel and source distributions and
+smoke-tests the installed wheel outside the source tree.
 
-- **PEP 561, “Distributing and Packaging Type Information”**
-  (<https://peps.python.org/pep-0561/>) specifies the `py.typed` marker for
-  packages with inline type information. CI verifies the marker in wheel and
-  source distributions.
-
-## Heuristic and transport boundaries
+## Product and transport boundaries
 
 Subject grouping is optional because distinct conversations can legitimately
-share the exact same standardized base subject. The extraction and comparison
-procedures are standards-grounded; deciding to merge disconnected roots remains
-a caller-selected heuristic (`group_by_subject=False` by default).
+share an exact base subject. Tree construction, extraction, comparison, ordering,
+search projection, and response grammar are standards-grounded; deciding to
+merge disconnected roots remains caller-selected.
 
-Sent-date sorting is implemented, but IMAP `THREAD` response serialization is
-still outside the core. That presentation layer must choose sequence numbers or
-UIDs, project the server's search result, and render RFC parenthesized response
-syntax. Keeping it separate lets the same thread trees serve local Python,
-naruon, and non-IMAP services.
+ThreadWeave does not implement mailbox search execution, IMAP command parsing,
+authentication, UIDVALIDITY lifecycle, persistence, or socket framing. Those are
+server responsibilities. Keeping them separate lets the same core serve local
+Python, naruon, migration services, archive viewers, and IMAP gateways.
 
 ## Provenance
 
 The RFC 5322 header primitives (`normalize_message_id`,
 `extract_reference_ids`, and `generate_email_fingerprint`) were extracted
 behaviour-preserving from the naruon control plane. The threading, subject,
-collation, and date layers are fresh standalone implementations designed to
-remain usable both independently and as naruon modules.
+collation, date, and IMAP projection layers are fresh standalone implementations
+designed to remain usable independently and as naruon modules.
