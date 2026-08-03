@@ -9,6 +9,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Preserve root ordering when subject grouping creates a synthetic container.
 - Preserve first-appearance root ordering for messages with missing or duplicate
   `Message-ID` values.
+- Preserve insertion order during depth-first container traversal, exclude the
+  traversal root from malformed cycles, and make re-adding a direct child
+  idempotent.
 
 ## [0.1.0] - 2026-07-12
 
