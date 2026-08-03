@@ -18,6 +18,7 @@ behaviour-preserving from the naruon control plane; the JWZ assembly
 (:mod:`threadweave.threading`) is a fresh canonical implementation.
 """
 
+from threadweave.adapters import message_from_email, thread_email_messages
 from threadweave.container import Container
 from threadweave.headers import (
     extract_reference_ids,
@@ -37,7 +38,9 @@ __all__ = [
     "extract_reference_ids",
     "generate_email_fingerprint",
     "is_reply_subject",
+    "message_from_email",
     "normalize_message_id",
     "normalize_subject",
+    "thread_email_messages",
     "thread_messages",
 ]
