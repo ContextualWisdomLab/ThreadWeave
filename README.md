@@ -29,6 +29,9 @@ implements it faithfully and **loop-safely**.
   stripped) — a heuristic, off by default.
 - Threads parsed standard-library email objects without manual header mapping;
   each source object is retained as the default payload.
+- Decodes RFC 2047 encoded words even under the legacy `compat32` parser policy,
+  recovers unknown character sets best-effort, and preserves malformed values
+  rather than aborting mailbox ingestion.
 - Terminates on adversarial input: self-references and mutual reference cycles
   never loop or crash.
 
@@ -138,9 +141,9 @@ submodule.
 ## Research grounding
 
 See [`docs/research`](docs/research/README.md): Zawinski's threading algorithm,
-RFC 5322 §3.6.4 identification fields, RFC 6532 internationalized email headers,
-and PEP 561 typed-package distribution. Base-subject grouping is documented
-there as a heuristic fallback.
+RFC 5322 §3.6.4 identification fields, RFC 2047 encoded words, RFC 6532
+internationalized email headers, and PEP 561 typed-package distribution.
+Base-subject grouping is documented there as a heuristic fallback.
 
 ## License
 
