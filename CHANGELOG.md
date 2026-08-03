@@ -29,6 +29,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Implement exact RFC 5256 base-subject extraction, including mailing-list
   blobs, reply/forward leaders, `(fwd)` trailers, `[fwd: ...]` wrappers, and RFC
   whitespace normalization.
+- Compare base subjects with RFC 5051 `i;unicode-casemap`, including Unicode
+  titlecase mapping and recursive compatibility decomposition, instead of
+  Python `casefold()`.
+- Add public `unicode_casemap_key` preparation for standards-consistent equality
+  and ordering keys while preserving unrelated-script confusables as distinct.
 - Add explicit `is_reply_or_forward_subject` classification and retain
   `is_reply_subject` as a compatibility name with the standardized semantics.
 - Preserve decoded Unicode header values, including internationalized subjects,
