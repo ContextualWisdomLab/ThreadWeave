@@ -160,6 +160,31 @@ visits each node at most once, so a cyclic reference graph can never hang.
   both wheel and source distributions, verifies the `py.typed` marker, and
   smoke-tests the installed wheel outside the source tree.
 
+## Autonomous maintenance
+
+Two staggered scheduled workflows keep development single-flight and review-
+first:
+
+- At minute 11 each hour, `hourly-pr-maintenance.yml` invokes the organization-
+  governed review-fix and merge schedulers from `ContextualWisdomLab/.github`.
+  Review feedback, branch updates, checks, and merge policy remain centralized.
+- At minute 41 each hour, `hourly-product-development.yml` creates one bounded
+  Copilot cloud-agent task only when there is no open pull request and no active
+  or unknown-state agent task. Inventory failure is treated as a closed gate, so
+  an API outage cannot create duplicate work.
+
+The Agent Tasks REST API does not accept the installation token behind
+`GITHUB_TOKEN`. Configure the repository or organization secret
+`COPILOT_GITHUB_TOKEN` with a fine-grained personal access token that has **Agent
+tasks: read and write** permission for this repository. The authenticated user
+must also have an eligible Copilot Business or Enterprise subscription. Without
+that secret, the workflow records the missing prerequisite and exits without
+mutation. Both workflows expose a manual `dry_run` input for safe verification.
+
+Contract tests pin the supported API version, dedicated-token boundary, active-
+task terminal states, centralized maintenance calls, bounded test-first prompt,
+and prohibition on product-task self-merging.
+
 ## Standards boundary
 
 Reference linking, dummy-container ownership, and base-subject extraction follow
