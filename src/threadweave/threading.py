@@ -1,29 +1,33 @@
-"""The canonical JWZ message-threading algorithm.
+"""The canonical JWZ/RFC 5256 message-threading algorithm.
 
-This is a fresh, faithful implementation of Jamie Zawinski's threading
-algorithm (https://www.jwz.org/doc/threading.html), aligned with the
-``REFERENCES`` algorithm standardized by RFC 5256: build an id-table of
-containers, link ``References`` chains without creating loops or overriding good
-existing parents, gather the root set, prune empty containers, and optionally
-group the root set by base subject.
+This module builds reference-linked container trees, prunes missing-message
+placeholders, optionally groups disconnected roots by standardized base subject,
+and can apply the sent-date ordering required by RFC 5256. All graph traversals
+are iterative and identity-guarded so malformed or hostile cycles terminate.
 
 The RFC 5322 identification-field primitives it consumes live in
 :mod:`threadweave.headers`; subject-table keys use RFC 5051
-``i;unicode-casemap`` preparation.
+``i;unicode-casemap`` preparation, and sent dates use
+:func:`threadweave.dates.normalize_sent_date`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from threadweave.collation import unicode_casemap_key
 from threadweave.container import Container
+from threadweave.dates import DateValue, normalize_sent_date
 from threadweave.headers import extract_reference_ids, normalize_message_id
 from threadweave.subject import is_reply_or_forward_subject, normalize_subject
 
 __all__ = ["Message", "thread_messages"]
+
+_SortKey = tuple[datetime, int, int]
+_EARLIEST_SORT_KEY: _SortKey = (normalize_sent_date(None), 0, 0)
 
 
 @dataclass
@@ -39,6 +43,12 @@ class Message:
             oldest first. Angle brackets and duplicate IDs are normalized away.
         subject: The ``Subject`` header, used for optional subject grouping.
         payload: Arbitrary caller-supplied data carried through untouched.
+        sent_date: The RFC 5322 ``Date`` header or a :class:`datetime` used for
+            optional RFC 5256 sibling ordering.
+        internal_date: Mailbox ``INTERNALDATE`` fallback when ``sent_date`` is
+            absent or unusable.
+        sequence_number: Positive mailbox sequence number used to break exact
+            sent-date ties. Input position is used when omitted.
     """
 
     message_id: str | None = None
@@ -46,6 +56,9 @@ class Message:
     references: str | Sequence[str] = field(default_factory=list)
     subject: str | None = None
     payload: Any = None
+    sent_date: DateValue = None
+    internal_date: DateValue = None
+    sequence_number: int | None = None
 
 
 def _reference_ids(value: str | Sequence[str] | None) -> list[str]:
@@ -69,9 +82,8 @@ def _effective_references(message: Message) -> list[str]:
 
     A valid ``References`` chain is used in full. When that field is absent or
     contains no valid identifiers, RFC 5256 requires the first valid identifier
-    in ``In-Reply-To`` to be used as the *only* reference. Limiting the fallback
-    prevents addresses or additional identifiers found in malformed historical
-    ``In-Reply-To`` fields from becoming a fabricated ancestry chain.
+    in ``In-Reply-To`` to be used as the only reference. Limiting the fallback
+    prevents trailing addresses or identifiers from becoming fabricated ancestry.
     """
     references = _reference_ids(message.references)
     if references:
@@ -80,11 +92,10 @@ def _effective_references(message: Message) -> list[str]:
 
 
 def _subject_of(container: Container) -> str | None:
-    """Best-effort subject for a container: its own, else its first child's.
+    """Return a container's subject, falling back to its first child message.
 
-    RFC 5256 step 5.B: an empty container takes the subject of its *first* child
-    message. Implemented as a first-child-first DFS (iterative + id()-guarded, so
-    it is loop-safe and never recurses on deep trees).
+    RFC 5256 gives a dummy container the subject of its first child. This
+    first-child-first traversal is iterative and visits each object identity once.
     """
     stack: list[Container] = [container]
     seen: set[int] = set()
@@ -102,8 +113,9 @@ def _subject_of(container: Container) -> str | None:
 def _link(parent: Container, child: Container) -> None:
     """Link ``child`` under ``parent`` if it neither loops nor steals a parent.
 
-    Mirrors RFC 5256 step 1.A: skip when ``child`` already has a parent, and skip any
-    link that would introduce a cycle.
+    Presumed edges created while walking another message's reference chain never
+    replace an existing parent. Self-links and descendant-to-ancestor links are
+    discarded because either would create a cycle.
     """
     if child.parent is not None:
         return
@@ -114,11 +126,11 @@ def _link(parent: Container, child: Container) -> None:
 
 
 def _set_parent(child: Container, parent: Container) -> None:
-    """RFC 5256 step 1.B: (re)parent ``child`` to ``parent``, loop-safely.
+    """Replace a presumed parent with the message's definitive parent safely.
 
-    A definitive parent from the message's own ``References`` overrides a parent
-    that was only presumed from another message's chain — unless doing so would
-    create a loop.
+    The current message's own effective reference chain is authoritative, but it
+    may reparent the container only when the new edge remains acyclic. Inconsistent
+    historical parent lists are tolerated and repaired.
     """
     if parent is child or child.has_descendant(parent):
         return
@@ -132,12 +144,11 @@ def _set_parent(child: Container, parent: Container) -> None:
 
 
 def _prune(holder: Container) -> None:
-    """RFC 5256 step 3: prune empty containers under ``holder``.
+    """Prune RFC 5256 dummy containers iteratively under ``holder``.
 
-    ``holder`` is a synthetic node whose ``children`` are the root set; an empty
-    container with more than one child at that top level is preserved as a
-    grouping root. Implemented iteratively (no recursion) so it stays safe on
-    very deep trees such as long linear reply chains.
+    Empty leaves are removed. Empty internal containers are splice-promoted,
+    except that a multi-child dummy at the root remains as the grouping node for
+    a missing thread root. Descendants are processed before ancestors.
     """
     order: list[Container] = []
     seen: set[int] = set()
@@ -176,11 +187,14 @@ def _subject_key(container: Container) -> str:
 
 
 def _group_by_subject(root_set: list[Container]) -> list[Container]:
-    """RFC 5256 step 5: merge root threads that share a base subject."""
+    """Merge root threads that share an RFC 5256 base subject.
+
+    Dummy owners are retained whenever present. Otherwise a concrete original is
+    preferred over a reply or forward, and the remaining roots are attached or
+    wrapped exactly once while preserving deterministic first appearance.
+    """
     subject_table: dict[str, Container] = {}
 
-    # RFC 5256 5.B keeps a dummy owner whenever one exists. Otherwise it prefers
-    # a non-reply/non-forward concrete owner over a reply/forward owner.
     for container in root_set:
         base = _subject_key(container)
         if not base:
@@ -243,36 +257,127 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
     return final
 
 
-def thread_messages(
-    messages: Iterable[Message], *, group_by_subject: bool = False
+def _validated_sequence_number(message: Message, input_position: int) -> int:
+    """Return a positive explicit sequence number or the one-based input position."""
+    sequence_number = message.sequence_number
+    if sequence_number is None:
+        return input_position
+    if (
+        isinstance(sequence_number, bool)
+        or not isinstance(sequence_number, int)
+        or sequence_number <= 0
+    ):
+        raise ValueError("sequence_number must be a positive integer")
+    return sequence_number
+
+
+def _container_sort_key(
+    container: Container,
+    sort_keys: dict[int, _SortKey],
+) -> _SortKey:
+    """Return a concrete key or a loop-safe dummy key from its first child.
+
+    RFC 5256 assigns a dummy container the sent date of its first child after that
+    child set has been sorted. Malformed first-child cycles terminate at the
+    earliest fallback key instead of hanging.
+    """
+    current = container
+    seen: set[int] = set()
+    while id(current) not in seen:
+        seen.add(id(current))
+        concrete_key = sort_keys.get(id(current))
+        if concrete_key is not None:
+            return concrete_key
+        if not current.children:
+            break
+        current = current.children[0]
+    return _EARLIEST_SORT_KEY
+
+
+def _sort_top_level(
+    root_set: list[Container],
+    sort_keys: dict[int, _SortKey],
+) -> None:
+    """Apply RFC 5256 step 4 before subject-table construction.
+
+    Children of every top-level dummy are sorted first; the resulting first child
+    supplies the dummy's key when the root set itself is sorted.
+    """
+    for root in root_set:
+        if root.message is None:
+            root.children.sort(key=lambda child: _container_sort_key(child, sort_keys))
+    root_set.sort(key=lambda root: _container_sort_key(root, sort_keys))
+
+
+def _sort_all_siblings(
+    root_set: list[Container],
+    sort_keys: dict[int, _SortKey],
 ) -> list[Container]:
-    """Thread ``messages`` into conversation trees via the JWZ/RFC 5256 algorithm.
+    """Apply RFC 5256 step 6, sorting descendants before ancestors.
+
+    A synthetic holder makes the final root set another sibling set. Reverse
+    pre-order yields the required bottom-up processing without recursion, while
+    an identity set prevents malformed cycles from being revisited.
+    """
+    holder = Container(children=root_set)
+    order: list[Container] = []
+    seen: set[int] = set()
+    stack: list[Container] = [holder]
+    while stack:
+        node = stack.pop()
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        order.append(node)
+        stack.extend(node.children)
+
+    for node in reversed(order):
+        node.children.sort(key=lambda child: _container_sort_key(child, sort_keys))
+    return holder.children
+
+
+def thread_messages(
+    messages: Iterable[Message],
+    *,
+    group_by_subject: bool = False,
+    sort_by_sent_date: bool = False,
+) -> list[Container]:
+    """Thread ``messages`` into deterministic conversation trees.
 
     Args:
-        messages: The messages to thread, consumed once in iteration order.
-        group_by_subject: When true, also merge distinct root threads that share
-            a base subject (a heuristic; off by default).
+        messages: Messages consumed once in iteration order.
+        group_by_subject: Merge disconnected roots sharing a standardized base
+            subject. This caller-selected heuristic is disabled by default.
+        sort_by_sent_date: Apply RFC 5256 steps 4 and 6. When disabled, the
+            existing first-appearance and child-insertion ordering is preserved.
 
     Returns:
-        The root :class:`Container` objects, one per thread, in a deterministic
-        order derived from first appearance in ``messages``.
+        Root :class:`Container` objects in deterministic order.
+
+    Raises:
+        ValueError: An effective sequence number is invalid or duplicated.
+        TypeError: Date metadata has an unsupported runtime type.
     """
     id_table: dict[str, Container] = {}
     container_order: list[Container] = []
+    sort_keys: dict[int, _SortKey] = {}
+    used_sequence_numbers: set[int] = set()
 
     def new_container(message: Message | None = None) -> Container:
+        """Create and remember a container in first-creation order."""
         container = Container(message=message)
         container_order.append(container)
         return container
 
     def container_for(message_id: str) -> Container:
+        """Return the existing ID container or create a dummy placeholder."""
         container = id_table.get(message_id)
         if container is None:
             container = new_container()
             id_table[message_id] = container
         return container
 
-    for message in messages:
+    for input_position, message in enumerate(messages, start=1):
         message_id = normalize_message_id(message.message_id)
 
         if message_id is None:
@@ -288,10 +393,19 @@ def thread_messages(
                 this = new_container(message)
                 id_table[message_id] = this
 
-        references = _effective_references(message)
+        if sort_by_sent_date:
+            sequence_number = _validated_sequence_number(message, input_position)
+            if sequence_number in used_sequence_numbers:
+                raise ValueError(f"duplicate sequence number: {sequence_number}")
+            used_sequence_numbers.add(sequence_number)
+            sort_keys[id(this)] = (
+                normalize_sent_date(message.sent_date, message.internal_date),
+                sequence_number,
+                input_position,
+            )
 
         previous: Container | None = None
-        for ref_id in references:
+        for ref_id in _effective_references(message):
             ref_container = container_for(ref_id)
             if previous is not None:
                 _link(previous, ref_container)
@@ -304,12 +418,15 @@ def thread_messages(
         container for container in container_order if container.parent is None
     ]
 
-    holder = Container()
-    holder.children = root_set
+    holder = Container(children=root_set)
     _prune(holder)
     root_set = holder.children
 
+    if sort_by_sent_date:
+        _sort_top_level(root_set, sort_keys)
     if group_by_subject:
         root_set = _group_by_subject(root_set)
+    if sort_by_sent_date:
+        root_set = _sort_all_siblings(root_set, sort_keys)
 
     return root_set
