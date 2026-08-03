@@ -4,11 +4,12 @@ Operating guide for automated agents working on this repository.
 
 `threadweave` implements the JWZ container model with RFC 5256 `REFERENCES`
 threading semantics, RFC 5322 identification-field parsing, RFC 2047 encoded-word
-decoding, RFC 5256 base-subject extraction, and RFC 5051 Unicode casemap
-comparison. Its value is correctness: mail clients and ingestion systems rely on
-threading being deterministic, standards-grounded, and impossible to hang on
-malformed input. Treat changes to `threading.py`, `container.py`, `subject.py`,
-`collation.py`, and `headers.py` as behavior-sensitive.
+decoding, RFC 5256 base-subject extraction, RFC 5051 Unicode casemap comparison,
+and optional RFC 5256 sent-date ordering. Its value is correctness: mail clients
+and ingestion systems rely on threading being deterministic, standards-grounded,
+and impossible to hang on malformed input. Treat changes to `threading.py`,
+`container.py`, `subject.py`, `collation.py`, `dates.py`, and `headers.py` as
+behavior-sensitive.
 
 ## Invariants that must not regress
 
@@ -31,15 +32,23 @@ malformed input. Treat changes to `threading.py`, `container.py`, `subject.py`,
    5051 `i;unicode-casemap`, not Python `casefold()`, locale-sensitive APIs, or
    visual-confusable heuristics. A dummy root remains the subject-table owner
    whenever one exists. A blob alone is not a reply or forward.
-6. **Missing roots become placeholders.** A referenced-but-unseen `Message-ID`
+6. **Sent-date ordering follows both RFC stages.** When enabled, normalize `Date`
+   to UTC, recover invalid zone/time components, fall back to `INTERNALDATE`, and
+   then the earliest UTC instant. Sort top-level dummy children before deriving
+   the dummy key; after subject grouping, sort every sibling set bottom-up.
+7. **Mailbox sequence metadata is valid.** Exact sent-date ties use a unique
+   positive sequence number. Omitted values use one-based input position, but an
+   explicit value may not collide with that effective fallback.
+8. **Missing roots become placeholders.** A referenced-but-unseen `Message-ID`
    yields an empty container that still co-threads its descendants.
-7. **Duplicate Message-IDs survive.** A later distinct message with an already-
+9. **Duplicate Message-IDs survive.** A later distinct message with an already-
    seen identifier receives its own container; no payload is destroyed.
-8. **Determinism.** Root and descendant order derives from first appearance and
-   child insertion order. Do not replace ordered structures with sets.
-9. **Adapters preserve caller data.** The stdlib email adapter carries the source
-   message as payload by default, preserves Unicode, and tolerates damaged legacy
-   encoded words without aborting ingestion.
+10. **Determinism and compatibility.** Without `sort_by_sent_date`, root and
+    descendant order remains first appearance and child insertion order. Do not
+    replace ordered structures with sets or silently change the default.
+11. **Adapters preserve caller data.** The stdlib email adapter carries the source
+    message as payload by default, preserves Unicode, tolerates damaged legacy
+    encoded words, and carries `Date` plus caller-supplied mailbox metadata.
 
 ## Architecture and dependency rules
 
@@ -48,6 +57,8 @@ malformed input. Treat changes to `threading.py`, `container.py`, `subject.py`,
   justified.
 - Preserve the standalone package API and its use as a naruon module. The header
   primitives originated in naruon; port behavioral fixes in both directions.
+- Keep IMAP response serialization separate from the transport-neutral tree and
+  date layers so non-IMAP callers do not inherit protocol-specific state.
 - Public behavior, compatibility aliases, and typing markers are release
   contracts. Record changes in `CHANGELOG.md` and update user/research docs.
 - Unicode collation results depend on the Unicode Character Database bundled
@@ -78,6 +89,7 @@ ruff check .
 python -m compileall -q src tests
 python -m doctest \
   src/threadweave/collation.py \
+  src/threadweave/dates.py \
   src/threadweave/headers.py \
   src/threadweave/subject.py
 coverage run -m pytest -q

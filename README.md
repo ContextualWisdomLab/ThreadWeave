@@ -6,8 +6,8 @@ stdlib, zero runtime dependencies.**
 `threadweave` turns a flat iterable of email messages into conversation trees
 using Jamie Zawinski's container algorithm and the reference-linking semantics
 standardized by RFC 5256. It builds on RFC 5322 identification fields, RFC 2047
-encoded-word decoding, exact RFC 5256 base-subject extraction, and RFC 5051
-`i;unicode-casemap` subject comparison.
+encoded-word decoding, exact RFC 5256 base-subject extraction, RFC 5051
+`i;unicode-casemap` subject comparison, and opt-in RFC 5256 sent-date ordering.
 
 It accepts normalized identifiers or raw header strings and integrates directly
 with Python's standard-library `email.message.Message` / `EmailMessage` objects.
@@ -35,6 +35,10 @@ or cyclic graph edges.
 - Optionally groups root threads by base subject while preserving RFC 5256 dummy-
   container and reply-or-forward ownership semantics. This heuristic is off by
   default because unrelated conversations can share a subject.
+- Optionally sorts roots and every sibling set by RFC 5256 sent date. `Date` is
+  normalized to UTC, invalid zones become UTC, invalid times become midnight,
+  missing or unusable values fall back to `INTERNALDATE`, and exact ties use the
+  mailbox sequence number.
 - Threads parsed standard-library email objects without manual header mapping;
   each source object is retained as the default payload.
 - Decodes RFC 2047 encoded words under modern and legacy parser policies,
@@ -138,15 +142,51 @@ Enable subject fallback only when reference headers are insufficient:
 threads = thread_messages(messages, group_by_subject=True)
 ```
 
+Enable RFC 5256 sent-date ordering explicitly. The default remains input order so
+existing integrations do not change behavior silently:
+
+```python
+from threadweave import Message, thread_messages
+
+threads = thread_messages(
+    [
+        Message(
+            message_id="later@example.com",
+            sent_date="2 Jan 2026 00:00:00 +0000",
+            sequence_number=2,
+        ),
+        Message(
+            message_id="earlier@example.com",
+            sent_date="1 Jan 2026 09:00:00 +0900",
+            internal_date="1 Jan 2026 00:00:00 +0000",
+            sequence_number=1,
+        ),
+    ],
+    sort_by_sent_date=True,
+)
+
+assert [root.message.message_id for root in threads] == [
+    "earlier@example.com",
+    "later@example.com",
+]
+```
+
+`thread_email_messages(..., sort_by_sent_date=True)` reads each message's `Date`
+header and uses one-based iterable order as its sequence number. IMAP clients that
+have a server-provided `INTERNALDATE` can call `message_from_email` first and pass
+that metadata explicitly.
+
 ## API
 
 | Symbol | Purpose |
 |---|---|
-| `Message` | Input dataclass: `message_id`, raw-or-split `in_reply_to` / `references`, `subject`, and `payload`. |
-| `thread_messages(messages, *, group_by_subject=False)` | Run the JWZ/RFC 5256 reference-threading core over any iterable. |
-| `message_from_email(message, *, payload=...)` | Convert a stdlib email message and retain the source object by default. |
-| `thread_email_messages(messages, *, group_by_subject=False)` | Thread stdlib email messages directly. |
+| `Message` | Input dataclass: identification headers, subject, payload, `sent_date`, `internal_date`, and `sequence_number`. |
+| `thread_messages(messages, *, group_by_subject=False, sort_by_sent_date=False)` | Run the JWZ/RFC 5256 core over any iterable. |
+| `message_from_email(message, *, payload=..., internal_date=None, sequence_number=None)` | Convert a stdlib email message and retain mailbox ordering metadata. |
+| `thread_email_messages(messages, *, group_by_subject=False, sort_by_sent_date=False)` | Thread stdlib email messages directly. |
 | `Container` | Loop-safe thread-tree node with parent, children, and deterministic traversal. |
+| `DateValue` | Accepted date input: `datetime`, RFC-style string, or `None`. |
+| `normalize_sent_date` | Normalize `Date`/`INTERNALDATE` to an aware UTC ordering value. |
 | `decode_header_text` | Tolerant RFC 2047 encoded-word decoder. |
 | `normalize_message_id` / `extract_reference_ids` | RFC 5322 identification-field parsing. |
 | `generate_email_fingerprint` | Deterministic SHA-256 identity fallback. |
@@ -167,7 +207,14 @@ threads = thread_messages(messages, group_by_subject=True)
   installed wheel outside the source tree.
 - Runtime dependencies remain zero.
 
-## Unicode and security boundary
+## Date, Unicode, and security boundaries
+
+`normalize_sent_date` accepts decoded RFC-style text or a `datetime`. A naive
+`datetime` and a date with an invalid zone are treated as UTC; an invalid time is
+treated as local midnight. An unusable `Date` falls back to `INTERNALDATE`, then
+to the earliest representable UTC instant. Explicit sequence numbers must be
+unique positive integers. This rejects contradictory mailbox metadata rather
+than producing an unstable ordering.
 
 `unicode_casemap_key` uses the Unicode Character Database bundled with the
 running Python version. RFC 5051 permits implementations based on different
@@ -176,18 +223,20 @@ decomposition properties. The collation is locale-independent and deliberately
 does not treat visual confusables as equal: Latin `A`, Greek `Α`, and Cyrillic
 `А` remain different keys.
 
-The public collation primitive expects already-decoded Unicode text. Raw and
-legacy encoded headers should enter through `decode_header_text` or the stdlib
-email adapter first.
+Raw and legacy encoded headers should enter through `decode_header_text` or the
+stdlib email adapter before subject comparison.
 
 ## Standards boundary
 
-Reference linking, dummy-container ownership, base-subject extraction, and
-subject comparison follow RFC 5256 and RFC 5051. Optional subject grouping
-remains a heuristic because distinct conversations can legitimately share one
-base subject. The transport-agnostic `Message` model does not yet require sent
-dates, so RFC 5256 sent-date sorting and IMAP `THREAD` response serialization
-remain outside the current core.
+Reference linking, dummy-container ownership, base-subject extraction, subject
+comparison, and optional sent-date sibling ordering follow RFC 5256 and RFC
+5051. Subject grouping remains a caller-selected heuristic because distinct
+conversations can legitimately share one base subject.
+
+The remaining IMAP presentation boundary is `THREAD` response serialization,
+including sequence-number/UID rendering and search-result projection. The core
+returns transport-neutral `Container` trees so standalone Python callers and
+naruon can consume the same result without an IMAP dependency.
 
 ## Autonomous maintenance
 
@@ -209,14 +258,15 @@ without mutation. Both workflows provide a manual `dry_run` input.
 ## One source, multi use
 
 The RFC 5322 header primitives in `src/threadweave/headers.py` were extracted
-behaviour-preserving from the naruon control plane. The assembly and collation
-layers are standalone APIs but remain suitable for import into naruon or another
-service module.
+behaviour-preserving from the naruon control plane. The assembly, subject,
+collation, and date layers are standalone APIs but remain suitable for import
+into naruon or another service module.
 
 ## Research grounding
 
 See [`docs/research`](docs/research/README.md) for JWZ, RFC 5256, RFC 5051, RFC
-5322, RFC 2047, RFC 6532, Unicode-version caveats, and PEP 561.
+5322, RFC 2047, RFC 6532, sent-date recovery rules, Unicode-version caveats, and
+PEP 561.
 
 ## License
 
