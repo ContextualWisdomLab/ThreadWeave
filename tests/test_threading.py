@@ -204,3 +204,20 @@ def test_duplicate_message_id_preserves_first_appearance_order():
         "second",
         "third",
     ]
+
+
+def test_in_reply_to_uses_first_valid_message_id():
+    threads = thread_messages(
+        [
+            Message(message_id="a@example.test"),
+            Message(message_id="b@example.test"),
+            Message(
+                message_id="reply@example.test",
+                in_reply_to="<a@example.test> <b@example.test>",
+            ),
+        ]
+    )
+
+    assert len(threads) == 2
+    assert _is_ancestor(threads, "a@example.test", "reply@example.test")
+    assert not _is_ancestor(threads, "b@example.test", "reply@example.test")
