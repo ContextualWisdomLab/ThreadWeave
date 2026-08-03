@@ -248,14 +248,20 @@ def thread_messages(
         order derived from first appearance in ``messages``.
     """
     id_table: dict[str, Container] = {}
-    # Containers for messages without a usable / unique Message-ID: they are
-    # never referenced, so they are always their own roots.
-    standalone: list[Container] = []
+    # Record every container when it is first created. Building the root set
+    # from this list preserves input order across normal, missing-ID, duplicate,
+    # and reference-placeholder containers alike.
+    container_order: list[Container] = []
+
+    def new_container(message: Message | None = None) -> Container:
+        container = Container(message=message)
+        container_order.append(container)
+        return container
 
     def container_for(message_id: str) -> Container:
         container = id_table.get(message_id)
         if container is None:
-            container = Container()
+            container = new_container()
             id_table[message_id] = container
         return container
 
@@ -265,8 +271,7 @@ def thread_messages(
 
         # 1.A — find or create this message's container.
         if message_id is None:
-            this = Container(message=message)
-            standalone.append(this)
+            this = new_container(message)
         else:
             existing = id_table.get(message_id)
             if existing is not None and existing.message is None:
@@ -275,10 +280,9 @@ def thread_messages(
             elif existing is not None:
                 # Duplicate Message-ID on a distinct message: keep it as its own
                 # container so nothing collides destructively.
-                this = Container(message=message)
-                standalone.append(this)
+                this = new_container(message)
             else:
-                this = Container(message=message)
+                this = new_container(message)
                 id_table[message_id] = this
 
         references = _effective_references(message)
@@ -295,9 +299,11 @@ def thread_messages(
         if previous is not None and previous is not this:
             _set_parent(this, previous)
 
-    # Step 2 — the root set is every parentless container.
-    root_set: list[Container] = [c for c in id_table.values() if c.parent is None]
-    root_set.extend(c for c in standalone if c.parent is None)
+    # Step 2 — the root set is every parentless container, in first-creation
+    # order (which follows the first appearance of each thread in ``messages``).
+    root_set: list[Container] = [
+        container for container in container_order if container.parent is None
+    ]
 
     # Step 3 — id_table is no longer needed.
 
