@@ -164,3 +164,16 @@ def test_subject_grouping_is_case_insensitive():
     )
     assert len(grouped) == 1
     assert _ids(grouped[0]) == {"p", "q"}
+
+
+def test_subject_grouping_preserves_first_appearance_order():
+    grouped = thread_messages(
+        [
+            Message(message_id="a", subject="Shared"),
+            Message(message_id="b", subject="Shared"),
+            Message(message_id="c", subject="Later"),
+        ],
+        group_by_subject=True,
+    )
+
+    assert [_ids(thread) for thread in grouped] == [{"a", "b"}, {"c"}]

@@ -213,17 +213,23 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
             subject_table[base] = merged
             created.append(merged)
 
-    # Final roots: everything still parentless, in a deterministic order,
-    # dropping any container left empty and childless by the merges.
+    # Final roots: resolve the top-level parent from each original root so a
+    # newly-created synthetic root keeps the position of its first appearance.
     final: list[Container] = []
     seen: set[int] = set()
     for container in list(root_set) + created:
-        if container.parent is not None or id(container) in seen:
+        root = container
+        ancestors: set[int] = set()
+        while root.parent is not None and id(root) not in ancestors:
+            ancestors.add(id(root))
+            root = root.parent
+
+        if id(root) in seen:
             continue
-        if container.message is None and not container.children:
+        if root.message is None and not root.children:
             continue
-        seen.add(id(container))
-        final.append(container)
+        seen.add(id(root))
+        final.append(root)
     return final
 
 
