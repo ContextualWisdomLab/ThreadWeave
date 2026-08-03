@@ -69,6 +69,19 @@ def test_message_from_email_decodes_unknown_charset_best_effort():
     assert converted.subject == "Hello"
 
 
+def test_message_from_email_preserves_malformed_encoded_word():
+    """Malformed transport encoding is retained instead of aborting ingestion."""
+    source = BytesParser(policy=policy.compat32).parsebytes(
+        b"Message-ID: <message@example.com>\r\n"
+        b"Subject: =?utf-8?b?A?=\r\n"
+        b"\r\n"
+    )
+
+    converted = message_from_email(source)
+
+    assert converted.subject == "=?utf-8?b?A?="
+
+
 def test_message_from_email_allows_explicit_none_payload():
     source = _message("<message@example.com>")
 
