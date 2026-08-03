@@ -11,11 +11,12 @@ The RFC 5322 header primitives it consumes live in :mod:`threadweave.headers`.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from threadweave.container import Container
-from threadweave.headers import normalize_message_id
+from threadweave.headers import extract_reference_ids, normalize_message_id
 from threadweave.subject import is_reply_subject, normalize_subject
 
 __all__ = ["Message", "thread_messages"]
@@ -27,38 +28,46 @@ class Message:
 
     Attributes:
         message_id: This message's ``Message-ID`` (brackets optional).
-        in_reply_to: The ``In-Reply-To`` header (used only when ``references``
-            is empty), brackets optional.
-        references: The ``References`` chain, oldest first. Each entry may carry
-            angle brackets; they are normalized away.
+        in_reply_to: The raw ``In-Reply-To`` header or a sequence of message
+            identifiers. Used only when ``references`` is empty.
+        references: The raw ``References`` header or its message identifiers,
+            oldest first. Angle brackets and duplicate IDs are normalized away.
         subject: The ``Subject`` header, used for optional subject grouping.
         payload: Arbitrary caller-supplied data carried through untouched.
     """
 
     message_id: str | None = None
-    in_reply_to: str | None = None
-    references: list[str] = field(default_factory=list)
+    in_reply_to: str | Sequence[str] | None = None
+    references: str | Sequence[str] = field(default_factory=list)
     subject: str | None = None
     payload: Any = None
+
+
+def _reference_ids(value: str | Sequence[str] | None) -> list[str]:
+    """Parse one raw identification header or a sequence of header values."""
+    if value is None:
+        return []
+
+    values = [value] if isinstance(value, str) else value
+    references: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        for reference in extract_reference_ids(str(raw_value)):
+            if reference not in seen:
+                seen.add(reference)
+                references.append(reference)
+    return references
 
 
 def _effective_references(message: Message) -> list[str]:
     """Normalized, de-duplicated reference chain for ``message``.
 
-    Falls back to ``In-Reply-To`` when ``References`` is absent, per JWZ.
+    Falls back to ``In-Reply-To`` when ``References`` is absent, per JWZ. Both
+    fields may be supplied as raw RFC 5322 header strings containing multiple
+    message identifiers or as already-split sequences.
     """
-    refs: list[str] = []
-    seen: set[str] = set()
-    for ref in message.references or []:
-        normalized = normalize_message_id(ref)
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            refs.append(normalized)
-    if not refs:
-        fallback = normalize_message_id(message.in_reply_to)
-        if fallback:
-            refs.append(fallback)
-    return refs
+    references = _reference_ids(message.references)
+    return references or _reference_ids(message.in_reply_to)
 
 
 def _subject_of(container: Container) -> str | None:
@@ -77,17 +86,12 @@ def _subject_of(container: Container) -> str | None:
         seen.add(id(node))
         if node.message is not None:
             return node.message.subject
-        # Push in reverse so the first child is examined first.
         stack.extend(reversed(node.children))
     return None
 
 
 def _link(parent: Container, child: Container) -> None:
-    """Link ``child`` under ``parent`` if it neither loops nor steals a parent.
-
-    Mirrors JWZ step 1.B: skip when ``child`` already has a parent, and skip any
-    link that would introduce a cycle.
-    """
+    """Link ``child`` under ``parent`` if it neither loops nor steals a parent."""
     if child.parent is not None:
         return
     if parent is child or child.has_descendant(parent):
@@ -97,12 +101,7 @@ def _link(parent: Container, child: Container) -> None:
 
 
 def _set_parent(child: Container, parent: Container) -> None:
-    """JWZ step 1.C: (re)parent ``child`` to ``parent``, loop-safely.
-
-    A definitive parent from the message's own ``References`` overrides a parent
-    that was only presumed from another message's chain — unless doing so would
-    create a loop.
-    """
+    """JWZ step 1.C: (re)parent ``child`` to ``parent``, loop-safely."""
     if parent is child or child.has_descendant(parent):
         return
     if child.parent is not None:
@@ -115,16 +114,7 @@ def _set_parent(child: Container, parent: Container) -> None:
 
 
 def _prune(holder: Container) -> None:
-    """JWZ step 4: prune empty containers under ``holder``.
-
-    ``holder`` is a synthetic node whose ``children`` are the root set; an empty
-    container with more than one child at that top level is preserved as a
-    grouping root. Implemented iteratively (no recursion) so it stays safe on
-    very deep trees such as long linear reply chains.
-    """
-    # Reverse pre-order gives every node AFTER all of its descendants, i.e. the
-    # post-order property the splice logic needs; the id()-visited set keeps it
-    # loop-safe even against a malformed graph.
+    """JWZ step 4: prune empty containers under ``holder``."""
     order: list[Container] = []
     seen: set[int] = set()
     stack: list[Container] = [holder]
@@ -142,14 +132,11 @@ def _prune(holder: Container) -> None:
         for child in node.children:
             if child.message is None:
                 if not child.children:
-                    # Empty leaf: nuke it.
                     continue
                 if is_root and len(child.children) > 1:
-                    # Empty root with several children: keep as a grouping root.
                     child.parent = None
                     kept.append(child)
                 else:
-                    # Splice the already-pruned children up into this level.
                     for grandchild in child.children:
                         grandchild.parent = None if is_root else node
                         kept.append(grandchild)
@@ -163,7 +150,6 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
     """JWZ step 5: merge root-set threads that share a base subject."""
     subject_table: dict[str, Container] = {}
 
-    # 5.B — choose one owner per base subject, preferring non-empty non-replies.
     for container in root_set:
         base = normalize_subject(_subject_of(container)).casefold()
         if not base:
@@ -179,7 +165,6 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
         if replace:
             subject_table[base] = container
 
-    # 5.C — merge every other root into (or with) its base-subject owner.
     created: list[Container] = []
     for container in root_set:
         base = normalize_subject(_subject_of(container)).casefold()
@@ -213,8 +198,6 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
             subject_table[base] = merged
             created.append(merged)
 
-    # Final roots: resolve the top-level parent from each original root so a
-    # newly-created synthetic root keeps the position of its first appearance.
     final: list[Container] = []
     seen: set[int] = set()
     for container in list(root_set) + created:
@@ -234,12 +217,12 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
 
 
 def thread_messages(
-    messages: list[Message], *, group_by_subject: bool = False
+    messages: Iterable[Message], *, group_by_subject: bool = False
 ) -> list[Container]:
     """Thread ``messages`` into conversation trees via the JWZ algorithm.
 
     Args:
-        messages: The messages to thread.
+        messages: The messages to thread, consumed once in iteration order.
         group_by_subject: When true, also merge distinct root threads that share
             a base subject (a heuristic; off by default).
 
@@ -248,9 +231,6 @@ def thread_messages(
         order derived from first appearance in ``messages``.
     """
     id_table: dict[str, Container] = {}
-    # Record every container when it is first created. Building the root set
-    # from this list preserves input order across normal, missing-ID, duplicate,
-    # and reference-placeholder containers alike.
     container_order: list[Container] = []
 
     def new_container(message: Message | None = None) -> Container:
@@ -265,11 +245,9 @@ def thread_messages(
             id_table[message_id] = container
         return container
 
-    # Step 1 — build the id-table and link reference chains.
     for message in messages:
         message_id = normalize_message_id(message.message_id)
 
-        # 1.A — find or create this message's container.
         if message_id is None:
             this = new_container(message)
         else:
@@ -278,8 +256,6 @@ def thread_messages(
                 existing.message = message
                 this = existing
             elif existing is not None:
-                # Duplicate Message-ID on a distinct message: keep it as its own
-                # container so nothing collides destructively.
                 this = new_container(message)
             else:
                 this = new_container(message)
@@ -287,7 +263,6 @@ def thread_messages(
 
         references = _effective_references(message)
 
-        # 1.B — link the referenced containers into a parent chain.
         previous: Container | None = None
         for ref_id in references:
             ref_container = container_for(ref_id)
@@ -295,25 +270,18 @@ def thread_messages(
                 _link(previous, ref_container)
             previous = ref_container
 
-        # 1.C — the last reference is this message's definitive parent.
         if previous is not None and previous is not this:
             _set_parent(this, previous)
 
-    # Step 2 — the root set is every parentless container, in first-creation
-    # order (which follows the first appearance of each thread in ``messages``).
     root_set: list[Container] = [
         container for container in container_order if container.parent is None
     ]
 
-    # Step 3 — id_table is no longer needed.
-
-    # Step 4 — prune empty containers.
     holder = Container()
     holder.children = root_set
     _prune(holder)
     root_set = holder.children
 
-    # Step 5 — optional subject grouping.
     if group_by_subject:
         root_set = _group_by_subject(root_set)
 
