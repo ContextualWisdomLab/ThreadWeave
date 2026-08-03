@@ -74,3 +74,34 @@ def test_add_child_reparents_the_exact_structurally_equal_child():
     assert old_parent.children[0] is first
     assert new_parent.children == [second]
     assert second.parent is new_parent
+
+
+def test_is_empty_reports_placeholder_state():
+    """``is_empty`` distinguishes placeholders from message-bearing nodes."""
+    assert Container().is_empty
+    assert not Container(message="message").is_empty
+
+
+def test_has_descendant_terminates_when_cycle_does_not_contain_target():
+    """A malformed cycle is visited once when the target is absent."""
+    root = Container(message="root")
+    child = Container(message="child")
+    missing = Container(message="missing")
+    root.children = [child]
+    child.children = [root]
+
+    assert not root.has_descendant(missing)
+
+
+def test_add_child_rejects_self_links_and_ancestor_links():
+    """Linking never creates a direct self-loop or a parent/child cycle."""
+    root = Container(message="root")
+    child = Container(message="child")
+    root.add_child(child)
+
+    root.add_child(root)
+    child.add_child(root)
+
+    assert root.parent is None
+    assert root.children == [child]
+    assert child.children == []
