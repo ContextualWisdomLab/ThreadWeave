@@ -43,3 +43,17 @@ def test_subject_grouping_decodes_encoded_words_before_comparison():
 
     assert len(grouped) == 1
     assert _thread_message_ids(grouped[0]) == {"original", "reply"}
+
+
+def test_subject_grouping_uses_rfc_5051_unicode_casemap():
+    """Compatibility-equivalent base subjects merge under RFC 5051."""
+    grouped = thread_messages(
+        [
+            Message(message_id="original", subject="Topic"),
+            Message(message_id="reply", subject="Re: Ｔｏｐｉｃ"),
+        ],
+        group_by_subject=True,
+    )
+
+    assert len(grouped) == 1
+    assert _thread_message_ids(grouped[0]) == {"original", "reply"}

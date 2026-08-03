@@ -1,7 +1,7 @@
 # Research grounding
 
-`threadweave` implements established, documented standards and algorithms rather
-than an ad-hoc heuristic. The primary sources are listed below.
+`threadweave` implements published standards and algorithms rather than an ad-hoc
+mailbox heuristic. The primary sources and the implemented boundaries are below.
 
 ## Message threading — JWZ and RFC 5256 REFERENCES
 
@@ -10,108 +10,147 @@ than an ad-hoc heuristic. The primary sources are listed below.
   based algorithm used by mature mail clients.
 - **RFC 5256, “Internet Message Access Protocol — SORT and THREAD Extensions”**
   (<https://www.rfc-editor.org/rfc/rfc5256>) standardizes the `REFERENCES`
-  threading algorithm. Its steps implemented here are:
-  1. Build an `id_table` mapping normalized `Message-ID` values to containers;
-     link `References` entries into a parent chain without loops and without
-     overriding a container that already has a parent.
-  2. When a usable `References` chain is absent, use the **first valid**
-     `In-Reply-To` identifier as the message's only reference. RFC 5256 applies
-     this restriction because real-world `In-Reply-To` fields frequently contain
-     addresses or other ambiguous material after the first identifier.
-  3. Gather the **root set**: every container with no parent.
-  4. **Prune empty containers**: remove empty childless containers; splice the
-     children of an empty container up into its level; at the root level, retain
-     an empty container with multiple children as the missing-thread-root
-     grouping node, but promote its only child when it has exactly one.
-  5. Optionally gather root threads by base subject. The RFC 5256 subject table
-     retains a dummy container as owner whenever one exists; otherwise it prefers
-     a non-reply/non-forward message over a reply/forward message.
-  6. Return the resulting thread roots. Date sorting from the IMAP `THREAD`
-     response algorithm is intentionally outside the current transport-agnostic
-     API because `Message` does not yet require a sent-date field.
+  threading algorithm.
+
+The implemented reference-threading steps are:
+
+1. Build an `id_table` mapping normalized `Message-ID` values to containers.
+   Link `References` entries into a parent chain without loops and without
+   overriding a container that already has a good parent.
+2. When a usable `References` chain is absent, use the **first valid**
+   `In-Reply-To` identifier as the message's only reference. RFC 5256 restricts
+   the fallback because historical fields often contain addresses or ambiguous
+   material after the first identifier.
+3. Gather every container without a parent into the root set.
+4. Prune dummy containers: remove empty leaves, splice-promote empty internal
+   containers, and retain a multi-child dummy at the root as a missing-thread-
+   root grouping node.
+5. Optionally gather root threads by base subject. A dummy owner is retained
+   whenever one exists; otherwise a non-reply/non-forward owner is preferred.
+6. Return the resulting roots. Sent-date sorting and IMAP response serialization
+   are not yet implemented because the transport-agnostic `Message` model does
+   not currently require the relevant mailbox metadata.
 
 ## Base-subject extraction — RFC 5256 §2.1 and §5
 
-RFC 5256 requires one exact seven-step procedure so connected and disconnected
-clients produce consistent base subjects. `normalize_subject` implements it:
+RFC 5256 requires a fixed seven-step procedure so clients produce consistent
+base subjects. `normalize_subject` implements it:
 
-1. Decode RFC 2047 encoded words to Unicode; convert tabs and folded lines to
-   spaces; collapse multiple ASCII spaces.
+1. Decode RFC 2047 encoded words; convert tabs and folded lines to spaces; and
+   collapse repeated ASCII spaces.
 2. Repeatedly remove trailing whitespace and `(fwd)` trailers.
 3. Remove a leading `subj-leader`: optional mailing-list blobs followed by a
    case-insensitive `Re:`, `Fw:`, or `Fwd:` token, including the optional blob
    permitted between the token and colon.
-4. Remove a leading `subj-blob` such as `[project]` only when a non-empty base
-   subject remains. This preserves a final blob when it is the entire subject.
+4. Remove a leading `subj-blob` only when a non-empty base remains. A final blob
+   may therefore be the complete subject.
 5. Repeat leader and blob removal until stable.
 6. Unwrap a surrounding `[fwd: ...]` form and restart from trailer removal.
-7. Return the resulting text as the base subject.
+7. Return the resulting text.
 
-RFC 5256 separately defines a message as a reply or forward when extraction
-removes a `subj-refwd`, a `(fwd)` trailer, or a `[fwd: ...]` wrapper.
-`is_reply_or_forward_subject` reports that classification. Removing a mailing-
-list blob alone does not classify a message as a reply or forward.
+RFC 5256 classifies a message as a reply or forward when extraction removes a
+`subj-refwd`, `(fwd)` trailer, or `[fwd: ...]` wrapper.
+`is_reply_or_forward_subject` exposes that result. Removing a mailing-list blob
+alone does not classify the message.
+
+## Subject comparison — RFC 5051 i;unicode-casemap
+
+RFC 5256 says subject comparisons are case-insensitive under its
+internationalization rules. **RFC 5051, “i;unicode-casemap — Simple Unicode
+Collation Algorithm”** (<https://www.rfc-editor.org/rfc/rfc5051>) defines the
+required preparation and comparison:
+
+1. Read one Unicode code point.
+2. Apply its **simple titlecase mapping** from `UnicodeData.txt`. If no simple
+   titlecase mapping exists, use its simple uppercase mapping; if neither exists,
+   leave the code point unchanged.
+3. Recursively apply canonical or compatibility decomposition to the resulting
+   code point — effectively Normalization Form KD.
+4. Append the result and repeat for the remaining input.
+5. Compare the prepared strings with octet equality/order semantics.
+
+Python's `str.title()` exposes the *full* titlecase mapping and can expand one
+code point through `SpecialCasing.txt`; that is not the RFC 5051 operation. The
+internal `_simple_titlecase` helper accepts a one-code-point `str.title()` result
+but keeps the original code point when Python returns an expansion. For the
+Unicode databases used by supported Python 3.10-3.13 runtimes, expanding full
+mappings have no simple `UnicodeData.txt` titlecase/uppercase mapping.
+`unicode_casemap_key` then applies `unicodedata.normalize("NFKD", ...)` to the
+simple result. RFC 5051 permits an equivalent Unicode code-point representation,
+so the prepared Python string is a practical equality and ordering key.
+
+Consequences covered by tests include:
+
+- ASCII case variants compare equally.
+- Full-width compatibility forms compare with their ASCII equivalents.
+- Precomposed and decomposed accents compare equally.
+- RFC 5051's U+01C4/U+01C5/U+01C6 DZ-with-caron example produces
+  `U+0044 U+007A U+030C` for every case form.
+- Multi-code-point full case expansions are deliberately not substituted for
+  simple mappings: `ß` remains `ß`, and the `ﬀ` ligature decomposes to lowercase
+  `ff` rather than titlecase `Ff`.
+- Visual confusables from unrelated scripts remain different. For example,
+  Latin `A` and Greek `Α` are not interchangeable.
+
+RFC 5051 notes that results can vary across Unicode revisions as new characters
+acquire titlecase or decomposition properties. `threadweave` therefore uses the
+Unicode Character Database bundled with the active supported Python runtime and
+documents the version boundary rather than hard-coding an obsolete table.
 
 ## Identification fields — RFC 5322 §3.6.4
 
 - **RFC 5322, “Internet Message Format”, §3.6.4 (Identification Fields)**
-  (<https://www.rfc-editor.org/rfc/rfc5322#section-3.6.4>) defines the
-  `Message-ID`, `In-Reply-To`, and `References` header fields and the
-  `msg-id = "<" id-left "@" id-right ">"` grammar.
-- Both `In-Reply-To` and `References` can contain one or more message
-  identifiers. Consequently, `threadweave.Message` accepts either a raw header
-  string or an already-split sequence for each field. The parser exposes every
-  identifier in first-seen order and removes duplicates; the threading layer then
-  applies RFC 5256's first-valid-only rule specifically to the `In-Reply-To`
-  fallback.
-- `threadweave.headers` strips angle brackets and also supports a whitespace
-  fallback for malformed but recoverable values. This is deliberately tolerant
-  ingestion; the normalized identifiers remain the algorithm's internal form.
+  (<https://www.rfc-editor.org/rfc/rfc5322#section-3.6.4>) defines `Message-ID`,
+  `In-Reply-To`, `References`, and the `msg-id` grammar.
+- Both reply-reference fields can contain one or more identifiers. The public
+  model accepts either raw header text or already-split sequences. Parsing keeps
+  first appearance and removes duplicates; the threading layer applies RFC
+  5256's first-valid-only rule specifically to the `In-Reply-To` fallback.
+- Angle brackets are stripped and malformed-but-recoverable whitespace-delimited
+  values are tolerated at ingestion.
 
 ## Encoded words — RFC 2047
 
 - **RFC 2047, “Message Header Extensions for Non-ASCII Text”**
   (<https://www.rfc-editor.org/rfc/rfc2047>) defines MIME encoded words such as
-  `=?utf-8?b?...?=` for non-ASCII header text.
-- Modern `EmailMessage` policies decode these values transparently, while the
-  legacy `compat32` policy can expose the transport representation. The shared
-  `decode_header_text` primitive decodes RFC 2047 parts explicitly, preserves
-  ordinary text between encoded words, recovers unknown character-set labels
-  with replacement decoding, and retains a malformed encoded word verbatim
-  rather than rejecting the whole message.
-- The same primitive is used by both the standard-library email adapter and base-
-  subject extraction, preventing parser-policy differences from changing thread
-  grouping.
+  `=?utf-8?b?...?=`.
+- Modern email policies often decode these transparently, while legacy
+  `compat32` can expose the transport representation. `decode_header_text`
+  explicitly decodes encoded words, preserves ordinary interstitial text,
+  recovers unknown character-set labels with replacement decoding, and retains
+  malformed encoded words verbatim rather than rejecting the whole message.
+- The same primitive feeds the stdlib adapter and base-subject extraction so
+  parser policy cannot alter grouping behavior.
 
 ## Internationalized headers — RFC 6532
 
 - **RFC 6532, “Internationalized Email Headers”**
-  (<https://www.rfc-editor.org/rfc/rfc6532>) extends the Internet Message Format
-  to permit UTF-8 in most header values. The standard-library adapter retains
-  decoded header text as Unicode, including non-ASCII subjects, rather than
-  performing lossy ASCII coercion.
+  (<https://www.rfc-editor.org/rfc/rfc6532>) permits UTF-8 in most header values.
+  The adapter carries decoded Unicode text without lossy ASCII coercion.
 
 ## Typed-package distribution — PEP 561
 
 - **PEP 561, “Distributing and Packaging Type Information”**
   (<https://peps.python.org/pep-0561/>) specifies the `py.typed` marker for
-  packages that distribute inline type information. `threadweave` ships this
-  marker and CI verifies that it is present in both wheel and source archives.
+  packages with inline type information. CI verifies the marker in wheel and
+  source distributions.
 
-## A note on base-subject grouping
+## Heuristic and transport boundaries
 
-Subject grouping is a **heuristic**, not part of the reference-based threading
-guarantee. Distinct conversations can share the exact same base subject, so it
-is off by default (`group_by_subject=False`). The extraction procedure itself is
-RFC 5256 compliant; the remaining transport-layer boundary is sent-date sorting
-and IMAP response serialization, which require metadata the core `Message` model
-does not yet mandate.
+Subject grouping is optional because distinct conversations can legitimately
+share the exact same standardized base subject. The extraction and comparison
+procedures are standards-grounded; deciding to merge disconnected roots remains
+a caller-selected heuristic (`group_by_subject=False` by default).
+
+The remaining RFC 5256 transport-layer gap is sent-date sorting and IMAP
+`THREAD` response serialization. Those require normalized Date/INTERNALDATE and
+sequence-number metadata that the current generic `Message` model does not
+mandate.
 
 ## Provenance
 
 The RFC 5322 header primitives (`normalize_message_id`,
-`extract_reference_ids`, `generate_email_fingerprint`) are extracted
-behaviour-preserving from the naruon control plane
-(`backend/services/threading_service.py`). The threading assembly is a fresh
-implementation built on the JWZ container model and RFC 5256 semantics, so
-improvements can be ported in both directions.
+`extract_reference_ids`, and `generate_email_fingerprint`) were extracted
+behaviour-preserving from the naruon control plane. The threading, subject, and
+collation layers are fresh standalone implementations designed to remain usable
+both independently and as naruon modules.

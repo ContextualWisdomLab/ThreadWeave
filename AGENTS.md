@@ -4,11 +4,11 @@ Operating guide for automated agents working on this repository.
 
 `threadweave` implements the JWZ container model with RFC 5256 `REFERENCES`
 threading semantics, RFC 5322 identification-field parsing, RFC 2047 encoded-word
-decoding, and RFC 5256 base-subject extraction. Its value is correctness: mail
-clients and ingestion systems rely on threading being deterministic, standards-
-grounded, and impossible to hang on malformed input. Treat changes to
-`threading.py`, `container.py`, `subject.py`, and `headers.py` as behavior-
-sensitive.
+decoding, RFC 5256 base-subject extraction, and RFC 5051 Unicode casemap
+comparison. Its value is correctness: mail clients and ingestion systems rely on
+threading being deterministic, standards-grounded, and impossible to hang on
+malformed input. Treat changes to `threading.py`, `container.py`, `subject.py`,
+`collation.py`, and `headers.py` as behavior-sensitive.
 
 ## Invariants that must not regress
 
@@ -25,10 +25,12 @@ sensitive.
    splice-promote empty internal containers. At the root level, retain an empty
    container with multiple children as a missing-root grouping node; promote its
    sole child when it has exactly one.
-5. **RFC 5256 subject behavior is exact.** Decode RFC 2047 first; normalize RFC
+5. **Subject behavior is standards-exact.** Decode RFC 2047 first; normalize RFC
    whitespace; handle reply/forward leaders, removable list blobs, `(fwd)`
-   trailers, and `[fwd: ...]` wrappers. A dummy root remains the subject-table
-   owner whenever one exists. A blob alone is not a reply or forward.
+   trailers, and `[fwd: ...]` wrappers. Compare resulting base subjects with RFC
+   5051 `i;unicode-casemap`, not Python `casefold()`, locale-sensitive APIs, or
+   visual-confusable heuristics. A dummy root remains the subject-table owner
+   whenever one exists. A blob alone is not a reply or forward.
 6. **Missing roots become placeholders.** A referenced-but-unseen `Message-ID`
    yields an empty container that still co-threads its descendants.
 7. **Duplicate Message-IDs survive.** A later distinct message with an already-
@@ -48,6 +50,9 @@ sensitive.
   primitives originated in naruon; port behavioral fixes in both directions.
 - Public behavior, compatibility aliases, and typing markers are release
   contracts. Record changes in `CHANGELOG.md` and update user/research docs.
+- Unicode collation results depend on the Unicode Character Database bundled
+  with the supported Python runtime. Tests must cover stable RFC examples and
+  security-sensitive non-equivalences rather than version-specific new codepoints.
 
 ## Autonomous development loop
 
@@ -71,7 +76,10 @@ sensitive.
 python -m pip install -e ".[test]" ruff build
 ruff check .
 python -m compileall -q src tests
-python -m doctest src/threadweave/headers.py src/threadweave/subject.py
+python -m doctest \
+  src/threadweave/collation.py \
+  src/threadweave/headers.py \
+  src/threadweave/subject.py
 coverage run -m pytest -q
 coverage report
 python -m build
