@@ -60,7 +60,9 @@ class Container:
         """
         if child is self or child.has_descendant(self):
             return
-        if child.parent is self:
+        if child.parent is self and any(
+            existing is child for existing in self.children
+        ):
             return
         if child.parent is not None:
             try:
