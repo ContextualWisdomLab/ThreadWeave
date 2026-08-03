@@ -91,7 +91,11 @@ def _subject_of(container: Container) -> str | None:
 
 
 def _link(parent: Container, child: Container) -> None:
-    """Link ``child`` under ``parent`` if it neither loops nor steals a parent."""
+    """Link ``child`` under ``parent`` if it neither loops nor steals a parent.
+
+    Mirrors JWZ step 1.B: skip when ``child`` already has a parent, and skip any
+    link that would introduce a cycle.
+    """
     if child.parent is not None:
         return
     if parent is child or child.has_descendant(parent):
@@ -101,7 +105,12 @@ def _link(parent: Container, child: Container) -> None:
 
 
 def _set_parent(child: Container, parent: Container) -> None:
-    """JWZ step 1.C: (re)parent ``child`` to ``parent``, loop-safely."""
+    """JWZ step 1.C: (re)parent ``child`` to ``parent``, loop-safely.
+
+    A definitive parent from the message's own ``References`` overrides a parent
+    that was only presumed from another message's chain — unless doing so would
+    create a loop.
+    """
     if parent is child or child.has_descendant(parent):
         return
     if child.parent is not None:
@@ -114,7 +123,13 @@ def _set_parent(child: Container, parent: Container) -> None:
 
 
 def _prune(holder: Container) -> None:
-    """JWZ step 4: prune empty containers under ``holder``."""
+    """JWZ step 4: prune empty containers under ``holder``.
+
+    ``holder`` is a synthetic node whose ``children`` are the root set; an empty
+    container with more than one child at that top level is preserved as a
+    grouping root. Implemented iteratively (no recursion) so it stays safe on
+    very deep trees such as long linear reply chains.
+    """
     order: list[Container] = []
     seen: set[int] = set()
     stack: list[Container] = [holder]
@@ -174,11 +189,12 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
         if owner is None or owner is container:
             continue
 
+        # The first pass guarantees that an owner is concrete whenever any
+        # concrete container exists for the base subject, and non-reply whenever
+        # any non-reply exists. Only the cases below can therefore remain.
         if owner.message is None and container.message is None:
             for grandchild in list(container.children):
                 owner.add_child(grandchild)
-        elif owner.message is None:
-            owner.add_child(container)
         elif container.message is None:
             container.add_child(owner)
             subject_table[base] = container
@@ -186,11 +202,6 @@ def _group_by_subject(root_set: list[Container]) -> list[Container]:
             _subject_of(owner)
         ):
             owner.add_child(container)
-        elif is_reply_subject(_subject_of(owner)) and not is_reply_subject(
-            _subject_of(container)
-        ):
-            container.add_child(owner)
-            subject_table[base] = container
         else:
             merged = Container()
             merged.add_child(owner)
