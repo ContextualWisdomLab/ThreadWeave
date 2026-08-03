@@ -38,6 +38,18 @@ than an ad-hoc heuristic. The primary sources are listed below.
   fallback for malformed but recoverable values. This is deliberately tolerant
   ingestion; the normalized identifiers remain the algorithm's internal form.
 
+## Encoded words — RFC 2047
+
+- **RFC 2047, “Message Header Extensions for Non-ASCII Text”**
+  (<https://www.rfc-editor.org/rfc/rfc2047>) defines MIME encoded words such as
+  `=?utf-8?b?...?=` for non-ASCII header text.
+- Modern `EmailMessage` policies decode these values transparently, while the
+  legacy `compat32` policy can expose the transport representation. The adapter
+  therefore decodes RFC 2047 parts explicitly, preserves ordinary text between
+  encoded words, recovers unknown character-set labels with replacement
+  decoding, and retains a malformed encoded word verbatim rather than rejecting
+  the whole message.
+
 ## Internationalized headers — RFC 6532
 
 - **RFC 6532, “Internationalized Email Headers”**
