@@ -8,8 +8,9 @@ malformed reference graph produces a cycle, iteration terminates.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any
 
 __all__ = ["Container"]
 
@@ -25,15 +26,15 @@ class Container:
     """
 
     message: Any | None = None
-    parent: "Container | None" = None
-    children: list["Container"] = field(default_factory=list)
+    parent: Container | None = None
+    children: list[Container] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
         """Whether this container holds no message (a placeholder node)."""
         return self.message is None
 
-    def has_descendant(self, other: "Container") -> bool:
+    def has_descendant(self, other: Container) -> bool:
         """Return whether ``other`` is this container or one of its descendants.
 
         Used for loop checks before linking. Loop-safe: visits each node once.
@@ -50,7 +51,7 @@ class Container:
             stack.extend(node.children)
         return False
 
-    def add_child(self, child: "Container") -> None:
+    def add_child(self, child: Container) -> None:
         """Attach ``child`` under this container, re-parenting it if needed.
 
         No-op when the link would be a self-loop or when ``child`` is already an
@@ -66,7 +67,7 @@ class Container:
         child.parent = self
         self.children.append(child)
 
-    def iter_descendants(self) -> Iterator["Container"]:
+    def iter_descendants(self) -> Iterator[Container]:
         """Yield every descendant (depth-first). Loop-safe; each node once."""
         seen: set[int] = set()
         stack: list[Container] = list(self.children)
