@@ -1,32 +1,36 @@
 # threadweave
 
-**The canonical JWZ email message-threading algorithm for Python — pure
+**Standards-grounded JWZ/RFC 5256 email reference threading for Python — pure
 stdlib, zero runtime dependencies.**
 
-`threadweave` turns a flat list of email messages into conversation trees using
-[Jamie Zawinski's threading algorithm](https://www.jwz.org/doc/threading.html),
-built on top of RFC 5322 §3.6.4 identification-field parsing (`Message-ID`,
-`References`, `In-Reply-To`). It accepts either normalized identifiers or raw
-header strings and integrates directly with Python's standard-library
+`threadweave` turns a flat iterable of email messages into conversation trees
+using Jamie Zawinski's container algorithm and the reference-linking semantics
+standardized by RFC 5256, built on RFC 5322 §3.6.4 identification-field parsing
+(`Message-ID`, `References`, `In-Reply-To`). It accepts normalized identifiers or
+raw header strings and integrates directly with Python's standard-library
 `email.message.Message` / `EmailMessage` objects.
 
 It exists because the obviously-wrong approaches — grouping by subject alone, or
-naively chaining `In-Reply-To` — mis-thread real mail: subjects collide across
-unrelated conversations, references arrive out of order, roots go missing, and
-malformed headers form reference loops. JWZ handles all of these; `threadweave`
-implements it faithfully and **loop-safely**.
+naively chaining every value found in `In-Reply-To` — mis-thread real mail:
+subjects collide across unrelated conversations, references arrive out of order,
+roots go missing, malformed headers contain ambiguous trailing material, and
+hostile inputs form reference loops. `threadweave` handles these cases
+deterministically and **loop-safely**.
 
 ## What it does
 
 - Builds the JWZ id-table of containers and links `References` chains **without
   creating loops** and **without overriding a message's good existing parent**.
-- Accepts raw RFC identification headers, including multiple message identifiers
-  in either `References` or `In-Reply-To`, as well as already-split sequences.
+- Accepts raw RFC identification headers, including multiple identifiers, as
+  well as already-split sequences.
+- Uses a valid `References` chain in full; when it is unavailable, follows RFC
+  5256 by using only the **first valid** `In-Reply-To` identifier as the parent.
 - Recovers missing roots as empty placeholder containers, then **prunes** empty
-  containers correctly (nuking childless empties and splice-promoting the
-  children of empty ones, with the special root-level single-child handling).
-- Optionally groups the root set by **base subject** (`Re:`/`Fwd:`/`Fw:`
-  stripped) — a heuristic, off by default.
+  containers correctly (removing childless empties and splice-promoting the
+  children of empty ones, with the root-level single-child special case).
+- Optionally groups the root set by a lightweight **base-subject** heuristic
+  (`Re:`/`Fwd:`/`Fw:` stripped), while preserving RFC 5256 dummy-container
+  ownership semantics. This heuristic is off by default.
 - Threads parsed standard-library email objects without manual header mapping;
   each source object is retained as the default payload.
 - Decodes RFC 2047 encoded words even under the legacy `compat32` parser policy,
@@ -76,6 +80,19 @@ thread_messages([
 ])
 ```
 
+When `References` is absent, only the first valid `In-Reply-To` identifier is
+used. This avoids turning ambiguous trailing values into a fabricated chain:
+
+```python
+thread_messages([
+    Message(message_id="root@example.com"),
+    Message(
+        message_id="child@example.com",
+        in_reply_to="<root@example.com> sender@example.net",
+    ),
+])
+```
+
 For parsed email messages, use the standard-library adapter:
 
 ```python
@@ -105,13 +122,13 @@ threads = thread_messages(messages, group_by_subject=True)
 | Symbol | Purpose |
 |---|---|
 | `Message` | Input dataclass: `message_id`, raw-or-split `in_reply_to` / `references`, `subject`, `payload`. |
-| `thread_messages(messages, *, group_by_subject=False)` | Run the JWZ algorithm over any iterable; returns the root `Container` list. |
+| `thread_messages(messages, *, group_by_subject=False)` | Run the JWZ/RFC 5256 reference-threading core over any iterable; return root `Container` objects. |
 | `message_from_email(message, *, payload=...)` | Convert a stdlib email message while retaining the source object by default. |
 | `thread_email_messages(messages, *, group_by_subject=False)` | Thread an iterable of stdlib email messages directly. |
 | `Container` | Thread-tree node: `message`, `parent`, `children`, `is_empty`, `add_child`, `iter_descendants`. |
-| `normalize_message_id` / `extract_reference_ids` | RFC 5322 `Message-ID` / `References` parsing. |
+| `normalize_message_id` / `extract_reference_ids` | RFC 5322 `Message-ID` / reference-header parsing. |
 | `generate_email_fingerprint` | Deterministic SHA-256 identity for messages lacking a usable `Message-ID`. |
-| `normalize_subject` / `is_reply_subject` | Base-subject stripping and reply detection. |
+| `normalize_subject` / `is_reply_subject` | Lightweight base-subject stripping and reply detection. |
 
 `Container.iter_descendants` and the internal linking are loop-safe: traversal
 visits each node at most once, so a cyclic reference graph can never hang.
@@ -127,23 +144,31 @@ visits each node at most once, so a cyclic reference graph can never hang.
   both wheel and source distributions, verifies the `py.typed` marker, and
   smoke-tests the installed wheel outside the source tree.
 
+## Standards boundary
+
+The reference-linking and dummy-container behavior follows RFC 5256. The optional
+subject parser intentionally implements only common `Re:`, `Fwd:`, and `Fw:`
+forms, and the transport-agnostic API does not yet require sent dates for RFC
+5256's IMAP response ordering steps. These boundaries are explicit so callers
+can rely on what is guaranteed without mistaking a lightweight fallback for the
+entire IMAP `THREAD` presentation algorithm.
+
 ## One source, multi use (OSMU)
 
 The RFC 5322 header primitives in
 [`threadweave/headers.py`](src/threadweave/headers.py) are extracted
 **behaviour-preserving** from a production control plane
 ([naruon](https://github.com/ContextualWisdomLab/naruon)), where they normalize
-`Message-ID`/`References` headers for canonical email threading. The JWZ
-assembly here is a **fresh canonical implementation** built on top of those
-primitives — one source, usable both as a standalone dependency and as a git
-submodule.
+`Message-ID`/reference headers for canonical email threading. The assembly here
+is a fresh implementation built on those primitives — one source, usable both as
+a standalone dependency and as a git submodule.
 
 ## Research grounding
 
-See [`docs/research`](docs/research/README.md): Zawinski's threading algorithm,
-RFC 5322 §3.6.4 identification fields, RFC 2047 encoded words, RFC 6532
-internationalized email headers, and PEP 561 typed-package distribution.
-Base-subject grouping is documented there as a heuristic fallback.
+See [`docs/research`](docs/research/README.md): Zawinski's container algorithm,
+RFC 5256 `REFERENCES` threading, RFC 5322 §3.6.4 identification fields, RFC 2047
+encoded words, RFC 6532 internationalized email headers, and PEP 561 typed-
+package distribution.
 
 ## License
 
