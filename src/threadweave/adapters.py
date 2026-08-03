@@ -8,6 +8,7 @@ source object as the default payload.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from email.header import decode_header
 from email.message import Message as EmailMessage
 from typing import Any
 
@@ -20,10 +21,26 @@ __all__ = ["message_from_email", "thread_email_messages"]
 _PAYLOAD_MISSING = object()
 
 
+def _decode_header_text(value: object) -> str:
+    """Decode RFC 2047 encoded words with a safe unknown-charset fallback."""
+    decoded_parts: list[str] = []
+    for part, charset in decode_header(str(value)):
+        if isinstance(part, str):
+            decoded_parts.append(part)
+            continue
+
+        encoding = charset or "ascii"
+        try:
+            decoded_parts.append(part.decode(encoding, errors="replace"))
+        except LookupError:
+            decoded_parts.append(part.decode("utf-8", errors="replace"))
+    return "".join(decoded_parts)
+
+
 def _header_text(message: EmailMessage, name: str) -> str | None:
     """Return one decoded header value as text, or ``None`` when absent."""
     value = message.get(name)
-    return None if value is None else str(value)
+    return None if value is None else _decode_header_text(value)
 
 
 def message_from_email(
