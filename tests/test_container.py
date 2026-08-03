@@ -39,3 +39,13 @@ def test_add_child_is_idempotent_for_existing_parent():
     root.add_child(first)
 
     assert [node.message for node in root.children] == ["first", "second"]
+
+
+def test_add_child_repairs_missing_child_entry():
+    root = Container(message="root")
+    child = Container(message="child", parent=root)
+
+    root.add_child(child)
+
+    assert len(root.children) == 1
+    assert root.children[0] is child
