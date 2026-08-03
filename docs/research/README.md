@@ -1,7 +1,7 @@
 # Research grounding
 
 `threadweave` implements published standards and algorithms rather than an ad-hoc
-mailbox heuristic. The primary sources and the implemented boundaries are below.
+mailbox heuristic. The primary sources and implemented boundaries are below.
 
 ## Message threading — JWZ and RFC 5256 REFERENCES
 
@@ -27,9 +27,8 @@ The implemented reference-threading steps are:
    root grouping node.
 5. Optionally gather root threads by base subject. A dummy owner is retained
    whenever one exists; otherwise a non-reply/non-forward owner is preferred.
-6. Return the resulting roots. Sent-date sorting and IMAP response serialization
-   are not yet implemented because the transport-agnostic `Message` model does
-   not currently require the relevant mailbox metadata.
+6. Optionally apply the RFC sent-date sorting stages described below.
+7. Return the resulting roots as transport-neutral `Container` objects.
 
 ## Base-subject extraction — RFC 5256 §2.1 and §5
 
@@ -97,6 +96,42 @@ acquire titlecase or decomposition properties. `threadweave` therefore uses the
 Unicode Character Database bundled with the active supported Python runtime and
 documents the version boundary rather than hard-coding an obsolete table.
 
+## Sent-date ordering — RFC 5256 §2.2 REFERENCES steps 4 and 6
+
+RFC 5256 does not leave date recovery or sibling ordering to implementation
+preference. `normalize_sent_date` and `sort_by_sent_date=True` implement these
+rules:
+
+1. Parse the message's RFC 5322 `Date` and adjust a valid value to UTC.
+2. Treat an invalid or absent zone as UTC.
+3. Treat an invalid time as `00:00:00` in the recovered local zone.
+4. If `Date` is missing or cannot provide a calendar date, use mailbox
+   `INTERNALDATE`.
+5. If neither value is usable, use the earliest representable UTC instant.
+6. Break exact sent-date ties with the positive mailbox sequence number.
+7. Before subject grouping, sort top-level roots. For a top-level dummy, first
+   sort its children and use its first child's key as the dummy key.
+8. After subject grouping, sort every sibling set bottom-up so grandchildren are
+   ordered before their parent is compared as part of an ancestor sibling set.
+
+`DateValue` accepts an already parsed `datetime` or RFC-style text. Naive
+`datetime` values follow the invalid-zone rule and are interpreted as UTC. RFC
+5322 permits a leap second value of `60`; Python's `datetime` cannot represent
+that second directly, so the implementation uses the final microsecond before
+the following minute, preserving its ordering after second `59` and before the
+next minute.
+
+Ordering is opt-in to preserve the package's historical first-appearance order.
+When enabled, omitted sequence numbers use one-based input position. All
+effective sequence numbers must be unique positive integers; mixed explicit and
+implicit metadata that collides is rejected instead of producing a false RFC
+tie-break.
+
+The stdlib adapter reads the decoded `Date` header. `message_from_email` also
+accepts server-provided `internal_date` and `sequence_number`; the convenience
+`thread_email_messages` adapter uses iterable order as sequence number when
+threading a mailbox directly.
+
 ## Identification fields — RFC 5322 §3.6.4
 
 - **RFC 5322, “Internet Message Format”, §3.6.4 (Identification Fields)**
@@ -142,15 +177,16 @@ share the exact same standardized base subject. The extraction and comparison
 procedures are standards-grounded; deciding to merge disconnected roots remains
 a caller-selected heuristic (`group_by_subject=False` by default).
 
-The remaining RFC 5256 transport-layer gap is sent-date sorting and IMAP
-`THREAD` response serialization. Those require normalized Date/INTERNALDATE and
-sequence-number metadata that the current generic `Message` model does not
-mandate.
+Sent-date sorting is implemented, but IMAP `THREAD` response serialization is
+still outside the core. That presentation layer must choose sequence numbers or
+UIDs, project the server's search result, and render RFC parenthesized response
+syntax. Keeping it separate lets the same thread trees serve local Python,
+naruon, and non-IMAP services.
 
 ## Provenance
 
 The RFC 5322 header primitives (`normalize_message_id`,
 `extract_reference_ids`, and `generate_email_fingerprint`) were extracted
-behaviour-preserving from the naruon control plane. The threading, subject, and
-collation layers are fresh standalone implementations designed to remain usable
-both independently and as naruon modules.
+behaviour-preserving from the naruon control plane. The threading, subject,
+collation, and date layers are fresh standalone implementations designed to
+remain usable both independently and as naruon modules.
