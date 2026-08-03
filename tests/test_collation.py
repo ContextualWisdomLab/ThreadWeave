@@ -30,3 +30,11 @@ def test_rfc_5051_dz_caron_example_maps_all_case_forms_identically():
 def test_visually_similar_scripts_remain_distinct():
     """Casemap does not collapse unrelated Latin and Greek characters."""
     assert unicode_casemap_key("A") != unicode_casemap_key("Α")
+
+
+def test_simple_titlecase_does_not_apply_multi_character_expansions():
+    """RFC 5051 uses UnicodeData simple titlecase, not full SpecialCasing."""
+    assert unicode_casemap_key("ß") == "ß"
+    assert unicode_casemap_key("ß") != unicode_casemap_key("SS")
+    assert unicode_casemap_key("ﬀ") == "ff"
+    assert unicode_casemap_key("ﬀ") != unicode_casemap_key("FF")
