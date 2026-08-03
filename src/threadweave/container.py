@@ -15,9 +15,11 @@ from typing import Any
 __all__ = ["Container"]
 
 
-@dataclass
+@dataclass(eq=False)
 class Container:
     """A node in a thread tree.
+
+    Containers are mutable graph nodes and therefore compare by identity.
 
     Attributes:
         message: The wrapped message, or ``None`` for an empty placeholder.
