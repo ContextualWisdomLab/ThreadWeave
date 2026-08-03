@@ -36,6 +36,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and ordering keys while preserving unrelated-script confusables as distinct.
 - Add explicit `is_reply_or_forward_subject` classification and retain
   `is_reply_subject` as a compatibility name with the standardized semantics.
+- Add public `normalize_sent_date` normalization for RFC 5256 ordering: adjust
+  valid dates to UTC, treat invalid zones as UTC and invalid times as midnight,
+  fall back to `INTERNALDATE`, and use the earliest UTC instant when both values
+  are unusable.
+- Add `sent_date`, `internal_date`, and `sequence_number` metadata to `Message`.
+- Add opt-in `sort_by_sent_date` processing for RFC 5256 steps 4 and 6, including
+  top-level dummy-child ordering, first-child dummy keys, bottom-up sibling
+  sorting, and sequence-number tie-breaking.
+- Carry `Date`, `INTERNALDATE`, and sequence metadata through the standard-
+  library email adapters; direct iterable order supplies deterministic one-based
+  sequence numbers.
+- Reject invalid or duplicate effective mailbox sequence numbers instead of
+  silently producing contradictory ordering.
 - Preserve decoded Unicode header values, including internationalized subjects,
   through the standard-library adapter.
 - Require 100% production statement and branch coverage in CI and verify that
