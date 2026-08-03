@@ -7,6 +7,7 @@ import inspect
 import threadweave.adapters
 import threadweave.collation
 import threadweave.container
+import threadweave.dates
 import threadweave.encoded_words
 import threadweave.headers
 import threadweave.subject
@@ -16,6 +17,7 @@ MODULES = (
     threadweave.adapters,
     threadweave.collation,
     threadweave.container,
+    threadweave.dates,
     threadweave.encoded_words,
     threadweave.headers,
     threadweave.subject,
