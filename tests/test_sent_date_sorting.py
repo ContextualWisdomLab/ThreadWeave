@@ -218,3 +218,15 @@ def test_placeholder_filled_by_later_message_keeps_its_sort_metadata():
     )
     assert roots[0].message.message_id == "root"
     assert _message_ids(roots[0].children) == ["child"]
+
+
+def test_effective_sequence_numbers_must_be_unique_when_metadata_is_mixed():
+    """Explicit metadata cannot collide with an input-position fallback."""
+    with pytest.raises(ValueError, match="duplicate sequence number"):
+        thread_messages(
+            [
+                Message(message_id="explicit", sequence_number=2),
+                Message(message_id="implicit"),
+            ],
+            sort_by_sent_date=True,
+        )
