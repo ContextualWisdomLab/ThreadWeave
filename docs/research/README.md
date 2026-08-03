@@ -1,13 +1,13 @@
 # Research grounding
 
-`threadweave` implements an established, documented algorithm rather than an
-ad-hoc heuristic. The primary sources:
+`threadweave` implements established, documented standards and algorithms rather
+than an ad-hoc heuristic. The primary sources are listed below.
 
 ## Message threading — the JWZ algorithm
 
-- **Jamie Zawinski, "message threading"**
+- **Jamie Zawinski, “message threading”**
   (<https://www.jwz.org/doc/threading.html>). The canonical description of the
-  algorithm used by Netscape Mail, Mozilla/Thunderbird, and most serious mail
+  algorithm used by Netscape Mail, Mozilla/Thunderbird, and other mature mail
   clients. The steps implemented here are:
   1. Build an `id_table` mapping `Message-ID` to a `Container`; for each message
      find or create its container, then link every `References` entry into a
@@ -26,11 +26,32 @@ ad-hoc heuristic. The primary sources:
 
 ## Identification fields — RFC 5322 §3.6.4
 
-- **RFC 5322, "Internet Message Format", §3.6.4 (Identification Fields)** defines
-  the `Message-ID`, `In-Reply-To`, and `References` header fields and the
-  `msg-id = "<" id-left "@" id-right ">"` grammar. `threadweave.headers` parses
-  these: it strips the angle brackets, de-duplicates references while preserving
-  header order, and falls back to whitespace splitting for malformed values.
+- **RFC 5322, “Internet Message Format”, §3.6.4 (Identification Fields)**
+  (<https://www.rfc-editor.org/rfc/rfc5322#section-3.6.4>) defines the
+  `Message-ID`, `In-Reply-To`, and `References` header fields and the
+  `msg-id = "<" id-left "@" id-right ">"` grammar.
+- Both `In-Reply-To` and `References` are defined as one or more message
+  identifiers. Consequently, `threadweave.Message` accepts either a raw header
+  string or an already-split sequence for each field. The parser extracts every
+  identifier, preserves first appearance, and drops duplicates.
+- `threadweave.headers` strips angle brackets and also supports a whitespace
+  fallback for malformed but recoverable values. This is deliberately tolerant
+  ingestion; the normalized identifiers remain the algorithm's internal form.
+
+## Internationalized headers — RFC 6532
+
+- **RFC 6532, “Internationalized Email Headers”**
+  (<https://www.rfc-editor.org/rfc/rfc6532>) extends the Internet Message Format
+  to permit UTF-8 in most header values. The standard-library adapter retains
+  decoded header text as Unicode, including non-ASCII subjects, rather than
+  performing lossy ASCII coercion.
+
+## Typed-package distribution — PEP 561
+
+- **PEP 561, “Distributing and Packaging Type Information”**
+  (<https://peps.python.org/pep-0561/>) specifies the `py.typed` marker for
+  packages that distribute inline type information. `threadweave` ships this
+  marker and CI verifies that it is present in both wheel and source archives.
 
 ## A note on base-subject grouping
 
