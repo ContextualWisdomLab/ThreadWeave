@@ -46,6 +46,13 @@ than an ad-hoc heuristic. The primary sources are listed below.
   decoded header text as Unicode, including non-ASCII subjects, rather than
   performing lossy ASCII coercion.
 
+## Typed-package distribution — PEP 561
+
+- **PEP 561, “Distributing and Packaging Type Information”**
+  (<https://peps.python.org/pep-0561/>) specifies the `py.typed` marker for
+  packages that distribute inline type information. `threadweave` ships this
+  marker and CI verifies that it is present in both wheel and source archives.
+
 ## A note on base-subject grouping
 
 Subject grouping (step 5) is a **heuristic**, not part of the reference-based
