@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from threadweave.container import Container
-from threadweave.headers import normalize_message_id
+from threadweave.headers import extract_reference_ids, normalize_message_id
 from threadweave.subject import is_reply_subject, normalize_subject
 
 __all__ = ["Message", "thread_messages"]
@@ -45,7 +45,8 @@ class Message:
 def _effective_references(message: Message) -> list[str]:
     """Normalized, de-duplicated reference chain for ``message``.
 
-    Falls back to ``In-Reply-To`` when ``References`` is absent, per JWZ.
+    Falls back to the first valid ``In-Reply-To`` message ID when
+    ``References`` is absent, per RFC 5256's REFERENCES algorithm.
     """
     refs: list[str] = []
     seen: set[str] = set()
@@ -55,9 +56,9 @@ def _effective_references(message: Message) -> list[str]:
             seen.add(normalized)
             refs.append(normalized)
     if not refs:
-        fallback = normalize_message_id(message.in_reply_to)
+        fallback = extract_reference_ids(message.in_reply_to)
         if fallback:
-            refs.append(fallback)
+            refs.append(fallback[0])
     return refs
 
 
