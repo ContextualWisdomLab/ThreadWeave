@@ -16,6 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   equality-safe and reparenting always removes the exact child instance.
 - Accept raw `References` and `In-Reply-To` header strings, including multiple
   identifiers, in addition to already-split sequences.
+- Follow RFC 5256 when `References` is unavailable by using only the first valid
+  `In-Reply-To` identifier, and retain dummy containers as base-subject owners.
 - Accept one-shot iterables in `thread_messages`.
 - Add `message_from_email` and `thread_email_messages` adapters for Python's
   standard-library email objects while retaining each source object as payload.
