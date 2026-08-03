@@ -1,0 +1,176 @@
+name: Hourly Product Development
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Evaluate the gate and prompt without creating an agent task
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "41 * * * *"
+
+concurrency:
+  group: hourly-product-development-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  copilot-requests: write
+
+jobs:
+  dispatch-product-gap:
+    runs-on: ubuntu-latest
+    env:
+      REPOSITORY_TOKEN: ${{ github.token }}
+      AGENT_TASK_TOKEN: ${{ secrets.COPILOT_AGENT_TOKEN || secrets.COPILOT_GITHUB_TOKEN || secrets.PR_REVIEW_MERGE_TOKEN || secrets.OPENCODE_APPROVE_TOKEN }}
+      DEFAULT_BRANCH: main
+      DRY_RUN: ${{ inputs.dry_run || false }}
+    steps:
+      - name: Enforce pull-request-first single-flight gate
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          open_prs="$(
+            GH_TOKEN="$REPOSITORY_TOKEN" gh pr list \
+              --repo "$GITHUB_REPOSITORY" --state open \
+              --limit 1 --json number,url
+          )"
+          if [ "$(jq 'length' <<<"$open_prs")" -gt 0 ]; then
+            {
+              echo "dispatch=false"
+              echo "reason=open_pull_request"
+            } >>"$GITHUB_OUTPUT"
+            echo "Open pull request exists; the maintenance loop owns this hour." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # The agent-tasks REST API intentionally rejects GitHub App
+          # installation tokens, including the built-in GITHUB_TOKEN. Use a
+          # fine-grained user token with Agent tasks read/write permission.
+          if [ -z "${AGENT_TASK_TOKEN:-}" ]; then
+            {
+              echo "dispatch=false"
+              echo "reason=agent_task_token_missing"
+            } >>"$GITHUB_OUTPUT"
+            echo "No supported user token is configured for the agent-tasks API; dispatch stopped safely." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          tasks_endpoint="/agents/repos/${GITHUB_REPOSITORY}/tasks?per_page=100&state=queued,in_progress,idle,waiting_for_user"
+          if ! tasks_json="$(
+            GH_TOKEN="$AGENT_TASK_TOKEN" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "$tasks_endpoint"
+          )"; then
+            {
+              echo "dispatch=false"
+              echo "reason=task_inventory_unavailable"
+            } >>"$GITHUB_OUTPUT"
+            echo "Cloud-agent task inventory was unavailable; failing closed to avoid duplicate work." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          active_tasks="$(
+            jq '[
+              (if type == "array" then . else (.tasks // .items // []) end)[]
+              | (.state // .status // "" | ascii_downcase) as $state
+              | select(
+                  $state == "queued" or
+                  $state == "in_progress" or
+                  $state == "idle" or
+                  $state == "waiting_for_user"
+                )
+            ] | length' <<<"$tasks_json"
+          )"
+          if [ "$active_tasks" -gt 0 ]; then
+            {
+              echo "dispatch=false"
+              echo "reason=active_agent_task"
+            } >>"$GITHUB_OUTPUT"
+            echo "An agent task is already active; no duplicate task was created." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "dispatch=true"
+            echo "reason=ready"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Prepare bounded commercial-quality task
+        if: steps.gate.outputs.dispatch == 'true'
+        shell: bash
+        run: |
+          cat >"$RUNNER_TEMP/threadweave-agent-prompt.md" <<'PROMPT'
+          Continue product development for ContextualWisdomLab/ThreadWeave.
+
+          Read AGENTS.md, README.md, CHANGELOG.md, docs/research, the current source,
+          tests, open issues, and recent merged pull requests before choosing work.
+          Identify the single highest-value buyer-visible product or reliability gap
+          that can be completed as one reviewable increment. Prefer correctness,
+          standards conformance, direct mailbox-ingestion usability, deterministic
+          behavior, performance on large mailboxes, stable integration APIs, and
+          release safety over cosmetic work.
+
+          Work test-first. Reproduce the gap with a failing test, implement the
+          smallest coherent fix or feature, and preserve loop safety and deterministic
+          ordering. Keep the runtime pure standard library unless an unavoidable,
+          explicitly justified product requirement says otherwise. Maintain 100% production statement and branch coverage and complete
+          production docstrings. Update CHANGELOG.md and all user/research documentation
+          affected by the behavior. Verify lint, compileall, doctests, the full test
+          suite, coverage, package build, installed-wheel smoke tests, and
+          security-sensitive edge cases.
+
+          Respect the repository's standalone-plus-module architecture and keep public
+          APIs usable both directly and from naruon. Do not merge, publish, or bypass
+          reviews. Create exactly one bounded pull request against main with evidence,
+          standards citations when relevant, explicit residual risks, and no unrelated
+          refactoring. If a release is genuinely ready, use semantic versioning and
+          update CHANGELOG.md; otherwise leave the version unchanged.
+          PROMPT
+
+      - name: Record dry-run decision
+        if: steps.gate.outputs.dispatch == 'true' && env.DRY_RUN == 'true'
+        shell: bash
+        run: |
+          echo "Dry run: a new bounded product-development task would be created." >>"$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/threadweave-agent-prompt.md" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Create Copilot cloud-agent task
+        if: steps.gate.outputs.dispatch == 'true' && env.DRY_RUN != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          request_file="$RUNNER_TEMP/threadweave-agent-request.json"
+          jq -n \
+            --rawfile prompt "$RUNNER_TEMP/threadweave-agent-prompt.md" \
+            --arg base "$DEFAULT_BRANCH" \
+            '{
+              prompt: $prompt,
+              base_ref: $base,
+              create_pull_request: true
+            }' >"$request_file"
+
+          response="$(
+            GH_TOKEN="$AGENT_TASK_TOKEN" gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "/agents/repos/${GITHUB_REPOSITORY}/tasks" \
+              --input "$request_file"
+          )"
+
+          task_id="$(jq -r '.id // .task_id // "unknown"' <<<"$response")"
+          task_state="$(jq -r '.state // .status // "submitted"' <<<"$response")"
+          {
+            echo "Created Copilot cloud-agent task \`$task_id\`."
+            echo "Initial state: \`$task_state\`."
+            echo "The hourly PR-maintenance workflow will review, repair, revalidate, and merge its pull request."
+          } >>"$GITHUB_STEP_SUMMARY"
