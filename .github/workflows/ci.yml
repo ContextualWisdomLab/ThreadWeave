@@ -50,6 +50,7 @@ jobs:
             tests/test_autonomous_documentation.py \
             tests/test_hourly_product_guard.py \
             tests/test_hourly_product_guard_coverage.py \
+            tests/test_hourly_product_guard_return.py \
             tests/test_nim_proxy.py
           coverage report \
             --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py \
