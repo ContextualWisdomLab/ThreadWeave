@@ -1,49 +1,16 @@
 # threadweave
 
-**Standards-grounded JWZ/RFC 5256 email reference threading for Python — pure
-stdlib, zero runtime dependencies.**
+**Standards-grounded JWZ/RFC 5256 email reference threading for Python, with no
+runtime dependencies.**
 
-`threadweave` turns a flat iterable of email messages into conversation trees
-using Jamie Zawinski's container algorithm and the reference-linking semantics
-standardized by RFC 5256. It builds on RFC 5322 identification fields, RFC 2047
-encoded-word decoding, exact RFC 5256 base-subject extraction, RFC 5051
-`i;unicode-casemap` subject comparison, and opt-in RFC 5256 sent-date ordering.
+`threadweave` turns a flat iterable of messages into deterministic conversation
+trees. It combines the JWZ container model with RFC 5322 identification fields,
+RFC 2047 encoded-word decoding, RFC 5256 base-subject extraction and optional
+sent-date ordering, and RFC 5051 `i;unicode-casemap` comparison.
 
-It accepts normalized identifiers or raw header strings and integrates directly
-with Python's standard-library `email.message.Message` / `EmailMessage` objects.
-The implementation is deterministic and loop-safe even when historical or
-hostile mail contains missing roots, duplicate identifiers, malformed references,
-or cyclic graph edges.
-
-## What it does
-
-- Builds the JWZ id-table of containers and links `References` chains **without
-  creating loops** and **without overriding a message's good existing parent**.
-- Accepts raw RFC identification headers, including multiple identifiers, as
-  well as already-split sequences.
-- Uses a valid `References` chain in full; when it is unavailable, follows RFC
-  5256 by using only the **first valid** `In-Reply-To` identifier as the parent.
-- Recovers missing roots as empty placeholder containers, then prunes empty
-  containers with the RFC 5256 root-level special case.
-- Implements RFC 5256 base-subject extraction: RFC 2047 decoding, whitespace
-  normalization, `Re:`/`Fw:`/`Fwd:` leaders, mailing-list blobs, `(fwd)`
-  trailers, and `[fwd: ...]` wrappers.
-- Compares base subjects with RFC 5051 `i;unicode-casemap`: per-codepoint Unicode
-  titlecasing followed by recursive canonical and compatibility decomposition.
-  Case, canonical-composition, and compatibility-width variants therefore group
-  consistently without collapsing unrelated scripts.
-- Optionally groups root threads by base subject while preserving RFC 5256 dummy-
-  container and reply-or-forward ownership semantics. This heuristic is off by
-  default because unrelated conversations can share a subject.
-- Optionally sorts roots and every sibling set by RFC 5256 sent date. `Date` is
-  normalized to UTC, invalid zones become UTC, invalid times become midnight,
-  missing or unusable values fall back to `INTERNALDATE`, and exact ties use the
-  mailbox sequence number.
-- Threads parsed standard-library email objects without manual header mapping;
-  each source object is retained as the default payload.
-- Decodes RFC 2047 encoded words under modern and legacy parser policies,
-  recovers unknown character sets best-effort, and preserves malformed values
-  rather than aborting mailbox ingestion.
+It accepts normalized identifiers, raw header strings, or Python standard-library
+`email.message.Message` objects. Malformed historical mail, missing roots,
+duplicate identifiers, deep chains, and cyclic references terminate safely.
 
 ## Install
 
@@ -51,58 +18,37 @@ or cyclic graph edges.
 pip install threadweave
 ```
 
-The runtime uses only the Python standard library. The distribution includes a
-PEP 561 `py.typed` marker so type checkers consume the inline annotations.
+The wheel includes a PEP 561 `py.typed` marker. The runtime is pure Python
+standard library and supports Python 3.10 through 3.13.
 
-## Quickstart
+## Reference threading
 
 ```python
 from threadweave import Message, thread_messages
 
-threads = thread_messages([
-    Message(message_id="a", subject="Deploy plan"),
-    Message(
-        message_id="b",
-        references=["a"],
-        in_reply_to="a",
-        subject="Re: Deploy plan",
-    ),
-    Message(message_id="c", references=["a", "b"], subject="Re: Deploy plan"),
-])
+roots = thread_messages(
+    [
+        Message(message_id="root@example.com", subject="Deploy plan"),
+        Message(
+            message_id="reply@example.com",
+            references="<root@example.com>",
+            in_reply_to="<root@example.com>",
+            subject="Re: Deploy plan",
+        ),
+    ]
+)
 
-assert len(threads) == 1
-root = threads[0]
-assert root.message.message_id == "a"
-assert [node.message.message_id for node in root.iter_descendants()] == ["b", "c"]
+assert len(roots) == 1
+assert roots[0].message.message_id == "root@example.com"
+assert [
+    node.message.message_id for node in roots[0].iter_descendants()
+] == ["reply@example.com"]
 ```
 
-Raw RFC header strings work directly:
+A valid `References` chain is used in full. When it is unavailable, only the
+first valid `In-Reply-To` identifier becomes the parent, as required by RFC 5256.
 
-```python
-thread_messages([
-    Message(message_id="a@example.com"),
-    Message(
-        message_id="b@example.com",
-        references="<a@example.com>",
-        in_reply_to="<a@example.com>",
-    ),
-])
-```
-
-When `References` is unavailable, only the first valid `In-Reply-To` identifier
-is used. Ambiguous trailing values never become a fabricated ancestry chain:
-
-```python
-thread_messages([
-    Message(message_id="root@example.com"),
-    Message(
-        message_id="child@example.com",
-        in_reply_to="<root@example.com> sender@example.net",
-    ),
-])
-```
-
-For parsed email messages, use the standard-library adapter:
+## Standard-library email adapter
 
 ```python
 from email import policy
@@ -110,45 +56,55 @@ from email.parser import BytesParser
 
 from threadweave import thread_email_messages
 
-parsed_messages = [
+messages = [
     BytesParser(policy=policy.default).parsebytes(raw_message)
     for raw_message in raw_messages
 ]
-threads = thread_email_messages(parsed_messages)
+roots = thread_email_messages(messages)
 
-assert threads[0].message.payload is parsed_messages[0]
+# Each parsed source object remains available to the caller.
+assert roots[0].message.payload is messages[0]
 ```
 
-Extract and compare standardized subjects directly:
+The adapter decodes RFC 2047 words under modern and legacy parser policies,
+preserves Unicode header text, tolerates unknown character-set labels, and keeps
+malformed values instead of aborting the mailbox ingest.
+
+## Subject fallback
+
+Subject grouping is optional because unrelated conversations can legitimately
+share a subject.
 
 ```python
 from threadweave import (
     is_reply_or_forward_subject,
     normalize_subject,
+    thread_messages,
     unicode_casemap_key,
 )
 
-subject = "[project] Re: [fwd: Release plan (fwd)]"
-assert normalize_subject(subject) == "Release plan"
-assert is_reply_or_forward_subject(subject)
-
+assert normalize_subject("[project] Re: [fwd: Release plan (fwd)]") == (
+    "Release plan"
+)
+assert is_reply_or_forward_subject("Fwd: Release plan")
 assert unicode_casemap_key("Ｔｏｐｉｃ") == unicode_casemap_key("Topic")
 assert unicode_casemap_key("é") == unicode_casemap_key("e\u0301")
+
+roots = thread_messages(messages, group_by_subject=True)
 ```
 
-Enable subject fallback only when reference headers are insufficient:
+The RFC 5051 key remains locale-independent and does not collapse visual
+confusables from unrelated scripts.
 
-```python
-threads = thread_messages(messages, group_by_subject=True)
-```
+## RFC 5256 sent-date ordering
 
-Enable RFC 5256 sent-date ordering explicitly. The default remains input order so
-existing integrations do not change behavior silently:
+The historical default remains first-appearance order. Enable RFC ordering
+explicitly when mailbox metadata is available:
 
 ```python
 from threadweave import Message, thread_messages
 
-threads = thread_messages(
+roots = thread_messages(
     [
         Message(
             message_id="later@example.com",
@@ -165,108 +121,99 @@ threads = thread_messages(
     sort_by_sent_date=True,
 )
 
-assert [root.message.message_id for root in threads] == [
+assert [root.message.message_id for root in roots] == [
     "earlier@example.com",
     "later@example.com",
 ]
 ```
 
-`thread_email_messages(..., sort_by_sent_date=True)` reads each message's `Date`
-header and uses one-based iterable order as its sequence number. IMAP clients that
-have a server-provided `INTERNALDATE` can call `message_from_email` first and pass
-that metadata explicitly.
+`Date` is normalized to UTC. Invalid or absent zones become UTC, invalid times
+become local midnight, unusable values fall back to `INTERNALDATE`, and exact
+ties use a unique positive mailbox sequence number. Dummy roots and every
+sibling set are sorted in the RFC-defined stages.
 
-## API
+## Public API
 
 | Symbol | Purpose |
 |---|---|
-| `Message` | Input dataclass: identification headers, subject, payload, `sent_date`, `internal_date`, and `sequence_number`. |
-| `thread_messages(messages, *, group_by_subject=False, sort_by_sent_date=False)` | Run the JWZ/RFC 5256 core over any iterable. |
-| `message_from_email(message, *, payload=..., internal_date=None, sequence_number=None)` | Convert a stdlib email message and retain mailbox ordering metadata. |
-| `thread_email_messages(messages, *, group_by_subject=False, sort_by_sent_date=False)` | Thread stdlib email messages directly. |
-| `Container` | Loop-safe thread-tree node with parent, children, and deterministic traversal. |
-| `DateValue` | Accepted date input: `datetime`, RFC-style string, or `None`. |
-| `normalize_sent_date` | Normalize `Date`/`INTERNALDATE` to an aware UTC ordering value. |
-| `decode_header_text` | Tolerant RFC 2047 encoded-word decoder. |
-| `normalize_message_id` / `extract_reference_ids` | RFC 5322 identification-field parsing. |
-| `generate_email_fingerprint` | Deterministic SHA-256 identity fallback. |
-| `normalize_subject` | Exact RFC 5256 base-subject extraction. |
-| `is_reply_or_forward_subject` | RFC 5256 reply-or-forward classification. |
-| `is_reply_subject` | Compatibility alias for the standardized classification. |
-| `unicode_casemap_key` | RFC 5051 `i;unicode-casemap` preparation key. |
+| `Message` | Thread input plus payload and optional mailbox ordering metadata. |
+| `Container` | Identity-based, loop-safe thread-tree node. |
+| `thread_messages(...)` | Build JWZ/RFC 5256 thread roots from any iterable. |
+| `message_from_email(...)` | Convert one stdlib email object. |
+| `thread_email_messages(...)` | Convert and thread stdlib email objects. |
+| `normalize_message_id` | Normalize one RFC 5322 identifier. |
+| `extract_reference_ids` | Parse and deduplicate a reference header. |
+| `generate_email_fingerprint` | Produce a deterministic SHA-256 identity fallback. |
+| `decode_header_text` | Decode RFC 2047 header text defensively. |
+| `normalize_subject` | Extract the RFC 5256 base subject. |
+| `is_reply_or_forward_subject` | Classify RFC reply/forward artifacts. |
+| `is_reply_subject` | Compatibility alias for the standardized classifier. |
+| `unicode_casemap_key` | Prepare an RFC 5051 comparison key. |
+| `DateValue` | Accepted date input: `datetime`, RFC-style text, or `None`. |
+| `normalize_sent_date` | Normalize `Date` and `INTERNALDATE` to aware UTC. |
 
-## Quality guarantees
+## Quality contract
 
-- CI runs on Python 3.10, 3.11, 3.12, and 3.13.
-- Production statement and branch coverage are both required to remain at
-  **100%**.
-- Every authored production module, class, method, property, and function must
-  have a docstring.
-- CI compiles source and tests, runs doctests, validates dependency consistency,
-  builds wheel and source distributions, verifies `py.typed`, and smoke-tests the
-  installed wheel outside the source tree.
-- Runtime dependencies remain zero.
-
-## Date, Unicode, and security boundaries
-
-`normalize_sent_date` accepts decoded RFC-style text or a `datetime`. A naive
-`datetime` and a date with an invalid zone are treated as UTC; an invalid time is
-treated as local midnight. An unusable `Date` falls back to `INTERNALDATE`, then
-to the earliest representable UTC instant. Explicit sequence numbers must be
-unique positive integers. This rejects contradictory mailbox metadata rather
-than producing an unstable ordering.
-
-`unicode_casemap_key` uses the Unicode Character Database bundled with the
-running Python version. RFC 5051 permits implementations based on different
-Unicode revisions to vary when newly assigned characters gain titlecase or
-decomposition properties. The collation is locale-independent and deliberately
-does not treat visual confusables as equal: Latin `A`, Greek `Α`, and Cyrillic
-`А` remain different keys.
-
-Raw and legacy encoded headers should enter through `decode_header_text` or the
-stdlib email adapter before subject comparison.
-
-## Standards boundary
-
-Reference linking, dummy-container ownership, base-subject extraction, subject
-comparison, and optional sent-date sibling ordering follow RFC 5256 and RFC
-5051. Subject grouping remains a caller-selected heuristic because distinct
-conversations can legitimately share one base subject.
-
-The remaining IMAP presentation boundary is `THREAD` response serialization,
-including sequence-number/UID rendering and search-result projection. The core
-returns transport-neutral `Container` trees so standalone Python callers and
-naruon can consume the same result without an IMAP dependency.
+- Production statement and branch coverage are required to remain at **100%**.
+- Every authored production module and callable must have a docstring.
+- CI runs Ruff, compileall, doctests, pytest with coverage, and dependency checks
+  on Python 3.10, 3.11, 3.12, and 3.13.
+- CI builds wheel and source distributions, verifies `py.typed`, installs the
+  wheel outside the source tree, and executes a smoke test.
+- Graph operations are iterative and identity-guarded; deep or cyclic malformed
+  input cannot recurse indefinitely.
 
 ## Autonomous maintenance
 
-Two staggered scheduled workflows keep development single-flight and review-
-first:
+Two staggered workflows keep development review-first and single-flight.
 
-- At minute 11 each hour, `hourly-pr-maintenance.yml` invokes the organization-
-  governed review-fix and merge schedulers from `ContextualWisdomLab/.github`.
-- At minute 41 each hour, `hourly-product-development.yml` runs one bounded
-  in-workflow OpenCode agent session against NVIDIA NIM only when there is no
-  open pull request, then packages the working tree as exactly one pull
-  request. The workflow's concurrency group keeps runs single-flight.
+At minute 11 of every hour, `hourly-pr-maintenance.yml` calls the organization
+workflows in `ContextualWisdomLab/.github` to inspect reviews, dispatch bounded
+fixes, revalidate the exact head, update branches, and merge only when policy is
+satisfied.
 
-The agent authenticates with the `NVIDIA_NIM_API_KEY` organization secret;
-no Copilot subscription or fine-grained user token is required. Without the
-secret, the workflow records the prerequisite and exits without mutation.
-Both workflows provide a manual `dry_run` input.
+At minute 41, `hourly-product-development.yml` runs only when the PR queue is
+empty. Its trust boundary is deliberately split across fresh GitHub-hosted jobs:
 
-## One source, multi use
+1. A disposable, `.git`-free workspace runs OpenCode through NVIDIA NIM as UID
+   65532 with an empty environment except for the scoped NIM credential.
+2. `scripts/ci/hourly_product_guard.py` accepts only bounded text changes under
+   `src/threadweave/`, `tests/`, `docs/`, `README.md`, and `CHANGELOG.md`.
+   Workflow, policy, dependency, release, deletion, link, binary, mode, size, and
+   secret-leak changes fail closed.
+3. Only the sealed patch, digest, path inventory, and sanitized PR metadata cross
+   the job boundary. A fresh credential-free job reapplies and independently
+   verifies that exact patch.
+4. A separate publisher job starts from a fresh `main`, rechecks that no PR or
+   base movement occurred, reapplies the same digest, and opens one PR. The model
+   runner never shares a process, filesystem, Git hook, or GitHub credential with
+   publication.
 
-The RFC 5322 header primitives in `src/threadweave/headers.py` were extracted
-behaviour-preserving from the naruon control plane. The assembly, subject,
-collation, and date layers are standalone APIs but remain suitable for import
-into naruon or another service module.
+Configure these organization or repository secrets:
 
-## Research grounding
+- `NVIDIA_NIM_API_KEY`: scoped and rotatable model credential.
+- `PR_REVIEW_MERGE_TOKEN` or `OPENCODE_APPROVE_TOKEN`: fine-grained PAT or GitHub
+  App token used only by the fresh publisher job.
 
-See [`docs/research`](docs/research/README.md) for JWZ, RFC 5256, RFC 5051, RFC
-5322, RFC 2047, RFC 6532, sent-date recovery rules, Unicode-version caveats, and
-PEP 561.
+The external automation token is intentional. GitHub documents that a pull
+request created with the repository `GITHUB_TOKEN` leaves its workflow runs
+awaiting approval; a GitHub App token or personal access token lets the required
+PR workflows start without that manual gate. The product-development agent never
+merges, tags, or publishes a release.
+
+Both workflows expose a manual `dry_run` input. Missing credentials, an open PR,
+a moved base, a changed patch digest, or an unavailable safe proposal stops the
+cycle without mutation.
+
+## Architecture and standards boundary
+
+The package remains useful both as a standalone dependency and as a module in
+`naruon` or another service. The threading, subject, collation, and date layers
+are transport-neutral. IMAP `THREAD` response serialization remains a separate
+presentation layer rather than leaking protocol state into the core model.
+
+See [`docs/research`](docs/research/README.md) for JWZ, RFC 5322, RFC 2047,
+RFC 5051, RFC 5256, RFC 6532, Unicode-version boundaries, and PEP 561.
 
 ## License
 
