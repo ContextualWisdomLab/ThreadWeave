@@ -1,4 +1,11 @@
-"""Validate and materialize deterministic ThreadWeave release evidence."""
+"""Validate and prepare deterministic evidence for ThreadWeave releases.
+
+The release workflow treats the checked-out source and built distributions as
+untrusted until project metadata, package metadata, changelog notes, filenames,
+and cryptographic digests agree on one canonical final version.  This module is
+standard-library only so it can run after the repository's reviewed CI lock is
+installed without adding runtime dependencies to ThreadWeave.
+"""
 
 from __future__ import annotations
 
@@ -7,31 +14,33 @@ import ast
 import hashlib
 import json
 import re
+import stat
 import sys
-import tomllib
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
-from typing import Any
 
-_VERSION_PATTERN = re.compile(
+_CANONICAL_VERSION = re.compile(
     r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 )
-_RELEASE_HEADING = re.compile(
-    r"^## \[(?P<version>[^]]+)] - (?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})$",
-    re.MULTILINE,
+_PROJECT_SECTION = re.compile(r"^\s*\[project\]\s*(?:#.*)?$")
+_SECTION = re.compile(r"^\s*\[[^\]]+\]\s*(?:#.*)?$")
+_VERSION_ASSIGNMENT = re.compile(
+    r"^\s*version\s*=\s*(?P<quote>['\"])(?P<value>[^'\"]+)(?P=quote)\s*(?:#.*)?$"
 )
-_LEVEL_TWO_HEADING = re.compile(r"^## .+$", re.MULTILINE)
-_PLACEHOLDER = re.compile(r"\b(?:TODO|TBD|UNRELEASED)\b", re.IGNORECASE)
+_PLACEHOLDER = re.compile(r"\b(?:TODO|TBD|Unreleased)\b", re.IGNORECASE)
+_PROJECT_NAME = "threadweave"
+_LICENSE_EXPRESSION = "Apache-2.0"
 
 
 class ReleaseContractError(RuntimeError):
-    """Raised when reviewed source cannot produce one unambiguous release."""
+    """Raised when source, artifacts, or release evidence fail closed."""
 
 
 @dataclass(frozen=True, slots=True)
 class ReleaseContract:
-    """Synchronized release metadata extracted from reviewed source."""
+    """Synchronized source metadata for one canonical final release."""
 
     version: str
     tag: str
@@ -41,177 +50,244 @@ class ReleaseContract:
 
 @dataclass(frozen=True, slots=True)
 class ReleaseEvidence:
-    """Paths and metadata for one deterministic release evidence bundle."""
+    """Paths to deterministic evidence generated for a validated release."""
 
     contract: ReleaseContract
     notes_path: Path
     checksums_path: Path
     sbom_path: Path
-    artifacts: tuple[Path, ...]
 
 
-def _canonical_version(value: str) -> str:
-    """Return one canonical three-part final version or fail closed."""
-    if _VERSION_PATTERN.fullmatch(value) is None:
+def _read_text(path: Path, label: str) -> str:
+    """Read strict UTF-8 text or raise a release-specific error."""
+
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ReleaseContractError(f"could not read {label}: {path}") from exc
+
+
+def _read_project_version(path: Path) -> str:
+    """Return the one literal ``[project].version`` value from ``pyproject.toml``."""
+
+    in_project = False
+    versions: list[str] = []
+    for line in _read_text(path, "project metadata").splitlines():
+        if _PROJECT_SECTION.fullmatch(line):
+            in_project = True
+            continue
+        if _SECTION.fullmatch(line):
+            in_project = False
+            continue
+        if not in_project:
+            continue
+        match = _VERSION_ASSIGNMENT.fullmatch(line)
+        if match is not None:
+            versions.append(match.group("value"))
+    if len(versions) != 1:
         raise ReleaseContractError(
-            "version must be a canonical three-part final release such as 0.2.0"
+            "project metadata must contain exactly one literal [project].version"
         )
-    return value
+    return versions[0]
 
 
-def _project_version(root: Path) -> str:
-    """Read the static PEP 621 project version from ``pyproject.toml``."""
-    path = root / "pyproject.toml"
+def _read_package_version(path: Path) -> str:
+    """Return one top-level literal ``__version__`` assignment from the package."""
+
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-        value = data["project"]["version"]
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError, KeyError, TypeError) as exc:
-        raise ReleaseContractError(
-            "pyproject.toml has no readable project version"
-        ) from exc
-    if not isinstance(value, str):
-        raise ReleaseContractError("pyproject.toml project version must be text")
-    return _canonical_version(value)
+        module = ast.parse(_read_text(path, "package metadata"), filename=str(path))
+    except SyntaxError as exc:
+        raise ReleaseContractError("package metadata is not valid Python") from exc
 
-
-def _package_version(root: Path) -> str:
-    """Read exactly one literal ``__version__`` assignment without importing code."""
-    path = root / "src/threadweave/__init__.py"
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    except (OSError, UnicodeError, SyntaxError) as exc:
-        raise ReleaseContractError(
-            "package __version__ source is not readable Python"
-        ) from exc
-
-    values: list[ast.expr] = []
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "__version__"
-            for target in node.targets
-        ):
-            values.append(node.value)
+    assignments: list[ast.expr] = []
+    for statement in module.body:
+        if isinstance(statement, ast.Assign):
+            version_target = any(
+                isinstance(target, ast.Name) and target.id == "__version__"
+                for target in statement.targets
+            )
+            if version_target:
+                assignments.append(statement.value)
         elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.target.id == "__version__"
-            and node.value is not None
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.target.id == "__version__"
+            and statement.value is not None
         ):
-            values.append(node.value)
-    if len(values) != 1:
+            assignments.append(statement.value)
+    if not assignments:
+        raise ReleaseContractError("package metadata has no __version__ assignment")
+    if len(assignments) != 1:
         raise ReleaseContractError(
-            "package must contain exactly one __version__ assignment"
+            "package metadata must contain exactly one __version__ assignment"
         )
-    value = values[0]
+    value = assignments[0]
     if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
         raise ReleaseContractError("package __version__ must be one string literal")
-    return _canonical_version(value.value)
+    return value.value
 
 
-def _changelog_release(root: Path, version: str) -> tuple[str, str]:
-    """Return the unique release date and material notes for ``version``."""
-    path = root / "CHANGELOG.md"
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise ReleaseContractError("CHANGELOG.md is not readable UTF-8") from exc
+def _read_changelog(path: Path, version: str) -> tuple[str, str]:
+    """Return the ISO date and material notes for one unique release section."""
 
-    matches = [
-        match
-        for match in _RELEASE_HEADING.finditer(text)
-        if match["version"] == version
-    ]
+    text = _read_text(path, "changelog")
+    header = re.compile(
+        rf"^## \[{re.escape(version)}\] - (?P<date>[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}})\s*$",
+        re.MULTILINE,
+    )
+    matches = list(header.finditer(text))
     if not matches:
-        raise ReleaseContractError(
-            f"CHANGELOG.md has no release section for {version}"
-        )
+        raise ReleaseContractError(f"changelog has no release section for {version}")
     if len(matches) != 1:
         raise ReleaseContractError(
-            f"CHANGELOG.md must contain exactly one release section for {version}"
+            f"changelog must contain exactly one release section for {version}"
         )
     match = matches[0]
-    next_heading = _LEVEL_TWO_HEADING.search(text, match.end())
-    end = len(text) if next_heading is None else next_heading.start()
+    release_date = match.group("date")
+    try:
+        date.fromisoformat(release_date)
+    except ValueError as exc:
+        raise ReleaseContractError("changelog release date is not a valid ISO date") from exc
+
+    following = re.search(r"^## ", text[match.end() :], re.MULTILINE)
+    end = match.end() + following.start() if following is not None else len(text)
     notes = text[match.end() : end].strip()
     if not notes:
-        raise ReleaseContractError("release notes are empty")
-    if _PLACEHOLDER.search(notes) is not None:
-        raise ReleaseContractError("release notes contain a placeholder")
-    return match["date"], notes
+        raise ReleaseContractError("changelog release notes are empty")
+    if _PLACEHOLDER.search(notes):
+        raise ReleaseContractError("changelog release notes contain a placeholder")
+    return release_date, notes
 
 
 def validate_release(root: Path, requested_version: str) -> ReleaseContract:
-    """Validate source metadata and return one synchronized release contract."""
-    version = _canonical_version(requested_version)
-    project_version = _project_version(root)
-    package_version = _package_version(root)
+    """Validate source metadata and return one immutable release contract."""
+
+    if _CANONICAL_VERSION.fullmatch(requested_version) is None:
+        raise ReleaseContractError(
+            "requested version must be a canonical three-part final version"
+        )
+    project_version = _read_project_version(root / "pyproject.toml")
+    package_version = _read_package_version(root / "src/threadweave/__init__.py")
     if project_version != package_version:
         raise ReleaseContractError("project and package version metadata disagrees")
-    if version != project_version:
+    if requested_version != project_version:
         raise ReleaseContractError(
-            "requested version does not match reviewed project metadata"
+            "requested version does not match the reviewed project version"
         )
-    release_date, notes = _changelog_release(root, version)
+    release_date, notes = _read_changelog(root / "CHANGELOG.md", requested_version)
     return ReleaseContract(
-        version=version,
-        tag=f"v{version}",
+        version=requested_version,
+        tag=f"v{requested_version}",
         release_date=release_date,
         notes=notes,
     )
 
 
-def _release_artifacts(dist_dir: Path, version: str) -> tuple[Path, Path]:
-    """Return exactly one wheel and one sdist for the reviewed version."""
-    try:
-        files = [path for path in dist_dir.iterdir() if path.is_file()]
-    except OSError as exc:
-        raise ReleaseContractError("distribution directory is not readable") from exc
-    wheels = sorted(
-        path
-        for path in files
-        if path.name.startswith(f"threadweave-{version}-") and path.suffix == ".whl"
-    )
-    if len(wheels) > 1:
-        raise ReleaseContractError("release requires exactly one wheel")
-    sdists = sorted(
-        path for path in files if path.name == f"threadweave-{version}.tar.gz"
-    )
-    if len(sdists) > 1:
-        raise ReleaseContractError("release requires exactly one source distribution")
-    if len(wheels) != 1 or len(sdists) != 1:
+def _artifact_digests(path: Path) -> tuple[str, str]:
+    """Return SPDX-required SHA-1 and security-grade SHA-256 file digests."""
+
+    # SPDX 2.3 requires one SHA-1 file checksum. ``usedforsecurity=False``
+    # makes explicit that SHA-1 is emitted only for standards interoperability;
+    # SHA-256 remains the release-integrity digest.
+    sha1 = hashlib.new("sha1", usedforsecurity=False)
+    sha256 = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            sha1.update(chunk)
+            sha256.update(chunk)
+    return sha1.hexdigest(), sha256.hexdigest()
+
+
+def _release_artifacts(dist_dir: Path, version: str) -> list[tuple[Path, str, str]]:
+    """Return exactly one reviewed wheel and one reviewed source archive."""
+
+    if dist_dir.is_symlink() or not dist_dir.is_dir():
         raise ReleaseContractError(
-            "distribution files do not match the reviewed version"
+            f"distribution directory must be one real directory: {dist_dir}"
         )
-    return wheels[0], sdists[0]
-
-
-def _sha256(path: Path) -> str:
-    """Return the SHA-256 digest of one release artifact."""
-    digest = hashlib.sha256()
     try:
-        with path.open("rb") as stream:
-            for block in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(block)
+        candidates = sorted(dist_dir.iterdir(), key=lambda path: path.name)
     except OSError as exc:
         raise ReleaseContractError(
-            f"cannot read release artifact: {path.name}"
+            f"could not inspect distribution directory: {dist_dir}"
         ) from exc
-    return digest.hexdigest()
+
+    wheels = [path for path in candidates if path.name.endswith(".whl")]
+    source_archives = [path for path in candidates if path.name.endswith(".tar.gz")]
+    if len(wheels) != 1:
+        raise ReleaseContractError("distribution directory must contain exactly one wheel")
+    if len(source_archives) != 1:
+        raise ReleaseContractError(
+            "distribution directory must contain exactly one source archive"
+        )
+
+    wheel = wheels[0]
+    source_archive = source_archives[0]
+    expected_wheel = re.compile(
+        rf"threadweave-{re.escape(version)}-[A-Za-z0-9_.-]+\.whl"
+    )
+    if expected_wheel.fullmatch(wheel.name) is None or source_archive.name != (
+        f"threadweave-{version}.tar.gz"
+    ):
+        raise ReleaseContractError(
+            "distribution filenames do not match the reviewed version"
+        )
+
+    results: list[tuple[Path, str, str]] = []
+    for artifact in (wheel, source_archive):
+        try:
+            metadata = artifact.lstat()
+        except OSError as exc:
+            raise ReleaseContractError(
+                f"could not inspect release artifact: {artifact}"
+            ) from exc
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ReleaseContractError(
+                f"release artifact must be one regular non-linked file: {artifact.name}"
+            )
+        sha1, sha256 = _artifact_digests(artifact)
+        results.append((artifact, sha1, sha256))
+    return sorted(results, key=lambda item: item[0].name)
+
+
+def _package_verification_code(artifacts: list[tuple[Path, str, str]]) -> str:
+    """Return the SPDX 2.3 package verification code for release files."""
+
+    concatenated_sha1 = "".join(sorted(sha1 for _path, sha1, _sha256 in artifacts))
+    verifier = hashlib.new(
+        "sha1",
+        concatenated_sha1.encode("ascii"),
+        usedforsecurity=False,
+    )
+    return verifier.hexdigest()
 
 
 def _spdx_document(
     contract: ReleaseContract,
-    artifacts: tuple[Path, ...],
-    digests: dict[str, str],
-) -> dict[str, Any]:
-    """Build a deterministic SPDX 2.3 document for ThreadWeave distributions."""
-    namespace_seed = "\n".join(
-        [contract.version, contract.release_date]
-        + [f"{artifact.name}:{digests[artifact.name]}" for artifact in artifacts]
+    artifacts: list[tuple[Path, str, str]],
+) -> dict[str, object]:
+    """Return a deterministic, schema-conformant SPDX 2.3 release document."""
+
+    package_id = "SPDXRef-Package-ThreadWeave"
+    manifest = "\n".join(
+        f"{path.name}:{sha256}" for path, _sha1, sha256 in artifacts
     )
-    namespace_digest = hashlib.sha256(namespace_seed.encode("utf-8")).hexdigest()
-    package_id = "SPDXRef-Package-threadweave"
-    files: list[dict[str, Any]] = []
+    namespace_digest = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
+    files = [
+        {
+            "SPDXID": f"SPDXRef-File-{index}",
+            "checksums": [
+                {"algorithm": "SHA1", "checksumValue": sha1},
+                {"algorithm": "SHA256", "checksumValue": sha256},
+            ],
+            "copyrightText": "NOASSERTION",
+            "fileName": f"dist/{path.name}",
+            "fileTypes": ["ARCHIVE"],
+            "licenseConcluded": _LICENSE_EXPRESSION,
+        }
+        for index, (path, sha1, sha256) in enumerate(artifacts, start=1)
+    ]
+    file_ids = [str(item["SPDXID"]) for item in files]
     relationships: list[dict[str, str]] = [
         {
             "spdxElementId": "SPDXRef-DOCUMENT",
@@ -219,83 +295,76 @@ def _spdx_document(
             "relatedSpdxElement": package_id,
         }
     ]
-    for index, artifact in enumerate(artifacts, start=1):
-        file_id = f"SPDXRef-File-{index}"
-        files.append(
-            {
-                "SPDXID": file_id,
-                "fileName": f"dist/{artifact.name}",
-                "checksums": [
-                    {
-                        "algorithm": "SHA256",
-                        "checksumValue": digests[artifact.name],
-                    }
-                ],
-                "licenseConcluded": "Apache-2.0",
-                "copyrightText": "NOASSERTION",
-            }
-        )
-        relationships.append(
-            {
-                "spdxElementId": package_id,
-                "relationshipType": "CONTAINS",
-                "relatedSpdxElement": file_id,
-            }
-        )
+    relationships.extend(
+        {
+            "spdxElementId": package_id,
+            "relationshipType": "CONTAINS",
+            "relatedSpdxElement": file_id,
+        }
+        for file_id in file_ids
+    )
     return {
-        "spdxVersion": "SPDX-2.3",
-        "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
-        "name": f"threadweave-{contract.version}-release",
-        "documentNamespace": (
-            "https://spdx.org/spdxdocs/"
-            f"threadweave-{contract.version}-{namespace_digest}"
-        ),
         "creationInfo": {
             "created": f"{contract.release_date}T00:00:00Z",
-            "creators": ["Organization: Contextual Wisdom Lab"],
-            "licenseListVersion": "3.25",
+            "creators": [
+                "Organization: Contextual Wisdom Lab",
+                "Tool: ThreadWeave-release-contract",
+            ],
         },
+        "dataLicense": "CC0-1.0",
+        "documentDescribes": [package_id],
+        "documentNamespace": (
+            "https://github.com/ContextualWisdomLab/ThreadWeave/spdxdocs/"
+            f"{contract.tag}/{namespace_digest}"
+        ),
+        "files": files,
+        "name": f"threadweave-{contract.version}-release",
         "packages": [
             {
                 "SPDXID": package_id,
-                "name": "threadweave",
-                "versionInfo": contract.version,
-                "downloadLocation": "NOASSERTION",
-                "filesAnalyzed": True,
-                "licenseConcluded": "Apache-2.0",
-                "licenseDeclared": "Apache-2.0",
                 "copyrightText": "NOASSERTION",
+                "downloadLocation": (
+                    f"https://pypi.org/project/threadweave/{contract.version}/"
+                ),
                 "externalRefs": [
                     {
                         "referenceCategory": "PACKAGE-MANAGER",
+                        "referenceLocator": f"pkg:pypi/threadweave@{contract.version}",
                         "referenceType": "purl",
-                        "referenceLocator": (
-                            f"pkg:pypi/threadweave@{contract.version}"
-                        ),
                     }
                 ],
+                "filesAnalyzed": True,
+                "hasFiles": file_ids,
+                "licenseConcluded": _LICENSE_EXPRESSION,
+                "licenseDeclared": _LICENSE_EXPRESSION,
+                "licenseInfoFromFiles": [_LICENSE_EXPRESSION],
+                "name": _PROJECT_NAME,
+                "packageVerificationCode": {
+                    "packageVerificationCodeValue": _package_verification_code(
+                        artifacts
+                    )
+                },
+                "primaryPackagePurpose": "LIBRARY",
+                "supplier": "Organization: Contextual Wisdom Lab",
+                "versionInfo": contract.version,
             }
         ],
-        "files": files,
         "relationships": relationships,
+        "spdxVersion": "SPDX-2.3",
     }
 
 
-def _require_empty_output(output_dir: Path) -> None:
-    """Create an empty output directory or reject stale evidence."""
-    try:
-        if output_dir.exists():
-            if not output_dir.is_dir() or any(output_dir.iterdir()):
-                raise ReleaseContractError(
-                    "release output directory must be empty"
-                )
-        else:
-            output_dir.mkdir(parents=True)
-    except OSError as exc:
-        raise ReleaseContractError(
-            "release output directory is not usable"
-        ) from exc
+def _prepare_output_directory(output_dir: Path) -> None:
+    """Create an empty evidence directory without following symbolic links."""
+
+    if output_dir.is_symlink():
+        raise ReleaseContractError("release output directory must not be a symbolic link")
+    if output_dir.exists():
+        if not output_dir.is_dir() or any(output_dir.iterdir()):
+            raise ReleaseContractError("release output directory must be absent or empty")
+    else:
+        output_dir.mkdir(parents=True)
 
 
 def prepare_release(
@@ -304,73 +373,53 @@ def prepare_release(
     dist_dir: Path,
     output_dir: Path,
 ) -> ReleaseEvidence:
-    """Validate and write release notes, checksums, and an SPDX 2.3 SBOM."""
-    contract = validate_release(root, version)
-    wheel, sdist = _release_artifacts(dist_dir, contract.version)
-    artifacts = tuple(sorted((wheel, sdist), key=lambda path: path.name))
-    digests = {artifact.name: _sha256(artifact) for artifact in artifacts}
-    _require_empty_output(output_dir)
+    """Validate a release and write deterministic notes, checksums, and SPDX JSON."""
 
-    notes_path = output_dir / "RELEASE_NOTES.md"
+    contract = validate_release(root.resolve(), version)
+    artifacts = _release_artifacts(dist_dir, version)
+    _prepare_output_directory(output_dir)
+
+    notes_path = output_dir / "release-notes.md"
     checksums_path = output_dir / "SHA256SUMS.txt"
-    sbom_path = output_dir / f"threadweave-{contract.version}.spdx.json"
-    try:
-        notes_path.write_text(contract.notes + "\n", encoding="utf-8")
-        checksums_path.write_text(
-            "".join(
-                f"{digests[path.name]}  {path.name}\n" for path in artifacts
-            ),
-            encoding="utf-8",
-        )
-        sbom_path.write_text(
-            json.dumps(
-                _spdx_document(contract, artifacts, digests),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        raise ReleaseContractError(
-            "release evidence could not be written"
-        ) from exc
+    sbom_path = output_dir / f"threadweave-{version}.spdx.json"
+    notes_path.write_text(contract.notes + "\n", encoding="utf-8")
+    checksums_path.write_text(
+        "".join(
+            f"{sha256}  {path.name}\n"
+            for path, _sha1, sha256 in artifacts
+        ),
+        encoding="utf-8",
+    )
+    sbom_path.write_text(
+        json.dumps(_spdx_document(contract, artifacts), indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
     return ReleaseEvidence(
         contract=contract,
         notes_path=notes_path,
         checksums_path=checksums_path,
         sbom_path=sbom_path,
-        artifacts=artifacts,
     )
 
 
-def _write_outputs(path: Path | None, evidence: ReleaseEvidence) -> None:
-    """Append bounded scalar outputs for downstream GitHub Actions jobs."""
+def _write_github_outputs(path: Path | None, evidence: ReleaseEvidence) -> None:
+    """Append bounded scalar release outputs for later workflow jobs."""
+
     if path is None:
         return
-    contract = evidence.contract
     values = {
-        "version": contract.version,
-        "tag": contract.tag,
-        "release_date": contract.release_date,
-        "notes_path": str(evidence.notes_path),
-        "checksums_path": str(evidence.checksums_path),
-        "sbom_path": str(evidence.sbom_path),
+        "version": evidence.contract.version,
+        "tag": evidence.contract.tag,
+        "release_date": evidence.contract.release_date,
     }
-    try:
-        with path.open("a", encoding="utf-8") as stream:
-            stream.writelines(
-                f"{key}={value}\n" for key, value in values.items()
-            )
-    except OSError as exc:
-        raise ReleaseContractError(
-            "GitHub output file is not writable"
-        ) from exc
+    with path.open("a", encoding="utf-8") as stream:
+        stream.writelines(f"{key}={value}\n" for key, value in values.items())
 
 
 def _parser() -> argparse.ArgumentParser:
-    """Build the command-line interface for trusted release jobs."""
+    """Build the command-line parser for release preparation."""
+
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     prepare = subparsers.add_parser("prepare")
@@ -383,24 +432,18 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the release contract CLI and convert contract failures to exit 2."""
+    """Prepare release evidence, returning exit code 2 for contract failures."""
+
     args = _parser().parse_args(argv)
     try:
         evidence = prepare_release(
-            args.root.resolve(),
+            args.root,
             args.version,
-            args.dist_dir.resolve(),
-            args.output_dir.resolve(),
+            args.dist_dir,
+            args.output_dir,
         )
-        _write_outputs(
-            (
-                args.github_output.resolve()
-                if args.github_output is not None
-                else None
-            ),
-            evidence,
-        )
-    except ReleaseContractError as exc:
+        _write_github_outputs(args.github_output, evidence)
+    except (ReleaseContractError, OSError) as exc:
         print(f"release contract: {exc}", file=sys.stderr)
         return 2
     return 0
