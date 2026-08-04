@@ -1,4 +1,4 @@
-# Temporary trusted finalizer. It deletes itself after the verified push commit.
+# Temporary trusted finalizer, retry 2. It deletes itself after the verified push commit.
 name: Finalize hash-lock migration
 
 on:
