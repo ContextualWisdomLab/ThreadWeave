@@ -51,6 +51,23 @@ def test_product_development_brokers_nim_outside_the_model_process():
     assert "/agents/repos" not in workflow
 
 
+def test_product_development_pauses_while_a_release_blocker_is_open():
+    """A release freeze prevents autonomous product drift before publication."""
+    workflow = _workflow("hourly-product-development.yml")
+    gate = workflow.split("      - name: Enforce the credential and pull-request-first gate", 1)[
+        1
+    ].split(
+        "      - name: Check out the protected default branch", 1
+    )[0]
+
+    assert "issues?state=open&labels=release-blocker&per_page=1" in gate
+    assert "select(.pull_request == null)" in gate
+    assert "reason=release_blocker" in gate
+    assert "A release-blocker issue is open" in gate
+    assert gate.index("reason=open_pull_request") < gate.index("reason=release_blocker")
+    assert gate.index("reason=release_blocker") < gate.index("reason=dry_run")
+
+
 def test_model_job_blocks_undeclared_network_egress():
     """The provider process cannot use DNS or arbitrary endpoints for exfiltration."""
     workflow = _workflow("hourly-product-development.yml")

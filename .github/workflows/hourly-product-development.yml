@@ -96,6 +96,21 @@ jobs:
             exit 0
           fi
 
+          release_blockers="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=release-blocker&per_page=1" \
+              --jq '[.[] | select(.pull_request == null)] | length'
+          )"
+          if [ "$release_blockers" -ne 0 ]; then
+            {
+              echo "develop=false"
+              echo "reason=release_blocker"
+            } >>"$GITHUB_OUTPUT"
+            echo "A release-blocker issue is open; product development remains frozen." \
+              >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           if [ "$DRY_RUN" = "true" ]; then
             {
               echo "develop=false"
