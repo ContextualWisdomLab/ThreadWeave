@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import pytest
 
 from threadweave import (
@@ -73,8 +71,29 @@ def test_callable_identifier_supports_external_mailbox_metadata():
     child = Container(message=Message(payload={"mailbox_id": 42}))
     root.add_child(child)
 
-    resolver: Callable[[Message], int] = lambda message: message.payload["mailbox_id"]
+    def resolver(message: Message) -> int:
+        """Read one external mailbox identifier from the caller payload."""
+        return message.payload["mailbox_id"]
+
     assert serialize_thread_data([root], identifier=resolver) == "THREAD (41 42)"
+
+
+def test_callable_identifier_is_not_compared_to_builtin_names():
+    """A callable with hostile equality remains a valid resolver boundary."""
+
+    class Resolver:
+        """Expose a callable whose equality must never be invoked."""
+
+        def __eq__(self, _other: object) -> bool:
+            """Fail if production code compares this resolver to a string."""
+            raise AssertionError("resolver equality must not be invoked")
+
+        def __call__(self, _message: Message) -> int:
+            """Return one valid external mailbox identifier."""
+            return 41
+
+    root = Container(message=Message())
+    assert serialize_thread_data([root], identifier=Resolver()) == "THREAD (41)"
 
 
 def test_root_iterable_is_consumed_once():
@@ -86,7 +105,10 @@ def test_root_iterable_is_consumed_once():
 def test_search_projection_groups_children_of_excluded_root():
     """Two matching descendants retain one thread when their parent is excluded."""
     root = _container(1, _container(3), _container(5))
-    include = lambda message: message.sequence_number in {3, 5}
+
+    def include(message: Message) -> bool:
+        """Select both descendant branches and exclude their common parent."""
+        return message.sequence_number in {3, 5}
 
     assert serialize_thread_data([root], include=include) == "THREAD ((3)(5))"
 
@@ -94,7 +116,10 @@ def test_search_projection_groups_children_of_excluded_root():
 def test_search_projection_promotes_single_descendant_of_excluded_root():
     """A single matching descendant needs no synthetic grouping container."""
     root = _container(1, _container(3))
-    include = lambda message: message.sequence_number == 3
+
+    def include(message: Message) -> bool:
+        """Select only the concrete descendant."""
+        return message.sequence_number == 3
 
     assert serialize_thread_data([root], include=include) == "THREAD (3)"
 
@@ -103,7 +128,10 @@ def test_search_projection_splices_excluded_internal_parent():
     """Matching grandchildren become siblings below the nearest included ancestor."""
     excluded = _container(2, _container(3), _container(5))
     root = _container(1, excluded)
-    include = lambda message: message.sequence_number != 2
+
+    def include(message: Message) -> bool:
+        """Exclude only the internal parent between selected messages."""
+        return message.sequence_number != 2
 
     assert serialize_thread_data([root], include=include) == "THREAD (1 (3)(5))"
 
@@ -117,7 +145,10 @@ def test_search_projection_drops_excluded_leaf_and_empty_thread():
 def test_uid_projection_does_not_resolve_an_excluded_ancestor():
     """Missing UID metadata is irrelevant for a parent outside the search result."""
     root = _container(1, _container(2, uid=202))
-    include = lambda message: message.sequence_number == 2
+
+    def include(message: Message) -> bool:
+        """Select only the child that carries UID metadata."""
+        return message.sequence_number == 2
 
     assert serialize_thread_data([root], identifier="uid", include=include) == (
         "THREAD (202)"
@@ -130,7 +161,11 @@ def test_serialization_does_not_mutate_source_tree():
     root = _container(1, child)
     original_children = list(root.children)
 
-    serialize_thread_data([root], include=lambda message: message.sequence_number == 2)
+    def include(message: Message) -> bool:
+        """Select the child while omitting its source-tree parent."""
+        return message.sequence_number == 2
+
+    serialize_thread_data([root], include=include)
 
     assert root.children == original_children
     assert child.parent is root
@@ -281,7 +316,10 @@ def test_private_dummy_cannot_appear_inside_concrete_chain():
     """Only a top-level thread-list can encode an identifier-less dummy."""
     from threadweave.imap import _ResponseNode, _render_thread_list
 
-    invalid = _ResponseNode(1, [_ResponseNode(None, [_ResponseNode(2), _ResponseNode(3)])])
+    invalid = _ResponseNode(
+        1,
+        [_ResponseNode(None, [_ResponseNode(2), _ResponseNode(3)])],
+    )
     with pytest.raises(ThreadSerializationError, match="only valid at the top level"):
         _render_thread_list(invalid)
 
