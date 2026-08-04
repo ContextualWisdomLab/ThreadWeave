@@ -85,6 +85,7 @@ jobs:
             tests/test_nim_proxy.py \
             tests/test_nim_tls_context.py \
             tests/test_release_contract.py \
+            tests/test_release_contract_coverage.py \
             tests/test_release_workflow.py
           coverage report \
             --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py,scripts/ci/release_contract.py \
@@ -134,8 +135,6 @@ jobs:
           PY
       - name: Prepare checksums, release notes, and SPDX evidence
         id: contract
-        env:
-          GITHUB_OUTPUT_FILE: ${{ github.output }}
         run: |
           set -euo pipefail
           python scripts/ci/release_contract.py prepare \
@@ -270,6 +269,9 @@ jobs:
                 --jq .tagName
             )"
             [ "$observed" = "$RELEASE_TAG" ]
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --notes-file "$bundle/release/RELEASE_NOTES.md"
             gh release upload "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --clobber \
