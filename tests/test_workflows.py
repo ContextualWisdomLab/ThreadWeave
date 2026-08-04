@@ -95,6 +95,18 @@ def test_reverification_runs_the_complete_product_quality_gate():
     assert "git diff --check" in workflow
 
 
+def test_ci_overrides_package_only_coverage_source_for_autonomous_scripts():
+    """The focused script run must override pyproject's `source = threadweave`."""
+    workflow = _workflow("ci.yml")
+
+    assert "coverage run --branch --source=scripts/ci -m pytest -q" in workflow
+    assert (
+        "--include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py"
+        in workflow
+    )
+    assert "--fail-under=100" in workflow
+
+
 def test_publication_uses_external_automation_token_without_write_token_permissions():
     """A fresh trusted job opens the PR so required workflows start automatically."""
     workflow = _workflow("hourly-product-development.yml")
