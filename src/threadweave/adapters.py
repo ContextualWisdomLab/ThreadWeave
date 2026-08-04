@@ -3,8 +3,8 @@
 The core API intentionally stays transport-agnostic. These helpers remove the
 boilerplate required to thread parsed RFC email messages while preserving each
 source object as the default payload. Optional mailbox metadata supplies the
-``INTERNALDATE`` and sequence-number values required for RFC 5256 sent-date
-ordering.
+``INTERNALDATE``, sequence number, and UID values used by RFC 5256 ordering and
+THREAD response serialization.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ def message_from_email(
     payload: Any = _PAYLOAD_MISSING,
     internal_date: DateValue = None,
     sequence_number: int | None = None,
+    uid: int | None = None,
 ) -> Message:
     """Convert a standard-library email message into a threadable message.
 
@@ -46,13 +47,14 @@ def message_from_email(
             passing ``None`` is therefore distinct from omitting the value.
         internal_date: Optional mailbox ``INTERNALDATE`` used when the message's
             ``Date`` header is absent or unusable during sent-date sorting.
-        sequence_number: Optional positive mailbox sequence number used to break
-            exact sent-date ties.
+        sequence_number: Optional positive mailbox sequence number used for
+            ordering and THREAD responses.
+        uid: Optional positive IMAP unique identifier for UID THREAD output.
 
     Returns:
         A normalized :class:`threadweave.Message`. The decoded ``Date`` header,
-        ``internal_date``, and ``sequence_number`` are retained as ordering
-        metadata without changing the transport-agnostic threading core.
+        ``internal_date``, ``sequence_number``, and ``uid`` are retained as
+        mailbox metadata without changing the transport-agnostic core.
     """
     references = _header_text(message, "References")
     in_reply_to = _header_text(message, "In-Reply-To")
@@ -65,6 +67,7 @@ def message_from_email(
         sent_date=_header_text(message, "Date"),
         internal_date=internal_date,
         sequence_number=sequence_number,
+        uid=uid,
     )
 
 
