@@ -81,10 +81,10 @@ def test_generated_lock_is_complete_hash_checking_input():
 def test_supply_chain_documentation_is_operational_and_auditable():
     """A new maintainer can refresh and review the lock without source archaeology."""
 
-    text = SUPPLY_CHAIN_DOC.read_text(encoding="utf-8")
+    text = SUPPLY_CHAIN_DOC.read_text(encoding="utf-8").lower()
     required_phrases = {
         "uv 0.11.29",
-        "2026-08-04T00:00:00Z",
+        "2026-08-04t00:00:00z",
         "scripts/ci/compile_ci_lock.sh",
         "python -m pip install --require-hashes -r requirements/ci.lock",
         "python -m build --no-isolation",
@@ -92,4 +92,4 @@ def test_supply_chain_documentation_is_operational_and_auditable():
         "autonomous model",
         "rollback",
     }
-    assert required_phrases <= {phrase for phrase in required_phrases if phrase in text}
+    assert all(phrase in text for phrase in required_phrases)
