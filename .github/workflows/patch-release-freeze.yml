@@ -1,19 +1,24 @@
-name: Apply release-freeze gate
+name: Prepare release-freeze gate patch
 
 on:
   push:
     branches: [ci/pause-development-for-release-blocker]
     paths: [.github/workflows/patch-release-freeze.yml]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/patch-release-freeze.yml
+      - tests/test_workflows.py
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: patch-release-freeze-${{ github.ref }}
+  group: prepare-release-freeze-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  patch:
+  prepare:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -21,15 +26,11 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
-      - name: Check out the source branch
+      - name: Check out the reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ci/pause-development-for-release-blocker
-          fetch-depth: 1
           persist-credentials: false
-      - name: Patch the tested gate and remove this workflow
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Apply the exact tested gate
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -80,13 +81,13 @@ jobs:
               raise SystemExit('expected one exact product gate block')
           path.write_text(text.replace(old, new), encoding='utf-8')
           PY
-          rm .github/workflows/patch-release-freeze.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "ci: stop product development during release freezes"
-          basic="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          GIT_CONFIG_COUNT=1 \
-          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $basic" \
-            git push origin HEAD:ci/pause-development-for-release-blocker
+          mkdir -p "$RUNNER_TEMP/release-freeze-gate/.github/workflows"
+          cp .github/workflows/hourly-product-development.yml \
+            "$RUNNER_TEMP/release-freeze-gate/.github/workflows/"
+      - name: Upload the reviewed workflow replacement
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-freeze-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-freeze-gate/
+          if-no-files-found: error
+          retention-days: 1
