@@ -6,10 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Add iterative RFC 5256 `THREAD` and `UID THREAD` response serialization with
+  search-result projection, sequence-number, UID, or callable identifier
+  selection, dummy-root preservation, protocol-safe framing, and fail-closed
+  graph and unsigned 32-bit identifier validation.
+- Carry optional IMAP UID metadata through `Message` and `message_from_email`.
 - Reject dot segments, encoded separators, nested escapes, path-parameter
   traversal, malformed percent escapes, and encoded controls in the loopback NIM
   broker before any request can reach the fixed upstream.
-- Hash-lock every CI, test, lint, coverage, and build dependency, regenerate the universal lock byte-for-byte with a pinned uv compiler, and reuse the same reviewed toolchain in autonomous verification.
+- Hash-lock every CI, test, lint, coverage, and build dependency, regenerate the
+  universal lock byte-for-byte with a pinned uv compiler, and reuse the same
+  reviewed toolchain in autonomous verification.
 - Replace the unavailable Copilot Agent Tasks dispatcher with an hourly OpenCode
   development session backed by NVIDIA NIM.
 - Keep the real `NVIDIA_NIM_API_KEY` outside the model process in a loopback-only
