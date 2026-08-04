@@ -37,6 +37,7 @@ def test_release_separates_build_attestation_tag_release_and_publish_privileges(
     assert "publish-pypi:" in workflow
     assert workflow.count("id-token: write") == 2
     assert workflow.count("attestations: write") == 1
+    assert workflow.count("artifact-metadata: write") == 1
     assert workflow.count("contents: write") == 2
     assert "environment:\n      name: pypi" in workflow
     assert "username:" not in workflow
@@ -114,4 +115,7 @@ def test_workflow_passes_user_input_via_environment_not_shell_interpolation():
     assert "RELEASE_VERSION: ${{ inputs.version }}" in workflow
     assert "--version \"$RELEASE_VERSION\"" in workflow
     run_blocks = workflow.split("run: |")
-    assert all("${{ inputs.version }}" not in block.split("\n      - name:", 1)[0] for block in run_blocks[1:])
+    assert all(
+        "${{ inputs.version }}" not in block.split("\n      - name:", 1)[0]
+        for block in run_blocks[1:]
+    )
