@@ -10,11 +10,13 @@ WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 
 def _workflow() -> str:
     """Return the release workflow without adding a YAML parser dependency."""
+
     return WORKFLOW.read_text(encoding="utf-8")
 
 
-def test_release_is_manual_main_only_and_single_flight():
+def test_release_is_manual_main_only_and_single_flight() -> None:
     """A release requires an explicit version and one protected main invocation."""
+
     workflow = _workflow()
     assert "workflow_dispatch:" in workflow
     assert "version:" in workflow
@@ -27,8 +29,9 @@ def test_release_is_manual_main_only_and_single_flight():
     assert "cancel-in-progress: false" in workflow
 
 
-def test_release_separates_build_attestation_tag_release_and_publish_privileges():
+def test_release_separates_build_attestation_tag_release_and_publish_privileges() -> None:
     """Build code never shares a job with publish, tag, or release credentials."""
+
     workflow = _workflow()
     assert "build-release:" in workflow
     assert "attest-release:" in workflow
@@ -45,8 +48,9 @@ def test_release_separates_build_attestation_tag_release_and_publish_privileges(
     assert "PYPI_API_TOKEN" not in workflow
 
 
-def test_release_uses_full_sha_actions_and_reviewed_artifact_handoff():
+def test_release_uses_full_sha_actions_and_reviewed_artifact_handoff() -> None:
     """Every external action is immutable and jobs exchange one named bundle."""
+
     workflow = _workflow()
     required_actions = {
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -67,8 +71,9 @@ def test_release_uses_full_sha_actions_and_reviewed_artifact_handoff():
     assert "retention-days: 7" in workflow
 
 
-def test_build_repeats_quality_gates_and_prepares_release_evidence():
+def test_build_repeats_quality_gates_and_prepares_release_evidence() -> None:
     """The released files are rebuilt from reviewed, hash-locked source."""
+
     workflow = _workflow()
     assert "python -m pip install --require-hashes -r requirements/ci.lock" in workflow
     assert "ruff check ." in workflow
@@ -83,8 +88,9 @@ def test_build_repeats_quality_gates_and_prepares_release_evidence():
     assert "git diff --exit-code" in workflow
 
 
-def test_attestation_covers_distributions_and_spdx_sbom():
+def test_attestation_covers_distributions_and_spdx_sbom() -> None:
     """GitHub records both SLSA provenance and the release SBOM."""
+
     workflow = _workflow()
     assert workflow.count(
         "actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26"
@@ -94,8 +100,9 @@ def test_attestation_covers_distributions_and_spdx_sbom():
     assert "threadweave-${{ needs.build-release.outputs.version }}.spdx.json" in workflow
 
 
-def test_tag_and_github_release_are_idempotent_and_pypi_publish_is_final():
-    """Retries preserve the reviewed tag while PyPI remains fail-closed."""
+def test_tag_and_github_release_are_idempotent_and_pypi_publish_is_final() -> None:
+    """Retries preserve immutable evidence while PyPI remains fail-closed."""
+
     workflow = _workflow()
     assert "git ls-remote --tags origin" in workflow
     assert "git tag -a" in workflow
@@ -103,17 +110,26 @@ def test_tag_and_github_release_are_idempotent_and_pypi_publish_is_final():
     assert "gh release view" in workflow
     assert "gh release create" in workflow
     assert "--verify-tag" in workflow
+    assert "expected-release-assets.txt" in workflow
+    assert "gh release edit" not in workflow
+    assert "--clobber" not in workflow
     assert "skip-existing" not in workflow
     assert "needs: [build-release, attest-release, tag-release, github-release]" in workflow
     assert "attestations: true" in workflow
     assert "print-hash: true" in workflow
+    publish_job = workflow.split("publish-pypi:", 1)[1]
+    assert publish_job.count("Verify distributions immediately before publication") == 1
+    assert "sha256sum --check ../release/SHA256SUMS.txt" in publish_job
 
 
-def test_workflow_passes_user_input_via_environment_not_shell_interpolation():
+def test_workflow_passes_user_input_via_environment_not_shell_interpolation() -> None:
     """The manually supplied version never becomes an unquoted command fragment."""
+
     workflow = _workflow()
     assert "RELEASE_VERSION: ${{ inputs.version }}" in workflow
     assert "--version \"$RELEASE_VERSION\"" in workflow
+    assert 'os.environ["RELEASE_VERSION"]' in workflow
+    assert 'threadweave.__version__ == "0.2.0"' not in workflow
     run_blocks = workflow.split("run: |")
     assert all(
         "${{ inputs.version }}" not in block.split("\n      - name:", 1)[0]
