@@ -1,0 +1,92 @@
+name: Apply release-freeze gate
+
+on:
+  push:
+    branches: [ci/pause-development-for-release-blocker]
+    paths: [.github/workflows/patch-release-freeze.yml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: patch-release-freeze-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Check out the source branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ci/pause-development-for-release-blocker
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Patch the tested gate and remove this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/hourly-product-development.yml')
+          text = path.read_text(encoding='utf-8')
+          old = '''          if [ "$open_prs" -ne 0 ]; then
+            {
+              echo "develop=false"
+              echo "reason=open_pull_request"
+            } >>"$GITHUB_OUTPUT"
+            echo "An open pull request exists; the maintenance loop owns this hour." \\
+              >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$DRY_RUN" = "true" ]; then
+          '''
+          new = '''          if [ "$open_prs" -ne 0 ]; then
+            {
+              echo "develop=false"
+              echo "reason=open_pull_request"
+            } >>"$GITHUB_OUTPUT"
+            echo "An open pull request exists; the maintenance loop owns this hour." \\
+              >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          release_blockers="$(
+            gh api \\
+              "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=release-blocker&per_page=1" \\
+              --jq '[.[] | select(.pull_request == null)] | length'
+          )"
+          if [ "$release_blockers" -ne 0 ]; then
+            {
+              echo "develop=false"
+              echo "reason=release_blocker"
+            } >>"$GITHUB_OUTPUT"
+            echo "A release-blocker issue is open; product development remains frozen." \\
+              >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$DRY_RUN" = "true" ]; then
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('expected one exact product gate block')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+          rm .github/workflows/patch-release-freeze.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "ci: stop product development during release freezes"
+          basic="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $basic" \
+            git push origin HEAD:ci/pause-development-for-release-blocker
