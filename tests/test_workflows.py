@@ -107,6 +107,18 @@ def test_ci_overrides_package_only_coverage_source_for_autonomous_scripts():
     assert "--fail-under=100" in workflow
 
 
+def test_ci_cancels_stale_runs_per_pull_request_or_protected_ref():
+    """Only the newest PR head or protected-ref push may consume CI runners."""
+    workflow = _workflow("ci.yml")
+
+    assert "concurrency:" in workflow
+    assert (
+        "group: ci-${{ github.workflow }}-${{ "
+        "github.event.pull_request.number || github.ref }}"
+    ) in workflow
+    assert "cancel-in-progress: true" in workflow
+
+
 def test_publication_uses_external_automation_token_without_write_token_permissions():
     """A fresh trusted job opens the PR so required workflows start automatically."""
     workflow = _workflow("hourly-product-development.yml")
