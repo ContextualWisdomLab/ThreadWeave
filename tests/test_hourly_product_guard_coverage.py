@@ -293,3 +293,12 @@ def test_self_test_detects_a_guard_that_stops_rejecting_unsafe_paths(
     monkeypatch.setattr(guard, "validate_patch_text", accept_only_negative_control)
     with pytest.raises(AssertionError, match="Unsafe build-configuration"):
         guard.self_test()
+
+
+def test_write_outputs_is_a_no_op_outside_github_actions(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Without GITHUB_OUTPUT the guard writes nothing instead of crashing."""
+
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    assert guard._write_outputs({"changed": "false"}) is None
