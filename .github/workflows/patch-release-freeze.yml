@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  issues: write
 
 concurrency:
   group: export-release-freeze-${{ github.ref }}
@@ -68,8 +67,4 @@ jobs:
                 --input - \
                 --jq '.sha'
           )"
-          body="<!-- release-freeze-workflow-blob --> head=${GITHUB_SHA} blob=${blob_sha}"
-          gh api \
-            --method POST \
-            "repos/${GITHUB_REPOSITORY}/issues/18/comments" \
-            -f body="$body"
+          echo "release-freeze-workflow-blob=$blob_sha"
