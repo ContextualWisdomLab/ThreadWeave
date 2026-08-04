@@ -124,7 +124,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: requirements/ci.lock
 
       - name: Install the pinned OpenCode CLI and model test tools
         if: steps.gate.outputs.develop == 'true'
@@ -143,11 +143,9 @@ jobs:
 
           agent_venv="${RUNNER_TEMP}/threadweave-agent-venv"
           python -m venv "$agent_venv"
-          "$agent_venv/bin/python" -m pip install --upgrade pip
           "$agent_venv/bin/python" -m pip install \
-            -e ".[test]" \
-            "ruff==0.15.20" \
-            build
+            --require-hashes \
+            -r requirements/ci.lock
 
       - name: Prepare an immutable diff baseline and bounded task
         if: steps.gate.outputs.develop == 'true'
@@ -392,6 +390,8 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
+    env:
+      PYTHONPATH: src
     outputs:
       base_sha: ${{ steps.seal.outputs.base_sha }}
       patch_sha256: ${{ steps.seal.outputs.patch_sha256 }}
@@ -425,7 +425,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: requirements/ci.lock
 
       - name: Download the untrusted proposal artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -475,8 +475,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[test]" "ruff==0.15.20" build
+          python -m pip install \
+            --require-hashes \
+            -r requirements/ci.lock
 
       - name: Run complete independent verification
         if: steps.gate.outputs.verify == 'true'
@@ -493,12 +494,23 @@ jobs:
             src/threadweave/subject.py
           coverage run -m pytest -q
           coverage report
-          python -m build
+          python -m build --no-isolation
           python -m pip check
           git diff --check
 
           temp_dir="$(mktemp -d)"
-          python -m pip install --force-reinstall dist/*.whl
+          wheel_path="$(realpath "$(find dist -maxdepth 1 -name '*.whl' -print -quit)")"
+          wheel_sha="$(sha256sum "$wheel_path" | awk '{print $1}')"
+          wheel_requirements="$RUNNER_TEMP/threadweave-wheel.txt"
+          printf 'threadweave @ file://%s \
+    --hash=sha256:%s\n' \
+            "$wheel_path" "$wheel_sha" >"$wheel_requirements"
+          python -m pip install \
+            --require-hashes \
+            --no-deps \
+            --no-index \
+            --force-reinstall \
+            -r "$wheel_requirements"
           (
             cd "$temp_dir"
             python - <<'PY'

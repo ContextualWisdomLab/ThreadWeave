@@ -165,6 +165,17 @@ sibling set are sorted in the RFC-defined stages.
 - Graph operations are iterative and identity-guarded; deep or cyclic malformed
   input cannot recurse indefinitely.
 
+## Reproducible CI supply chain
+
+ThreadWeave keeps its runtime dependency-free, but treats test and build tools as
+executable supply-chain inputs. `requirements/ci.in` records exact direct intent;
+a pinned uv compiler generates the universal `requirements/ci.lock` with
+transitive SHA-256 hashes for Python 3.10-3.13. CI regenerates the lock and
+requires a byte-for-byte match before installing it with pip hash-checking mode.
+Builds run without isolation because the reviewed Hatchling backend is already
+installed from that lock. See [`docs/supply-chain.md`](docs/supply-chain.md) for
+the refresh procedure, reviewer checklist, and rollback contract.
+
 ## Autonomous maintenance
 
 Two staggered workflows keep development review-first and single-flight.
