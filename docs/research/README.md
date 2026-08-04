@@ -132,6 +132,43 @@ accepts server-provided `internal_date` and `sequence_number`; the convenience
 `thread_email_messages` adapter uses iterable order as sequence number when
 threading a mailbox directly.
 
+## IMAP THREAD response encoding — RFC 5256 §4 and RFC 9051
+
+RFC 5256 defines `thread-data` as `THREAD` followed by zero or more
+parenthesized `thread-list` values. Successive numbers identify a parent-child
+chain. When a node has sibling subthreads, each branch becomes its own nested
+list. The published example therefore serializes as:
+
+```text
+* THREAD (2)(3 6 (4 23)(44 7 96))
+```
+
+`serialize_thread_data` and `serialize_thread_response` implement that grammar
+as a presentation layer over the transport-neutral tree:
+
+1. Use message sequence numbers for ordinary `THREAD`, UIDs for `UID THREAD`, or
+   a caller-supplied resolver when mailbox identifiers are stored externally.
+2. Apply an optional server search-result predicate before rendering. Excluded
+   concrete ancestors and dummy internal containers are splice-promoted. A
+   top-level excluded or missing ancestor with multiple selected branches is
+   retained as the grouping form `((3)(5))`.
+3. Require every emitted identifier to be a unique non-zero unsigned 32-bit
+   integer. RFC 9051 retains this `nz-number` boundary and identifies UIDs as
+   non-zero unsigned 32-bit values.
+4. Reject cycles, shared containers, malformed node types, duplicate identifiers,
+   missing UIDs, and protocol-unsafe line endings rather than truncating output.
+5. Render chains and arbitrarily deep sibling splits iteratively. RFC 5256 places
+   no nesting limit on THREAD responses, so recursion depth cannot be a product
+   limit.
+6. Leave the source `Container` graph unchanged. Search projection is an
+   ephemeral response view, not a mutation of the canonical conversation tree.
+
+RFC 9051 specifies IMAP4rev2 framing as CRLF-terminated protocol lines and states
+that registered IMAP4rev1 extensions remain valid for IMAP4rev2 unless an
+extension says otherwise. RFC 5256 therefore remains the standards-track source
+for the SORT and THREAD extension while RFC 9051 supplies the current base IMAP
+number and framing contract.
+
 ## Identification fields — RFC 5322 §3.6.4
 
 - **RFC 5322, “Internet Message Format”, §3.6.4 (Identification Fields)**
@@ -177,16 +214,26 @@ share the exact same standardized base subject. The extraction and comparison
 procedures are standards-grounded; deciding to merge disconnected roots remains
 a caller-selected heuristic (`group_by_subject=False` by default).
 
-Sent-date sorting is implemented, but IMAP `THREAD` response serialization is
-still outside the core. That presentation layer must choose sequence numbers or
-UIDs, project the server's search result, and render RFC parenthesized response
-syntax. Keeping it separate lets the same thread trees serve local Python,
-naruon, and non-IMAP services.
+Sent-date sorting and IMAP THREAD serialization are implemented, but remain
+explicit opt-in presentation and ordering layers. The core `Container` graph has
+no socket, command parser, session, authentication, or capability-advertisement
+state. This boundary lets the same tree serve local Python, naruon, IMAP4rev1,
+IMAP4rev2, and non-IMAP services.
 
 ## Provenance
 
 The RFC 5322 header primitives (`normalize_message_id`,
 `extract_reference_ids`, and `generate_email_fingerprint`) were extracted
 behaviour-preserving from the naruon control plane. The threading, subject,
-collation, and date layers are fresh standalone implementations designed to
-remain usable both independently and as naruon modules.
+collation, date, and protocol-projection layers are fresh standalone
+implementations designed to remain usable both independently and as naruon
+modules.
+
+## References (APA 7th edition)
+
+Crispin, M., & Murchison, K. (2008). *Internet Message Access Protocol—SORT and
+THREAD extensions* (RFC 5256). RFC Editor. <https://doi.org/10.17487/RFC5256>
+
+Melnikov, A., & Leiba, B. (Eds.). (2021). *Internet Message Access Protocol
+(IMAP)—Version 4rev2* (RFC 9051). RFC Editor.
+<https://doi.org/10.17487/RFC9051>
