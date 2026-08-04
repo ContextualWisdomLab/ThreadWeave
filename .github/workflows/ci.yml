@@ -64,7 +64,7 @@ jobs:
             src/threadweave/dates.py \
             src/threadweave/headers.py \
             src/threadweave/subject.py
-      - name: Require complete autonomous-boundary coverage
+      - name: Require complete autonomous and release boundary coverage
         env:
           COVERAGE_FILE: .coverage.autonomous
         run: |
@@ -76,9 +76,12 @@ jobs:
             tests/test_hourly_product_guard_coverage.py \
             tests/test_hourly_product_guard_return.py \
             tests/test_nim_proxy.py \
-            tests/test_nim_tls_context.py
+            tests/test_nim_tls_context.py \
+            tests/test_release_contract.py \
+            tests/test_release_contract_coverage.py \
+            tests/test_release_workflow.py
           coverage report \
-            --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py \
+            --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py,scripts/ci/release_contract.py \
             --fail-under=100 \
             --show-missing
       - run: coverage run -m pytest -q
@@ -141,10 +144,12 @@ jobs:
           python - <<'PY'
           from threadweave import (
               Message,
+              __version__,
               serialize_thread_response,
               thread_messages,
           )
 
+          assert __version__ == "0.2.0"
           roots = thread_messages(
               [
                   Message(
