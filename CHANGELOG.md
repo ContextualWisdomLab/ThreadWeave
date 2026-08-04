@@ -6,10 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
-- Replace the Copilot cloud-agent dispatch in `hourly-product-development.yml`
-  with an in-workflow OpenCode agent authenticated by the `NVIDIA_NIM_API_KEY`
-  organization secret; the workflow now opens the bounded pull request itself
-  and no longer assumes `COPILOT_GITHUB_TOKEN` or the Agent Tasks API.
+- Replace the unavailable Copilot Agent Tasks dispatcher with an hourly OpenCode
+  development session authenticated by the `NVIDIA_NIM_API_KEY` organization
+  secret.
+- Isolate the model in a disposable `.git`-free workspace under an unprivileged
+  user, with no GitHub or OIDC credential environment and no web-fetch tools.
+- Add a fail-closed autonomous patch boundary that permits only bounded text
+  changes to product source, tests, docs, README, and CHANGELOG; reject workflow,
+  policy, dependency, release, deletion, link, binary, mode, size, and common
+  secret-leak changes.
+- Reapply and independently verify the sealed patch on fresh runners before a
+  separate trusted publisher opens exactly one PR with an external automation
+  token, so the model never shares a process, filesystem, Git hook, or GitHub
+  credential with publication.
 - Preserve root ordering when subject grouping creates a synthetic container.
 - Preserve first-appearance root ordering for messages with missing or duplicate
   `Message-ID` values.
@@ -61,10 +70,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that the PEP 561 `py.typed` marker is packaged.
 - Add an hourly centralized review-fix/check-revalidation/merge workflow that
   delegates policy to the organization `.github` repository.
-- Add a pull-request-first, single-flight hourly product-development dispatcher
-  for the GitHub Agent Tasks public-preview API. It uses a supported fine-
-  grained user token, the current API version, fail-closed task inventory, and
-  contract tests that prevent self-merging or duplicate autonomous work.
 
 ## [0.1.0] - 2026-07-12
 
