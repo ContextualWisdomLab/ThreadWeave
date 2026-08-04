@@ -164,6 +164,7 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+      artifact-metadata: write
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -230,9 +231,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$RELEASE_TAG" "$GITHUB_SHA" -m "ThreadWeave ${RELEASE_VERSION}"
-          git push \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "refs/tags/${RELEASE_TAG}"
+          gh auth setup-git
+          git push origin "refs/tags/${RELEASE_TAG}"
 
   github-release:
     name: Publish GitHub Release evidence
