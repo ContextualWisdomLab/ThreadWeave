@@ -156,6 +156,8 @@ sibling set are sorted in the RFC-defined stages.
 
 - Production statement and branch coverage are required to remain at **100%**.
 - Every authored production module and callable must have a docstring.
+- The autonomous patch guard and NIM credential broker also require **100%**
+  statement and branch coverage.
 - CI runs Ruff, compileall, doctests, pytest with coverage, and dependency checks
   on Python 3.10, 3.11, 3.12, and 3.13.
 - CI builds wheel and source distributions, verifies `py.typed`, installs the
@@ -175,23 +177,35 @@ satisfied.
 At minute 41, `hourly-product-development.yml` runs only when the PR queue is
 empty. Its trust boundary is deliberately split across fresh GitHub-hosted jobs:
 
-1. A disposable, `.git`-free workspace runs OpenCode through NVIDIA NIM as UID
-   65532 with an empty environment except for the scoped NIM credential.
-2. `scripts/ci/hourly_product_guard.py` accepts only bounded text changes under
-   `src/threadweave/`, `tests/`, `docs/`, `README.md`, and `CHANGELOG.md`.
-   Workflow, policy, dependency, release, deletion, link, binary, mode, size, and
-   secret-leak changes fail closed.
-3. Only the sealed patch, digest, path inventory, and sanitized PR metadata cross
-   the job boundary. A fresh credential-free job reapplies and independently
-   verifies that exact patch.
-4. A separate publisher job starts from a fresh `main`, rechecks that no PR or
-   base movement occurred, reapplies the same digest, and opens one PR. The model
-   runner never shares a process, filesystem, Git hook, or GitHub credential with
+1. A runner-local broker owns `NVIDIA_NIM_API_KEY`, injects it only into HTTPS
+   requests to the fixed NVIDIA NIM host, strips caller authorization, bounds
+   request/response sizes, and suppresses prompt logging. OpenCode receives only
+   a non-secret placeholder key and can reach the broker on IPv4 loopback.
+2. The model runs as UID 65532 in a disposable, `.git`-free workspace with an
+   empty environment, bounded processes and file descriptors, no GitHub or OIDC
+   credential, and no publication filesystem. Undeclared network egress is
+   blocked; OpenCode web-fetch, web-search, external-directory, task, and LSP
+   capabilities are denied. Surviving model descendants are killed before any
+   trusted inspection occurs.
+3. `scripts/ci/hourly_product_guard.py` accepts only bounded UTF-8 text changes
+   under `src/threadweave/`, `tests/`, `docs/`, `README.md`, and `CHANGELOG.md`.
+   Workflow, policy, dependency, release, deletion, rename, link, binary,
+   executable, mode, size, line-budget, unsafe metadata, and credential-leak
+   changes fail closed.
+4. Only the sealed patch, SHA-256 digest, exact path inventory, and sanitized PR
+   metadata cross the job boundary. A fresh credential-free job reapplies that
+   exact patch and independently runs Ruff, compileall, doctests, the full
+   pytest/coverage suite, package build, dependency checks, and installed-wheel
+   smoke verification.
+5. A third fresh publisher starts from `main`, repeats the zero-PR, unchanged-base,
+   digest, path, and patch checks, and opens one PR. The model never shares a
+   process, filesystem, Git hook, network credential, or GitHub credential with
    publication.
 
 Configure these organization or repository secrets:
 
-- `NVIDIA_NIM_API_KEY`: scoped and rotatable model credential.
+- `NVIDIA_NIM_API_KEY`: scoped and rotatable credential held only by the local
+  broker and the trusted post-model credential-leak scanner.
 - `PR_REVIEW_MERGE_TOKEN` or `OPENCODE_APPROVE_TOKEN`: fine-grained PAT or GitHub
   App token used only by the fresh publisher job.
 
@@ -202,8 +216,8 @@ PR workflows start without that manual gate. The product-development agent never
 merges, tags, or publishes a release.
 
 Both workflows expose a manual `dry_run` input. Missing credentials, an open PR,
-a moved base, a changed patch digest, or an unavailable safe proposal stops the
-cycle without mutation.
+a moved base, a changed patch digest, failed independent verification, or an
+unavailable safe proposal stops the cycle without mutation.
 
 ## Architecture and standards boundary
 
