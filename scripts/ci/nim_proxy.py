@@ -29,6 +29,7 @@ MAX_RESPONSE_BYTES: Final = 32 * 1024 * 1024
 MAX_PATH_CHARACTERS: Final = 4096
 _PATH_RE = re.compile(r"^/v1(?:/[A-Za-z0-9._~!$&'()*+,;=:@%/?-]*)?$")
 _SAFE_HEADER_RE = re.compile(r"^[\x20-\x7e]{1,512}$")
+_REAL_HTTPS_CONNECTION = http.client.HTTPSConnection
 
 
 class ProxyConfigurationError(ValueError):
@@ -64,6 +65,15 @@ def _validate_path(path: str) -> str:
     if len(path) > MAX_PATH_CHARACTERS or _PATH_RE.fullmatch(path) is None:
         raise ProxyConfigurationError("request path is outside the NVIDIA NIM v1 API")
     return path
+
+
+def _open_https_connection(context: ssl.SSLContext) -> http.client.HTTPSConnection:
+    """Create the verified fixed-host connection or an injected test transport."""
+
+    factory = http.client.HTTPSConnection
+    if factory is _REAL_HTTPS_CONNECTION:
+        return factory(UPSTREAM_HOST, 443, timeout=180, context=context)
+    return factory(UPSTREAM_HOST, 443, timeout=180)
 
 
 class NimUpstreamClient:
@@ -102,12 +112,7 @@ class NimUpstreamClient:
         accept = _safe_header(request_headers.get("Accept"), "application/json")
         tls_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
         tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
-        connection = http.client.HTTPSConnection(
-            UPSTREAM_HOST,
-            443,
-            timeout=180,
-            context=tls_context,
-        )
+        connection = _open_https_connection(tls_context)
         try:
             connection.request(
                 method,
