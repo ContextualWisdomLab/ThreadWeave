@@ -30,14 +30,19 @@ def test_hourly_pr_maintenance_uses_central_cwl_workflows():
     assert "secrets: inherit" in workflow
 
 
-def test_product_development_uses_nim_in_a_credential_isolated_workspace():
-    """The model receives NIM only and never shares a runner with publication."""
+def test_product_development_brokers_nim_outside_the_model_process():
+    """The model gets a placeholder key while a loopback broker owns the secret."""
     workflow = _workflow("hourly-product-development.yml")
 
     assert 'cron: "41 * * * *"' in workflow
     assert "cancel-in-progress: false" in workflow
-    assert "NVIDIA_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}" in workflow
+    assert "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}" in workflow
+    assert "python scripts/ci/nim_proxy.py" in workflow
+    assert '"baseURL": "http://127.0.0.1:8765/v1"' in workflow
+    assert "NVIDIA_API_KEY=threadweave-local-broker" in workflow
+    assert "NVIDIA_API_KEY=\"$NIM_UPSTREAM_API_KEY\"" not in workflow
     assert "sudo -u '#65532' -g '#65532' env -i" in workflow
+    assert "sudo pkill -KILL -u 65532" in workflow
     assert "git archive HEAD | tar -x" in workflow
     assert "persist-credentials: false" in workflow
     assert '"webfetch": "deny"' in workflow
@@ -46,12 +51,24 @@ def test_product_development_uses_nim_in_a_credential_isolated_workspace():
     assert "/agents/repos" not in workflow
 
 
+def test_model_job_blocks_undeclared_network_egress():
+    """The provider process cannot use DNS or arbitrary endpoints for exfiltration."""
+    workflow = _workflow("hourly-product-development.yml")
+
+    assert workflow.count("egress-policy: block") == 3
+    assert workflow.count("disable-telemetry: true") == 3
+    assert "integrate.api.nvidia.com:443" in workflow
+    assert "registry.npmjs.org:443" in workflow
+    assert "*.blob.core.windows.net:443" in workflow
+    assert "egress-policy: audit" not in workflow
+
+
 def test_product_development_packages_and_reverifies_a_bounded_patch():
     """Model output crosses jobs only as a validated immutable text patch."""
     workflow = _workflow("hourly-product-development.yml")
 
     assert "scripts/ci/hourly_product_guard.py capture" in workflow
-    assert "scripts/ci/hourly_product_guard.py apply" in workflow
+    assert workflow.count("scripts/ci/hourly_product_guard.py apply") == 2
     assert "THREADWEAVE_FORBIDDEN_SECRET" in workflow
     assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in workflow
     assert "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" in workflow
@@ -61,6 +78,21 @@ def test_product_development_packages_and_reverifies_a_bounded_patch():
     assert 'git add -A -- src/threadweave tests docs README.md CHANGELOG.md' in workflow
     assert "pyproject.toml" in workflow
     assert "Do not edit .github/**, scripts/**, AGENTS.md" in workflow
+
+
+def test_reverification_runs_the_complete_product_quality_gate():
+    """A fresh credential-free job proves the patch before publication."""
+    workflow = _workflow("hourly-product-development.yml")
+
+    assert "Set up independent Python verification" in workflow
+    assert 'python -m pip install -e ".[test]" "ruff==0.15.20" build' in workflow
+    assert "ruff check ." in workflow
+    assert "coverage run -m pytest -q" in workflow
+    assert "coverage report" in workflow
+    assert "python -m build" in workflow
+    assert "python -m pip check" in workflow
+    assert "python -m pip install --force-reinstall dist/*.whl" in workflow
+    assert "git diff --check" in workflow
 
 
 def test_publication_uses_external_automation_token_without_write_token_permissions():
