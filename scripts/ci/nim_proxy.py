@@ -13,6 +13,7 @@ import http.client
 import json
 import os
 import re
+import ssl
 import sys
 import threading
 from collections.abc import Mapping, Sequence
@@ -99,7 +100,14 @@ class NimUpstreamClient:
             request_headers.get("Content-Type"), "application/json"
         )
         accept = _safe_header(request_headers.get("Accept"), "application/json")
-        connection = http.client.HTTPSConnection(UPSTREAM_HOST, 443, timeout=180)
+        tls_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
+        tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        connection = http.client.HTTPSConnection(
+            UPSTREAM_HOST,
+            443,
+            timeout=180,
+            context=tls_context,
+        )
         try:
             connection.request(
                 method,
@@ -333,6 +341,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         server.serve_forever(poll_interval=0.25)
     except KeyboardInterrupt:
+        # Ctrl+C deliberately exits the serve loop; finalization closes the socket.
         pass
     finally:
         server.server_close()
