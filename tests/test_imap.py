@@ -192,11 +192,20 @@ def test_missing_uid_is_rejected_in_uid_mode():
 
 
 def test_unknown_identifier_field_is_rejected():
-    """Only supported built-in fields or a callable resolver are accepted."""
+    """Unknown built-in identifier names fail with a public boundary error."""
     with pytest.raises(ValueError, match="sequence_number.*uid"):
         serialize_thread_data(
             [_container(1)],
             identifier="message_id",  # type: ignore[arg-type]
+        )
+
+
+def test_non_callable_identifier_is_rejected():
+    """A non-string, non-callable identifier selector fails explicitly."""
+    with pytest.raises(ValueError, match="sequence_number.*uid"):
+        serialize_thread_data(
+            [_container(1)],
+            identifier=object(),  # type: ignore[arg-type]
         )
 
 
