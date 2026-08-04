@@ -5,11 +5,11 @@ Operating guide for automated agents working on this repository.
 `threadweave` implements the JWZ container model with RFC 5256 `REFERENCES`
 threading semantics, RFC 5322 identification-field parsing, RFC 2047 encoded-word
 decoding, RFC 5256 base-subject extraction, RFC 5051 Unicode casemap comparison,
-and optional RFC 5256 sent-date ordering. Its value is correctness: mail clients
-and ingestion systems rely on threading being deterministic, standards-grounded,
-and impossible to hang on malformed input. Treat changes to `threading.py`,
-`container.py`, `subject.py`, `collation.py`, `dates.py`, and `headers.py` as
-behavior-sensitive.
+optional RFC 5256 sent-date ordering, and RFC 5256 IMAP `THREAD` response
+serialization. Its value is correctness: mail clients and ingestion systems rely
+on threading being deterministic, standards-grounded, and impossible to hang on
+malformed input. Treat changes to `threading.py`, `container.py`, `subject.py`,
+`collation.py`, `dates.py`, `headers.py`, and `imap.py` as behavior-sensitive.
 
 ## Invariants that must not regress
 
@@ -48,7 +48,13 @@ behavior-sensitive.
     replace ordered structures with sets or silently change the default.
 11. **Adapters preserve caller data.** The stdlib email adapter carries the source
     message as payload by default, preserves Unicode, tolerates damaged legacy
-    encoded words, and carries `Date` plus caller-supplied mailbox metadata.
+    encoded words, and carries `Date`, `INTERNALDATE`, sequence-number, and UID
+    metadata supplied by the caller.
+12. **IMAP projection is exact and non-mutating.** `THREAD` and `UID THREAD`
+    output must use unique non-zero unsigned 32-bit identifiers, preserve RFC
+    dummy-root grouping after search projection, reject cyclic or shared graphs,
+    and leave the source `Container` tree unchanged. Rendering stays iterative,
+    and response framing accepts only CRLF or a caller-owned empty suffix.
 
 ## Architecture and dependency rules
 

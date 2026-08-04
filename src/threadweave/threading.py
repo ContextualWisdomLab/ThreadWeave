@@ -48,7 +48,9 @@ class Message:
         internal_date: Mailbox ``INTERNALDATE`` fallback when ``sent_date`` is
             absent or unusable.
         sequence_number: Positive mailbox sequence number used to break exact
-            sent-date ties. Input position is used when omitted.
+            sent-date ties and serialize THREAD responses. Input position is
+            used for sorting when omitted.
+        uid: Positive IMAP unique identifier used for UID THREAD responses.
     """
 
     message_id: str | None = None
@@ -59,6 +61,7 @@ class Message:
     sent_date: DateValue = None
     internal_date: DateValue = None
     sequence_number: int | None = None
+    uid: int | None = None
 
 
 def _reference_ids(value: str | Sequence[str] | None) -> list[str]:

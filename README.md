@@ -6,7 +6,8 @@ runtime dependencies.**
 `threadweave` turns a flat iterable of messages into deterministic conversation
 trees. It combines the JWZ container model with RFC 5322 identification fields,
 RFC 2047 encoded-word decoding, RFC 5256 base-subject extraction and optional
-sent-date ordering, and RFC 5051 `i;unicode-casemap` comparison.
+sent-date ordering, RFC 5051 `i;unicode-casemap` comparison, and RFC 5256 IMAP
+`THREAD` response serialization.
 
 It accepts normalized identifiers, raw header strings, or Python standard-library
 `email.message.Message` objects. Malformed historical mail, missing roots,
@@ -68,7 +69,8 @@ assert roots[0].message.payload is messages[0]
 
 The adapter decodes RFC 2047 words under modern and legacy parser policies,
 preserves Unicode header text, tolerates unknown character-set labels, and keeps
-malformed values instead of aborting the mailbox ingest.
+malformed values instead of aborting the mailbox ingest. `message_from_email`
+also accepts mailbox sequence-number and UID metadata for protocol output.
 
 ## Subject fallback
 
@@ -132,15 +134,53 @@ become local midnight, unusable values fall back to `INTERNALDATE`, and exact
 ties use a unique positive mailbox sequence number. Dummy roots and every
 sibling set are sorted in the RFC-defined stages.
 
+## IMAP THREAD response serialization
+
+The core tree remains transport-neutral. IMAP servers and gateways can project a
+search result and serialize it into the exact RFC 5256 response shape:
+
+```python
+from threadweave import Message, serialize_thread_response, thread_messages
+
+roots = thread_messages(
+    [
+        Message(message_id="root", sequence_number=3, uid=103),
+        Message(
+            message_id="child",
+            references=["root"],
+            sequence_number=6,
+            uid=106,
+        ),
+    ]
+)
+
+assert serialize_thread_response(roots) == "* THREAD (3 6)\r\n"
+assert serialize_thread_response(roots, identifier="uid") == (
+    "* THREAD (103 106)\r\n"
+)
+```
+
+`serialize_thread_data` also accepts an `include` predicate for the server's
+search result and a callable identifier resolver for mailbox metadata stored
+outside `Message`. Excluded ancestors are projected as RFC dummy structure;
+source containers are never mutated. Cycles, shared nodes, duplicate numbers,
+missing UIDs, values outside the non-zero unsigned 32-bit range, and unsafe line
+endings fail closed. Both deep chains and nested splits are rendered iteratively.
+
 ## Public API
 
 | Symbol | Purpose |
 |---|---|
-| `Message` | Thread input plus payload and optional mailbox ordering metadata. |
+| `Message` | Thread input plus payload and optional mailbox ordering/protocol metadata. |
 | `Container` | Identity-based, loop-safe thread-tree node. |
 | `thread_messages(...)` | Build JWZ/RFC 5256 thread roots from any iterable. |
 | `message_from_email(...)` | Convert one stdlib email object. |
 | `thread_email_messages(...)` | Convert and thread stdlib email objects. |
+| `serialize_thread_data(...)` | Render RFC 5256 `thread-data` without response framing. |
+| `serialize_thread_response(...)` | Render one untagged `* THREAD` response. |
+| `ThreadSerializationError` | Report invalid graph or mailbox identifier state. |
+| `IdentifierResolver` | Select sequence-number, UID, or callable identifier output. |
+| `MessageFilter` | Type alias for a server search-result predicate. |
 | `normalize_message_id` | Normalize one RFC 5322 identifier. |
 | `extract_reference_ids` | Parse and deduplicate a reference header. |
 | `generate_email_fingerprint` | Produce a deterministic SHA-256 identity fallback. |
@@ -162,8 +202,8 @@ sibling set are sorted in the RFC-defined stages.
   on Python 3.10, 3.11, 3.12, and 3.13.
 - CI builds wheel and source distributions, verifies `py.typed`, installs the
   wheel outside the source tree, and executes a smoke test.
-- Graph operations are iterative and identity-guarded; deep or cyclic malformed
-  input cannot recurse indefinitely.
+- Graph operations and IMAP rendering are iterative and identity-guarded; deep
+  or cyclic malformed input cannot recurse indefinitely.
 
 ## Reproducible CI supply chain
 
@@ -234,11 +274,11 @@ unavailable safe proposal stops the cycle without mutation.
 
 The package remains useful both as a standalone dependency and as a module in
 `naruon` or another service. The threading, subject, collation, and date layers
-are transport-neutral. IMAP `THREAD` response serialization remains a separate
-presentation layer rather than leaking protocol state into the core model.
+are transport-neutral. IMAP `THREAD` response serialization is a separate
+presentation layer rather than protocol state embedded in the core model.
 
 See [`docs/research`](docs/research/README.md) for JWZ, RFC 5322, RFC 2047,
-RFC 5051, RFC 5256, RFC 6532, Unicode-version boundaries, and PEP 561.
+RFC 5051, RFC 5256, RFC 6532, RFC 9051, Unicode-version boundaries, and PEP 561.
 
 ## License
 
