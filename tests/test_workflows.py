@@ -85,18 +85,45 @@ def test_product_development_packages_and_reverifies_a_bounded_patch():
 
 
 def test_reverification_runs_the_complete_product_quality_gate():
-    """A fresh credential-free job proves the patch before publication."""
+    """A fresh credential-free job proves the locked patch before publication."""
     workflow = _workflow("hourly-product-development.yml")
 
     assert "Set up independent Python verification" in workflow
-    assert 'python -m pip install -e ".[test]" "ruff==0.15.20" build' in workflow
+    assert workflow.count("--require-hashes") >= 3
+    assert workflow.count("-r requirements/ci.lock") >= 2
+    assert "python -m build --no-isolation" in workflow
+    assert "wheel_requirements=" in workflow
+    assert "--no-index" in workflow
+    assert "PIP_NO_INDEX=1" in workflow
     assert "ruff check ." in workflow
     assert "coverage run -m pytest -q" in workflow
     assert "coverage report" in workflow
-    assert "python -m build" in workflow
     assert "python -m pip check" in workflow
-    assert "python -m pip install --force-reinstall dist/*.whl" in workflow
     assert "git diff --check" in workflow
+    assert "pip install --upgrade pip" not in workflow
+    assert "pip install -e" not in workflow
+
+
+def test_ci_regenerates_and_installs_only_the_reviewed_hash_lock():
+    """Repository CI rejects stale locks and unhashed package installations."""
+    workflow = _workflow("ci.yml")
+
+    assert "lock-integrity:" in workflow
+    assert (
+        "astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990"
+        in workflow
+    )
+    assert 'version: "0.11.29"' in workflow
+    assert "bash scripts/ci/compile_ci_lock.sh" in workflow
+    assert "cmp --silent requirements/ci.lock" in workflow
+    assert workflow.count(
+        "python -m pip install --require-hashes -r requirements/ci.lock"
+    ) == 2
+    assert "python -m build --no-isolation" in workflow
+    assert "wheel_sha=" in workflow
+    assert "--no-index" in workflow
+    assert "pip install --upgrade pip" not in workflow
+    assert "pip install -e" not in workflow
 
 
 def test_ci_overrides_package_only_coverage_source_for_autonomous_scripts():
