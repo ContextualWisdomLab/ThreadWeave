@@ -172,6 +172,42 @@ def test_get_forwarding_and_header_sanitization():
     assert forwarded["Content-Type"] == "application/json"
 
 
+def test_path_validation_rejects_normalization_ambiguity():
+    """Dot segments, encoded separators, controls, and nested escapes stay local."""
+    invalid_paths = (
+        "/v1/../admin/config",
+        "/v1/././../etc/passwd",
+        "/v1/..",
+        "/v1/../",
+        "/v1/foo/../../bar",
+        "/v1/%2e%2e/admin",
+        "/v1/%2E%2E/admin",
+        "/v1/..%2fadmin",
+        "/v1/..%5cadmin",
+        "/v1/%252e%252e/admin",
+        "/v1/%252fadmin",
+        "/v1/..;session=1/admin",
+        "/v1/%2e%2e%3bsession=1/admin",
+        "/v1/%00/admin",
+        "/v1/%c0%afadmin",
+        "/v1/%",
+        "/v1/%2",
+        "/v1/%zz",
+    )
+    for path in invalid_paths:
+        with pytest.raises(proxy.ProxyConfigurationError, match="path"):
+            proxy._validate_path(path)
+
+    valid_paths = (
+        "/v1/models",
+        "/v1/files/a.b.json",
+        "/v1/models/%7Euser",
+        "/v1/models?cursor=..%2Fpage",
+    )
+    for path in valid_paths:
+        assert proxy._validate_path(path) == path
+
+
 def test_bad_path_body_framing_and_unsupported_methods_fail_locally():
     """Invalid local requests never consume an upstream connection."""
     server, thread = _start_server()

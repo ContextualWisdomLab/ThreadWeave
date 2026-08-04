@@ -20,6 +20,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Final
+from urllib.parse import unquote
 
 UPSTREAM_HOST: Final = "integrate.api.nvidia.com"
 DEFAULT_HOST: Final = "127.0.0.1"
@@ -28,6 +29,8 @@ MAX_REQUEST_BYTES: Final = 16 * 1024 * 1024
 MAX_RESPONSE_BYTES: Final = 32 * 1024 * 1024
 MAX_PATH_CHARACTERS: Final = 4096
 _PATH_RE = re.compile(r"^/v1(?:/[A-Za-z0-9._~!$&'()*+,;=:@%/?-]*)?$")
+_INVALID_PERCENT_ESCAPE_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+_PATH_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _SAFE_HEADER_RE = re.compile(r"^[\x20-\x7e]{1,512}$")
 _REAL_HTTPS_CONNECTION = http.client.HTTPSConnection
 
@@ -60,10 +63,30 @@ def _safe_header(value: str | None, default: str) -> str:
 
 
 def _validate_path(path: str) -> str:
-    """Return a safe fixed-upstream API path or raise configuration error."""
+    """Return one unambiguous fixed-upstream API target or reject it."""
 
     if len(path) > MAX_PATH_CHARACTERS or _PATH_RE.fullmatch(path) is None:
         raise ProxyConfigurationError("request path is outside the NVIDIA NIM v1 API")
+    if _INVALID_PERCENT_ESCAPE_RE.search(path) is not None:
+        raise ProxyConfigurationError("request path contains malformed percent encoding")
+
+    path_component = path.partition("?")[0]
+    for segment in path_component.split("/"):
+        try:
+            decoded = unquote(segment, errors="strict")
+        except UnicodeDecodeError as exc:
+            raise ProxyConfigurationError(
+                "request path contains invalid percent-encoded UTF-8"
+            ) from exc
+        routing_segment = decoded.partition(";")[0]
+        if routing_segment in {".", ".."}:
+            raise ProxyConfigurationError("request path contains a dot segment")
+        if any(separator in decoded for separator in ("/", "\\", "%")):
+            raise ProxyConfigurationError(
+                "request path contains an encoded separator or nested escape"
+            )
+        if _PATH_CONTROL_RE.search(decoded) is not None:
+            raise ProxyConfigurationError("request path contains an encoded control")
     return path
 
 
