@@ -390,6 +390,8 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
+    env:
+      PYTHONPATH: src
     outputs:
       base_sha: ${{ steps.seal.outputs.base_sha }}
       patch_sha256: ${{ steps.seal.outputs.patch_sha256 }}

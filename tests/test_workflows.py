@@ -89,6 +89,10 @@ def test_reverification_runs_the_complete_product_quality_gate():
     workflow = _workflow("hourly-product-development.yml")
 
     assert "Set up independent Python verification" in workflow
+    reverify = workflow.split("  reverify-product-gap:", 1)[1].split(
+        "  publish-product-gap:", 1
+    )[0]
+    assert "PYTHONPATH: src" in reverify
     assert workflow.count("--require-hashes") >= 3
     assert workflow.count("-r requirements/ci.lock") >= 2
     assert "python -m build --no-isolation" in workflow
