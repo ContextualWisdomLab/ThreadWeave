@@ -1,0 +1,316 @@
+name: Release ThreadWeave
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Canonical three-part release version without a leading v
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RELEASE_VERSION: ${{ inputs.version }}
+
+jobs:
+  build-release:
+    name: Build and verify release bundle
+    if: >-
+      github.repository == 'ContextualWisdomLab/ThreadWeave' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.contract.outputs.version }}
+      tag: ${{ steps.contract.outputs.tag }}
+      release_date: ${{ steps.contract.outputs.release_date }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Check out reviewed main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements/ci.lock
+      - name: Install the pinned lock compiler
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.29"
+          enable-cache: false
+      - name: Regenerate and compare the reviewed lock
+        run: |
+          set -euo pipefail
+          regenerated="$(mktemp)"
+          bash scripts/ci/compile_ci_lock.sh "$regenerated"
+          cmp --silent requirements/ci.lock "$regenerated"
+      - name: Install the reviewed CI lock
+        run: python -m pip install --require-hashes -r requirements/ci.lock
+      - name: Repeat the complete quality gate
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          ruff check .
+          python -m compileall -q src tests scripts
+          python -m doctest \
+            src/threadweave/collation.py \
+            src/threadweave/dates.py \
+            src/threadweave/headers.py \
+            src/threadweave/subject.py
+          coverage erase
+          coverage run --branch --source=scripts/ci -m pytest -q \
+            tests/test_autonomous_documentation.py \
+            tests/test_dependency_lock_contract.py \
+            tests/test_hourly_product_guard.py \
+            tests/test_hourly_product_guard_coverage.py \
+            tests/test_hourly_product_guard_return.py \
+            tests/test_nim_proxy.py \
+            tests/test_nim_tls_context.py \
+            tests/test_release_contract.py \
+            tests/test_release_workflow.py
+          coverage report \
+            --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py,scripts/ci/release_contract.py \
+            --fail-under=100 \
+            --show-missing
+          coverage run -m pytest -q
+          coverage report
+          python -m pip check
+      - name: Build wheel and source distribution
+        run: python -m build --no-isolation
+      - name: Hash-install and smoke-test the built wheel
+        env:
+          PYTHONPATH: ""
+        run: |
+          set -euo pipefail
+          wheel_path="$(realpath "$(find dist -maxdepth 1 -name '*.whl' -print -quit)")"
+          wheel_sha="$(sha256sum "$wheel_path" | awk '{print $1}')"
+          wheel_requirements="$RUNNER_TEMP/threadweave-wheel.txt"
+          printf 'threadweave @ file://%s \\\n    --hash=sha256:%s\n' \
+            "$wheel_path" "$wheel_sha" >"$wheel_requirements"
+          python -m pip install \
+            --require-hashes \
+            --no-deps \
+            --no-index \
+            --force-reinstall \
+            -r "$wheel_requirements"
+          temp_dir="$(mktemp -d)"
+          cd "$temp_dir"
+          python - <<'PY'
+          from threadweave import Message, serialize_thread_response, thread_messages
+
+          roots = thread_messages(
+              [
+                  Message(message_id="root", sequence_number=1, uid=101),
+                  Message(
+                      message_id="reply",
+                      references=["root"],
+                      sequence_number=2,
+                      uid=102,
+                  ),
+              ]
+          )
+          assert serialize_thread_response(roots) == "* THREAD (1 2)\r\n"
+          assert serialize_thread_response(roots, identifier="uid") == (
+              "* THREAD (101 102)\r\n"
+          )
+          PY
+      - name: Prepare checksums, release notes, and SPDX evidence
+        id: contract
+        env:
+          GITHUB_OUTPUT_FILE: ${{ github.output }}
+        run: |
+          set -euo pipefail
+          python scripts/ci/release_contract.py prepare \
+            --root . \
+            --version "$RELEASE_VERSION" \
+            --dist-dir dist \
+            --output-dir release \
+            --github-output "$GITHUB_OUTPUT"
+          git diff --exit-code
+      - name: Upload immutable release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/
+            release/
+          if-no-files-found: error
+          retention-days: 7
+
+  attest-release:
+    name: Attest distributions and SPDX SBOM
+    needs: build-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Download reviewed release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.0
+        with:
+          name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-bundle
+      - name: Attest SLSA build provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: ${{ runner.temp }}/release-bundle/dist/*
+      - name: Attest SPDX software bill of materials
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: ${{ runner.temp }}/release-bundle/dist/*
+          sbom-path: ${{ runner.temp }}/release-bundle/release/threadweave-${{ needs.build-release.outputs.version }}.spdx.json
+
+  tag-release:
+    name: Create or verify annotated release tag
+    needs: [build-release, attest-release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Check out reviewed release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Download reviewed release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.0
+        with:
+          name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-bundle
+      - name: Verify bundle checksums and create tag idempotently
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/release-bundle/dist"
+          sha256sum -c ../release/SHA256SUMS.txt
+          cd "$GITHUB_WORKSPACE"
+          annotated="$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}^{}" | awk '{print $1}')"
+          direct="$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')"
+          if [ -n "$annotated" ] || [ -n "$direct" ]; then
+            resolved="${annotated:-$direct}"
+            if [ "$resolved" != "$GITHUB_SHA" ]; then
+              echo "::error::Existing release tag targets a different commit."
+              exit 1
+            fi
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$RELEASE_TAG" "$GITHUB_SHA" -m "ThreadWeave ${RELEASE_VERSION}"
+          git push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "refs/tags/${RELEASE_TAG}"
+
+  github-release:
+    name: Publish GitHub Release evidence
+    needs: [build-release, attest-release, tag-release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Download reviewed release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.0
+        with:
+          name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-bundle
+      - name: Create or update the verified GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/release-bundle"
+          cd "$bundle/dist"
+          sha256sum -c ../release/SHA256SUMS.txt
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            observed="$(
+              gh release view "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json tagName \
+                --jq .tagName
+            )"
+            [ "$observed" = "$RELEASE_TAG" ]
+            gh release upload "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber \
+              "$bundle"/dist/* \
+              "$bundle"/release/SHA256SUMS.txt \
+              "$bundle"/release/*.spdx.json
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "ThreadWeave ${RELEASE_VERSION}" \
+              --notes-file "$bundle/release/RELEASE_NOTES.md" \
+              "$bundle"/dist/* \
+              "$bundle"/release/SHA256SUMS.txt \
+              "$bundle"/release/*.spdx.json
+          fi
+
+  publish-pypi:
+    name: Publish exact artifacts to PyPI
+    needs: [build-release, attest-release, tag-release, github-release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/threadweave
+    permissions:
+      actions: read
+      id-token: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Download reviewed release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.0
+        with:
+          name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-bundle
+      - name: Publish through PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          packages-dir: ${{ runner.temp }}/release-bundle/dist/
+          attestations: true
+          print-hash: true
