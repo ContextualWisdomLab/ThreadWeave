@@ -84,9 +84,9 @@ behavior-sensitive.
 ## Verify
 
 ```bash
-python -m pip install -e ".[test]" ruff build
+python -m pip install --require-hashes -r requirements/ci.lock
 ruff check .
-python -m compileall -q src tests
+python -m compileall -q src tests scripts
 python -m doctest \
   src/threadweave/collation.py \
   src/threadweave/dates.py \
@@ -94,9 +94,14 @@ python -m doctest \
   src/threadweave/subject.py
 coverage run -m pytest -q
 coverage report
-python -m build
+python -m build --no-isolation
 python -m pip check
 ```
+
+Regenerate dependency policy only through `scripts/ci/compile_ci_lock.sh` with
+uv 0.11.29, then review the complete lock diff and follow
+[`docs/supply-chain.md`](docs/supply-chain.md). Never bypass a hash mismatch by
+adding an unhashed install or re-enabling isolated build resolution.
 
 For workflow changes, also parse every YAML file and run `bash -n` over every
 shell `run` block. Built wheels must be installed and smoke-tested outside the
