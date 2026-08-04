@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Reject dot segments, encoded separators, nested escapes, path-parameter
+  traversal, malformed percent escapes, and encoded controls in the loopback NIM
+  broker before any request can reach the fixed upstream.
 - Hash-lock every CI, test, lint, coverage, and build dependency, regenerate the universal lock byte-for-byte with a pinned uv compiler, and reuse the same reviewed toolchain in autonomous verification.
 - Replace the unavailable Copilot Agent Tasks dispatcher with an hourly OpenCode
   development session backed by NVIDIA NIM.
