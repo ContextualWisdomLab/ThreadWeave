@@ -45,7 +45,7 @@ from threadweave.subject import (
 )
 from threadweave.threading import Message, thread_messages
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # REFERENCE_PATTERN is an implementation detail of `threadweave.headers`; use
 # `extract_reference_ids`. It stays importable as `threadweave.headers.REFERENCE_PATTERN`.

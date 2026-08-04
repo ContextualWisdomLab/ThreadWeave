@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "threadweave"
-version = "0.1.0"
-description = "The canonical JWZ email message-threading algorithm with RFC 5322 identification-field parsing — pure stdlib, no runtime dependencies."
+version = "0.2.0"
+description = "Standards-grounded JWZ/RFC 5256 email threading and IMAP THREAD serialization — pure stdlib, no runtime dependencies."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -13,7 +13,9 @@ authors = [{ name = "Contextual Wisdom Lab" }]
 keywords = [
     "email",
     "threading",
+    "imap",
     "jwz",
+    "rfc5256",
     "rfc5322",
     "mailbox",
     "conversation",
@@ -43,6 +45,8 @@ test = [
 Homepage = "https://github.com/ContextualWisdomLab/ThreadWeave"
 Repository = "https://github.com/ContextualWisdomLab/ThreadWeave"
 Issues = "https://github.com/ContextualWisdomLab/ThreadWeave/issues"
+Changelog = "https://github.com/ContextualWisdomLab/ThreadWeave/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/ContextualWisdomLab/ThreadWeave#readme"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/threadweave"]

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.2.0] - 2026-08-04
+
 - Add iterative RFC 5256 `THREAD` and `UID THREAD` response serialization with
   search-result projection, sequence-number, UID, or callable identifier
   selection, dummy-root preservation, protocol-safe framing, and fail-closed
