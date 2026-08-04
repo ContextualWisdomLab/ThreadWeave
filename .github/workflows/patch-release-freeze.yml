@@ -1,4 +1,4 @@
-name: Apply release-freeze gate
+name: Export release-freeze workflow blob
 
 on:
   push:
@@ -7,13 +7,14 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
-  group: apply-release-freeze-${{ github.ref }}
+  group: export-release-freeze-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  patch:
+  export:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -27,7 +28,7 @@ jobs:
           ref: ci/pause-development-for-release-blocker
           fetch-depth: 1
           persist-credentials: false
-      - name: Patch the tested gate and remove this workflow
+      - name: Patch and export the reviewed workflow blob
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -58,13 +59,17 @@ jobs:
               raise SystemExit('expected one exact dry-run gate')
           path.write_text(text.replace(marker, insertion + marker), encoding='utf-8')
           PY
-          rm .github/workflows/patch-release-freeze.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "ci: stop product development during release freezes"
-          basic="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          GIT_CONFIG_COUNT=1 \
-          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $basic" \
-            git push origin HEAD:ci/pause-development-for-release-blocker
+          encoded="$(base64 -w0 .github/workflows/hourly-product-development.yml)"
+          blob_sha="$(
+            jq -n --arg content "$encoded" '{content: $content, encoding: "base64"}' |
+              gh api \
+                --method POST \
+                "repos/${GITHUB_REPOSITORY}/git/blobs" \
+                --input - \
+                --jq '.sha'
+          )"
+          body="<!-- release-freeze-workflow-blob --> head=${GITHUB_SHA} blob=${blob_sha}"
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/18/comments" \
+            -f body="$body"
