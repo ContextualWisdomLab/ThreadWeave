@@ -101,3 +101,11 @@ python -m pip check
 For workflow changes, also parse every YAML file and run `bash -n` over every
 shell `run` block. Built wheels must be installed and smoke-tested outside the
 source tree.
+
+## Code-owner review gates — disabled (on hold)
+
+As of 2026-08-04, code-owner review requirements (`require_code_owner_reviews` in branch
+protection, `require_code_owner_review` in rulesets) are disabled across the ContextualWisdomLab
+org: there is a single maintainer (solo developer), so a code-owner approval gate can never be
+satisfied. This is ON HOLD until the org has multiple maintainers — do NOT re-enable these
+settings or add CODEOWNERS-based merge gates before then.
