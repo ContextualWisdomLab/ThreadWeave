@@ -30,48 +30,121 @@ def test_hourly_pr_maintenance_uses_central_cwl_workflows():
     assert "secrets: inherit" in workflow
 
 
-def test_product_development_uses_supported_agent_task_authentication():
-    """Raw Agent Tasks REST calls use a supported fine-grained user token."""
-    workflow = _workflow("hourly-product-development.yml")
-
-    assert 'AGENT_TASK_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}' in workflow
-    assert 'REPOSITORY_TOKEN: ${{ github.token }}' in workflow
-    assert 'reason=agent_task_token_unavailable' in workflow
-    assert 'GH_TOKEN="$AGENT_TASK_TOKEN" gh api' in workflow
-    assert 'GH_TOKEN="$REPOSITORY_TOKEN" gh pr list' in workflow
-    assert 'X-GitHub-Api-Version: 2026-03-10' in workflow
-    assert "copilot-requests: write" not in workflow
-    assert "GH_TOKEN: ${{ github.token }}" not in workflow
-
-
-def test_product_development_is_single_flight_and_fail_closed():
-    """New work starts only when no PR or active/unknown task exists."""
+def test_product_development_brokers_nim_outside_the_model_process():
+    """The model gets a placeholder key while a loopback broker owns the secret."""
     workflow = _workflow("hourly-product-development.yml")
 
     assert 'cron: "41 * * * *"' in workflow
     assert "cancel-in-progress: false" in workflow
-    assert '--state open --limit 1 --json number,url' in workflow
-    assert '"/agents/repos/${GITHUB_REPOSITORY}/tasks?per_page=100"' in workflow
-    assert 'reason=task_inventory_unavailable' in workflow
-    assert 'reason=active_agent_task' in workflow
-    assert '$state != "completed"' in workflow
-    assert '$state != "failed"' in workflow
-    assert '$state != "timed_out"' in workflow
-    assert '$state != "cancelled"' in workflow
-    assert "// \"unknown\"" in workflow
+    assert "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}" in workflow
+    assert "python scripts/ci/nim_proxy.py" in workflow
+    assert '"baseURL": "http://127.0.0.1:8765/v1"' in workflow
+    assert "NVIDIA_API_KEY=threadweave-local-broker" in workflow
+    assert "NVIDIA_API_KEY=\"$NIM_UPSTREAM_API_KEY\"" not in workflow
+    assert "sudo -u '#65532' -g '#65532' env -i" in workflow
+    assert "sudo pkill -KILL -u 65532" in workflow
+    assert "git archive HEAD | tar -x" in workflow
+    assert "persist-credentials: false" in workflow
+    assert '"webfetch": "deny"' in workflow
+    assert '"websearch": "deny"' in workflow
+    assert "COPILOT_GITHUB_TOKEN" not in workflow
+    assert "/agents/repos" not in workflow
 
 
-def test_product_task_is_bounded_reviewable_and_commercially_focused():
-    """Every autonomous cycle creates one tested PR and never self-merges."""
+def test_model_job_blocks_undeclared_network_egress():
+    """The provider process cannot use DNS or arbitrary endpoints for exfiltration."""
+    workflow = _workflow("hourly-product-development.yml")
+    workflow_lines = {line.strip() for line in workflow.splitlines()}
+    required_endpoints = {
+        "integrate.api.nvidia.com:443",
+        "registry.npmjs.org:443",
+        "*.blob.core.windows.net:443",
+    }
+
+    assert workflow.count("egress-policy: block") == 3
+    assert workflow.count("disable-telemetry: true") == 3
+    assert required_endpoints <= workflow_lines
+    assert "egress-policy: audit" not in workflow_lines
+
+
+def test_product_development_packages_and_reverifies_a_bounded_patch():
+    """Model output crosses jobs only as a validated immutable text patch."""
     workflow = _workflow("hourly-product-development.yml")
 
-    assert "create_pull_request: true" in workflow
-    assert "Maintain 100% production" in workflow
-    assert "statement and branch coverage" in workflow
-    assert "Update CHANGELOG.md" in workflow
-    assert "Create exactly one bounded pull request" in workflow
-    assert "buyer-visible" in workflow
-    assert "security-sensitive edge cases" in workflow
-    assert "Do not merge, publish, or bypass" in workflow
-    assert "reviews. Create exactly one bounded pull request" in workflow
+    assert "scripts/ci/hourly_product_guard.py capture" in workflow
+    assert workflow.count("scripts/ci/hourly_product_guard.py apply") == 2
+    assert "THREADWEAVE_FORBIDDEN_SECRET" in workflow
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in workflow
+    assert "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" in workflow
+    assert "reverify-product-gap:" in workflow
+    assert "publish-product-gap:" in workflow
+    assert workflow.count("pulls?state=open&per_page=1") >= 3
+    assert 'git add -A -- src/threadweave tests docs README.md CHANGELOG.md' in workflow
+    assert "pyproject.toml" in workflow
+    assert "Do not edit .github/**, scripts/**, AGENTS.md" in workflow
+
+
+def test_reverification_runs_the_complete_product_quality_gate():
+    """A fresh credential-free job proves the patch before publication."""
+    workflow = _workflow("hourly-product-development.yml")
+
+    assert "Set up independent Python verification" in workflow
+    assert 'python -m pip install -e ".[test]" "ruff==0.15.20" build' in workflow
+    assert "ruff check ." in workflow
+    assert "coverage run -m pytest -q" in workflow
+    assert "coverage report" in workflow
+    assert "python -m build" in workflow
+    assert "python -m pip check" in workflow
+    assert "python -m pip install --force-reinstall dist/*.whl" in workflow
+    assert "git diff --check" in workflow
+
+
+def test_ci_overrides_package_only_coverage_source_for_autonomous_scripts():
+    """The focused script run must override pyproject's `source = threadweave`."""
+    workflow = _workflow("ci.yml")
+
+    assert "coverage run --branch --source=scripts/ci -m pytest -q" in workflow
+    assert (
+        "--include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py"
+        in workflow
+    )
+    assert "--fail-under=100" in workflow
+
+
+def test_ci_cancels_stale_runs_per_pull_request_or_protected_ref():
+    """Only the newest PR head or protected-ref push may consume CI runners."""
+    workflow = _workflow("ci.yml")
+
+    assert "concurrency:" in workflow
+    assert (
+        "group: ci-${{ github.workflow }}-${{ "
+        "github.event.pull_request.number || github.ref }}"
+    ) in workflow
+    assert "cancel-in-progress: true" in workflow
+
+
+def test_publication_uses_external_automation_token_without_write_token_permissions():
+    """A fresh trusted job opens the PR so required workflows start automatically."""
+    workflow = _workflow("hourly-product-development.yml")
+
+    assert "contents: write" not in workflow
+    assert "pull-requests: write" not in workflow
+    assert (
+        "AUTOMATION_TOKEN: ${{ secrets.PR_REVIEW_MERGE_TOKEN || "
+        "secrets.OPENCODE_APPROVE_TOKEN }}"
+    ) in workflow
+    assert "GH_TOKEN=\"$AUTOMATION_TOKEN\" gh pr create" in workflow
+    assert "https://x-access-token:${AUTOMATION_TOKEN}@github.com/" in workflow
     assert "gh pr merge" not in workflow
+
+
+def test_product_task_is_test_first_documented_and_never_self_releases():
+    """Every autonomous increment remains reviewable and commercially focused."""
+    workflow = _workflow("hourly-product-development.yml")
+
+    assert "Use test-driven development" in workflow
+    assert "Maintain 100% production statement and branch coverage" in workflow
+    assert "Record user-visible changes under CHANGELOG.md [Unreleased]" in workflow
+    assert "highest-value buyer-visible" in workflow
+    assert "Do not stage, commit, push, open a pull request, tag, or publish" in workflow
+    assert "PR_MESSAGE.md" in workflow

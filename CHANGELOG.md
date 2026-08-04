@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Replace the unavailable Copilot Agent Tasks dispatcher with an hourly OpenCode
+  development session backed by NVIDIA NIM.
+- Keep the real `NVIDIA_NIM_API_KEY` outside the model process in a loopback-only
+  credential broker that injects authorization only for the fixed NIM host,
+  bounds traffic, strips caller credentials, and suppresses prompt logging.
+- Isolate the model in a disposable `.git`-free workspace under an unprivileged
+  user, with a non-secret placeholder provider key, no GitHub or OIDC credential,
+  blocked undeclared network egress, bounded process resources, and no web-fetch
+  tools; terminate surviving model descendants before trusted inspection.
+- Add a fail-closed autonomous patch boundary that permits only bounded UTF-8
+  text changes to product source, tests, docs, README, and CHANGELOG; reject
+  workflow, policy, dependency, release, deletion, rename, link, binary,
+  executable, mode, size, line-budget, unsafe metadata, and common secret-leak
+  changes.
+- Reapply the exact sealed patch on a fresh credential-free runner and require
+  Ruff, compileall, doctests, the full pytest/coverage suite, package build,
+  dependency checks, and installed-wheel smoke verification before a third fresh
+  runner may open one PR with an external automation token.
+- Require 100% statement and branch coverage for the autonomous patch guard and
+  loopback NIM credential broker in addition to the package's production code.
 - Preserve root ordering when subject grouping creates a synthetic container.
 - Preserve first-appearance root ordering for messages with missing or duplicate
   `Message-ID` values.
@@ -57,10 +77,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that the PEP 561 `py.typed` marker is packaged.
 - Add an hourly centralized review-fix/check-revalidation/merge workflow that
   delegates policy to the organization `.github` repository.
-- Add a pull-request-first, single-flight hourly product-development dispatcher
-  for the GitHub Agent Tasks public-preview API. It uses a supported fine-
-  grained user token, the current API version, fail-closed task inventory, and
-  contract tests that prevent self-merging or duplicate autonomous work.
 
 ## [0.1.0] - 2026-07-12
 

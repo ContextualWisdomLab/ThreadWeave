@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -16,16 +20,20 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[test]" ruff
+      # Pin ruff: an unpinned "latest" broke every branch when a new release
+      # changed the default rule set.
+      - run: python -m pip install -e ".[test]" "ruff==0.15.20"
       - run: ruff check .
-      - run: python -m compileall -q src tests
+      - run: python -m compileall -q src tests scripts
       - name: Run production doctests
         run: |
           python -m doctest \
@@ -33,6 +41,22 @@ jobs:
             src/threadweave/dates.py \
             src/threadweave/headers.py \
             src/threadweave/subject.py
+      - name: Require complete autonomous-boundary coverage
+        env:
+          COVERAGE_FILE: .coverage.autonomous
+        run: |
+          coverage erase
+          coverage run --branch --source=scripts/ci -m pytest -q \
+            tests/test_autonomous_documentation.py \
+            tests/test_hourly_product_guard.py \
+            tests/test_hourly_product_guard_coverage.py \
+            tests/test_hourly_product_guard_return.py \
+            tests/test_nim_proxy.py \
+            tests/test_nim_tls_context.py
+          coverage report \
+            --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py \
+            --fail-under=100 \
+            --show-missing
       - run: coverage run -m pytest -q
       - run: coverage report
       - run: python -m pip check
@@ -40,8 +64,10 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
@@ -95,7 +121,7 @@ jobs:
               "later@example.com",
           ]
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: threadweave-distributions
           path: dist/
