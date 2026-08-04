@@ -1,0 +1,46 @@
+name: Bootstrap CI dependency lock
+
+on:
+  push:
+    branches: [supply-chain/hash-locked-ci]
+    paths:
+      - .github/workflows/bootstrap-ci-lock.yml
+      - requirements/ci.in
+      - scripts/ci/compile_ci_lock.sh
+      - pyproject.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bootstrap-ci-lock-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Check out the lock policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned lock compiler
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.29"
+          enable-cache: false
+      - name: Compile the universal hash lock
+        run: bash scripts/ci/compile_ci_lock.sh "$RUNNER_TEMP/ci.lock"
+      - name: Preserve the generated lock
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: threadweave-ci-lock-${{ github.sha }}
+          path: ${{ runner.temp }}/ci.lock
+          if-no-files-found: error
+          retention-days: 3
