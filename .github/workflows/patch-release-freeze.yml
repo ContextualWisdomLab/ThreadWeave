@@ -38,29 +38,8 @@ jobs:
 
           path = Path('.github/workflows/hourly-product-development.yml')
           text = path.read_text(encoding='utf-8')
-          old = '''          if [ "$open_prs" -ne 0 ]; then
-            {
-              echo "develop=false"
-              echo "reason=open_pull_request"
-            } >>"$GITHUB_OUTPUT"
-            echo "An open pull request exists; the maintenance loop owns this hour." \\
-              >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          if [ "$DRY_RUN" = "true" ]; then
-          '''
-          new = '''          if [ "$open_prs" -ne 0 ]; then
-            {
-              echo "develop=false"
-              echo "reason=open_pull_request"
-            } >>"$GITHUB_OUTPUT"
-            echo "An open pull request exists; the maintenance loop owns this hour." \\
-              >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          release_blockers="$(
+          marker = '          if [ "$DRY_RUN" = "true" ]; then\n'
+          insertion = '''          release_blockers="$(
             gh api \\
               "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=release-blocker&per_page=1" \\
               --jq '[.[] | select(.pull_request == null)] | length'
@@ -75,11 +54,10 @@ jobs:
             exit 0
           fi
 
-          if [ "$DRY_RUN" = "true" ]; then
-          '''
-          if text.count(old) != 1:
-              raise SystemExit('expected one exact product gate block')
-          path.write_text(text.replace(old, new), encoding='utf-8')
+'''
+          if text.count(marker) != 1:
+              raise SystemExit('expected one exact dry-run gate')
+          path.write_text(text.replace(marker, insertion + marker), encoding='utf-8')
           PY
           mkdir -p "$RUNNER_TEMP/release-freeze-gate/.github/workflows"
           cp .github/workflows/hourly-product-development.yml \
