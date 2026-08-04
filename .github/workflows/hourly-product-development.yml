@@ -28,6 +28,8 @@ env:
     nvidia-nim/nvidia/nemotron-3-super-120b-a12b
     nvidia-nim/deepseek-ai/deepseek-v4-pro
   OPENCODE_RUN_TIMEOUT_SECONDS: "2100"
+  NIM_PROXY_HOST: "127.0.0.1"
+  NIM_PROXY_PORT: "8765"
 
 jobs:
   develop-product-gap:
@@ -42,22 +44,36 @@ jobs:
       changed: ${{ steps.package.outputs.changed }}
       patch_sha256: ${{ steps.package.outputs.patch_sha256 }}
     steps:
-      - name: Harden runner
+      - name: Harden runner and block undeclared egress
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: |
+            api.github.com:443
+            codeload.github.com:443
+            files.pythonhosted.org:443
+            github.com:443
+            integrate.api.nvidia.com:443
+            objects.githubusercontent.com:443
+            pypi.org:443
+            registry.npmjs.org:443
+            release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
 
       - name: Enforce the credential and pull-request-first gate
         id: gate
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          NVIDIA_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+          NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
           DRY_RUN: ${{ inputs.dry_run || false }}
         run: |
           set -euo pipefail
 
-          if [ -z "${NVIDIA_API_KEY:-}" ]; then
+          if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then
             {
               echo "develop=false"
               echo "reason=nim_api_key_unavailable"
@@ -96,13 +112,21 @@ jobs:
 
       - name: Check out the protected default branch without persisted credentials
         if: steps.gate.outputs.develop == 'true'
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Install the pinned OpenCode CLI
+      - name: Set up the trusted Python toolchain
+        if: steps.gate.outputs.develop == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the pinned OpenCode CLI and model test tools
         if: steps.gate.outputs.develop == 'true'
         shell: bash
         run: |
@@ -116,6 +140,14 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP"
           sudo install -m 0755 "${RUNNER_TEMP}/opencode" /usr/local/bin/opencode
           opencode --version
+
+          agent_venv="${RUNNER_TEMP}/threadweave-agent-venv"
+          python -m venv "$agent_venv"
+          "$agent_venv/bin/python" -m pip install --upgrade pip
+          "$agent_venv/bin/python" -m pip install \
+            -e ".[test]" \
+            "ruff==0.15.20" \
+            build
 
       - name: Prepare an immutable diff baseline and bounded task
         if: steps.gate.outputs.develop == 'true'
@@ -174,18 +206,51 @@ jobs:
           test evidence, standards sources, compatibility, and residual risk.
           PROMPT
 
+      - name: Start the loopback-only NIM credential broker
+        if: steps.gate.outputs.develop == 'true'
+        shell: bash
+        env:
+          NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          proxy_log="${RUNNER_TEMP}/threadweave-nim-proxy.log"
+          proxy_pid="${RUNNER_TEMP}/threadweave-nim-proxy.pid"
+          python scripts/ci/nim_proxy.py \
+            --host "$NIM_PROXY_HOST" \
+            --port "$NIM_PROXY_PORT" \
+            >"$proxy_log" 2>&1 &
+          printf '%s\n' "$!" >"$proxy_pid"
+
+          ready=false
+          for _attempt in $(seq 1 30); do
+            if curl -fsS \
+              "http://${NIM_PROXY_HOST}:${NIM_PROXY_PORT}/healthz" \
+              >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != "true" ]; then
+            cat "$proxy_log" >&2
+            echo "::error::The loopback NIM credential broker did not become ready."
+            exit 1
+          fi
+
       - name: Run the NVIDIA NIM development agent in a disposable workspace
         if: steps.gate.outputs.develop == 'true'
         id: agent
         shell: bash
-        env:
-          NVIDIA_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
         run: |
           set -euo pipefail
+          trap 'sudo pkill -KILL -u 65532 >/dev/null 2>&1 || true' EXIT
           prompt="$(cat "${RUNNER_TEMP}/threadweave-agent-prompt.md")"
           successful_workspace=""
+          agent_venv="${RUNNER_TEMP}/threadweave-agent-venv"
 
           for model in $OPENCODE_MODEL_CANDIDATES; do
+            sudo pkill -KILL -u 65532 >/dev/null 2>&1 || true
             agent_workspace="${RUNNER_TEMP}/threadweave-agent"
             agent_home="${RUNNER_TEMP}/threadweave-agent-home"
             rm -rf "$agent_workspace" "$agent_home"
@@ -214,9 +279,9 @@ jobs:
             "provider": {
               "nvidia-nim": {
                 "npm": "@ai-sdk/openai-compatible",
-                "name": "NVIDIA NIM",
+                "name": "NVIDIA NIM through local broker",
                 "options": {
-                  "baseURL": "https://integrate.api.nvidia.com/v1",
+                  "baseURL": "http://127.0.0.1:8765/v1",
                   "apiKey": "{env:NVIDIA_API_KEY}"
                 },
                 "models": {
@@ -245,20 +310,26 @@ jobs:
             echo "::group::opencode $model"
             if timeout --kill-after=30s "${OPENCODE_RUN_TIMEOUT_SECONDS}s" \
               sudo -u '#65532' -g '#65532' env -i \
-                PATH=/usr/local/bin:/usr/bin:/bin \
+                PATH="${agent_venv}/bin:/usr/local/bin:/usr/bin:/bin" \
                 HOME="$agent_home" \
                 TMPDIR="$agent_home/tmp" \
+                PYTHONPATH="$agent_workspace/src" \
+                PYTHONDONTWRITEBYTECODE=1 \
+                PIP_NO_INDEX=1 \
                 LANG=C.UTF-8 \
                 LC_ALL=C.UTF-8 \
-                NVIDIA_API_KEY="$NVIDIA_API_KEY" \
+                NVIDIA_API_KEY=threadweave-local-broker \
                 OPENCODE_DISABLE_AUTOUPDATE=1 \
-                sh -c 'cd "$1" && exec opencode run "$2" --model "$3"' \
-                sh "$agent_workspace" "$prompt" "$model"; then
+                /bin/bash -c \
+                  'ulimit -u 256; ulimit -n 1024; cd "$1"; exec opencode run "$2" --model "$3"' \
+                bash "$agent_workspace" "$prompt" "$model"; then
+              sudo pkill -KILL -u 65532 >/dev/null 2>&1 || true
               successful_workspace="$agent_workspace"
               echo "::endgroup::"
               echo "Agent session completed with \`$model\`." >>"$GITHUB_STEP_SUMMARY"
               break
             fi
+            sudo pkill -KILL -u 65532 >/dev/null 2>&1 || true
             echo "::endgroup::"
             echo "::warning::Model $model failed; its disposable workspace was discarded."
           done
@@ -270,6 +341,19 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" "$successful_workspace"
           rm -f "$successful_workspace/opencode.json"
           echo "workspace=$successful_workspace" >>"$GITHUB_OUTPUT"
+
+      - name: Stop the credential broker and all model descendants
+        if: always() && steps.gate.outputs.develop == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo pkill -KILL -u 65532 >/dev/null 2>&1 || true
+          proxy_pid_file="${RUNNER_TEMP}/threadweave-nim-proxy.pid"
+          if [ -s "$proxy_pid_file" ]; then
+            proxy_pid="$(cat "$proxy_pid_file")"
+            kill "$proxy_pid" >/dev/null 2>&1 || true
+            wait "$proxy_pid" >/dev/null 2>&1 || true
+          fi
 
       - name: Capture the bounded credential-free patch
         if: steps.gate.outputs.develop == 'true'
@@ -303,7 +387,7 @@ jobs:
     needs: develop-product-gap
     if: needs.develop-product-gap.outputs.changed == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
@@ -313,17 +397,35 @@ jobs:
       patch_sha256: ${{ steps.seal.outputs.patch_sha256 }}
       publish: ${{ steps.seal.outputs.publish }}
     steps:
-      - name: Harden runner
+      - name: Harden runner and block undeclared egress
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: |
+            api.github.com:443
+            files.pythonhosted.org:443
+            github.com:443
+            objects.githubusercontent.com:443
+            pypi.org:443
+            release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
 
       - name: Check out a fresh protected branch
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 1
           persist-credentials: false
+
+      - name: Set up independent Python verification
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Download the untrusted proposal artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -368,19 +470,50 @@ jobs:
             "$artifact_dir/threadweave.patch" \
             "$artifact_dir/proposal.json"
 
-      - name: Run dependency-free independent verification
+      - name: Install independent verification dependencies
+        if: steps.gate.outputs.verify == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]" "ruff==0.15.20" build
+
+      - name: Run complete independent verification
         if: steps.gate.outputs.verify == 'true'
         shell: bash
         run: |
           set -euo pipefail
           python scripts/ci/hourly_product_guard.py self-test
-          python -m compileall -q src tests
+          ruff check .
+          python -m compileall -q src tests scripts
           python -m doctest \
             src/threadweave/collation.py \
             src/threadweave/dates.py \
             src/threadweave/headers.py \
             src/threadweave/subject.py
+          coverage run -m pytest -q
+          coverage report
+          python -m build
+          python -m pip check
           git diff --check
+
+          temp_dir="$(mktemp -d)"
+          python -m pip install --force-reinstall dist/*.whl
+          (
+            cd "$temp_dir"
+            python - <<'PY'
+          from threadweave import Message, thread_messages
+
+          roots = thread_messages(
+              [
+                  Message(message_id="later", sent_date="2 Jan 2026 +0000"),
+                  Message(message_id="earlier", sent_date="1 Jan 2026 +0000"),
+              ],
+              sort_by_sent_date=True,
+          )
+          assert [root.message.message_id for root in roots] == ["earlier", "later"]
+          PY
+          )
 
       - name: Seal the independently verified proposal receipt
         if: steps.gate.outputs.verify == 'true'
@@ -413,13 +546,21 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - name: Harden runner
+      - name: Harden runner and block undeclared egress
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: |
+            api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
 
       - name: Check out a fresh protected branch
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 1
@@ -531,5 +672,5 @@ jobs:
           )"
           {
             echo "Opened independently verified pull request: $pr_url"
-            echo "The hourly PR-maintenance loop owns review, repair, checks, and merge."
+            echo "The hourly PR-maintenance loop owns review, repair, revalidation, and merge."
           } >>"$GITHUB_STEP_SUMMARY"
