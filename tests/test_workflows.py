@@ -54,13 +54,17 @@ def test_product_development_brokers_nim_outside_the_model_process():
 def test_model_job_blocks_undeclared_network_egress():
     """The provider process cannot use DNS or arbitrary endpoints for exfiltration."""
     workflow = _workflow("hourly-product-development.yml")
+    workflow_lines = {line.strip() for line in workflow.splitlines()}
+    required_endpoints = {
+        "integrate.api.nvidia.com:443",
+        "registry.npmjs.org:443",
+        "*.blob.core.windows.net:443",
+    }
 
     assert workflow.count("egress-policy: block") == 3
     assert workflow.count("disable-telemetry: true") == 3
-    assert "integrate.api.nvidia.com:443" in workflow
-    assert "registry.npmjs.org:443" in workflow
-    assert "*.blob.core.windows.net:443" in workflow
-    assert "egress-policy: audit" not in workflow
+    assert required_endpoints <= workflow_lines
+    assert "egress-policy: audit" not in workflow_lines
 
 
 def test_product_development_packages_and_reverifies_a_bounded_patch():
