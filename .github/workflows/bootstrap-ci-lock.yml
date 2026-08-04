@@ -1,3 +1,4 @@
+# Temporary trusted bootstrap. Remove after requirements/ci.lock is committed.
 name: Bootstrap CI dependency lock
 
 on:
