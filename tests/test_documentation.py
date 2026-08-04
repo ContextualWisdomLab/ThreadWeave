@@ -10,6 +10,7 @@ import threadweave.container
 import threadweave.dates
 import threadweave.encoded_words
 import threadweave.headers
+import threadweave.imap
 import threadweave.subject
 import threadweave.threading
 
@@ -20,6 +21,7 @@ MODULES = (
     threadweave.dates,
     threadweave.encoded_words,
     threadweave.headers,
+    threadweave.imap,
     threadweave.subject,
     threadweave.threading,
 )
