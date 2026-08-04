@@ -47,6 +47,7 @@ jobs:
         run: |
           coverage erase
           coverage run --branch --source=scripts/ci -m pytest -q \
+            tests/test_autonomous_documentation.py \
             tests/test_hourly_product_guard.py \
             tests/test_hourly_product_guard_coverage.py \
             tests/test_nim_proxy.py
