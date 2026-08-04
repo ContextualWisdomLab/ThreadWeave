@@ -38,22 +38,22 @@ jobs:
           path = Path('.github/workflows/hourly-product-development.yml')
           text = path.read_text(encoding='utf-8')
           marker = '          if [ "$DRY_RUN" = "true" ]; then\n'
-          insertion = '''          release_blockers="$(
-            gh api \\
-              "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=release-blocker&per_page=1" \\
-              --jq '[.[] | select(.pull_request == null)] | length'
-          )"
-          if [ "$release_blockers" -ne 0 ]; then
-            {
-              echo "develop=false"
-              echo "reason=release_blocker"
-            } >>"$GITHUB_OUTPUT"
-            echo "A release-blocker issue is open; product development remains frozen." \\
-              >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-'''
+          insertion = (
+              '          release_blockers="$(\n'
+              '            gh api \\\n'
+              '              "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=release-blocker&per_page=1" \\\n'
+              "              --jq '[.[] | select(.pull_request == null)] | length'\n"
+              '          )"\n'
+              '          if [ "$release_blockers" -ne 0 ]; then\n'
+              '            {\n'
+              '              echo "develop=false"\n'
+              '              echo "reason=release_blocker"\n'
+              '            } >>"$GITHUB_OUTPUT"\n'
+              '            echo "A release-blocker issue is open; product development remains frozen." \\\n'
+              '              >>"$GITHUB_STEP_SUMMARY"\n'
+              '            exit 0\n'
+              '          fi\n\n'
+          )
           if text.count(marker) != 1:
               raise SystemExit('expected one exact dry-run gate')
           path.write_text(text.replace(marker, insertion + marker), encoding='utf-8')
