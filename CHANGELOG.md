@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Replace the Copilot cloud-agent dispatch in `hourly-product-development.yml`
+  with an in-workflow OpenCode agent authenticated by the `NVIDIA_NIM_API_KEY`
+  organization secret; the workflow now opens the bounded pull request itself
+  and no longer assumes `COPILOT_GITHUB_TOKEN` or the Agent Tasks API.
 - Preserve root ordering when subject grouping creates a synthetic container.
 - Preserve first-appearance root ordering for messages with missing or duplicate
   `Message-ID` values.

@@ -245,15 +245,15 @@ first:
 
 - At minute 11 each hour, `hourly-pr-maintenance.yml` invokes the organization-
   governed review-fix and merge schedulers from `ContextualWisdomLab/.github`.
-- At minute 41 each hour, `hourly-product-development.yml` creates one bounded
-  Copilot cloud-agent task only when there is no open pull request and no active
-  or unknown-state task. Inventory failure closes the gate.
+- At minute 41 each hour, `hourly-product-development.yml` runs one bounded
+  in-workflow OpenCode agent session against NVIDIA NIM only when there is no
+  open pull request, then packages the working tree as exactly one pull
+  request. The workflow's concurrency group keeps runs single-flight.
 
-The Agent Tasks REST API requires a supported user token. Configure
-`COPILOT_GITHUB_TOKEN` as a fine-grained personal access token with Agent tasks
-read/write permission for this repository and an eligible Copilot Business or
-Enterprise user. Without it, the workflow records the prerequisite and exits
-without mutation. Both workflows provide a manual `dry_run` input.
+The agent authenticates with the `NVIDIA_NIM_API_KEY` organization secret;
+no Copilot subscription or fine-grained user token is required. Without the
+secret, the workflow records the prerequisite and exits without mutation.
+Both workflows provide a manual `dry_run` input.
 
 ## One source, multi use
 

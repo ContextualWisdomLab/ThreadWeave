@@ -30,48 +30,47 @@ def test_hourly_pr_maintenance_uses_central_cwl_workflows():
     assert "secrets: inherit" in workflow
 
 
-def test_product_development_uses_supported_agent_task_authentication():
-    """Raw Agent Tasks REST calls use a supported fine-grained user token."""
+def test_product_development_authenticates_with_nvidia_nim():
+    """The in-workflow agent uses NVIDIA NIM only; Copilot is never assumed."""
     workflow = _workflow("hourly-product-development.yml")
 
-    assert 'AGENT_TASK_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}' in workflow
+    assert 'NVIDIA_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}' in workflow
     assert 'REPOSITORY_TOKEN: ${{ github.token }}' in workflow
-    assert 'reason=agent_task_token_unavailable' in workflow
-    assert 'GH_TOKEN="$AGENT_TASK_TOKEN" gh api' in workflow
+    assert 'reason=nim_api_key_unavailable' in workflow
     assert 'GH_TOKEN="$REPOSITORY_TOKEN" gh pr list' in workflow
-    assert 'X-GitHub-Api-Version: 2026-03-10' in workflow
+    assert '"baseURL": "https://integrate.api.nvidia.com/v1"' in workflow
+    assert '"apiKey": "{env:NVIDIA_API_KEY}"' in workflow
+    assert "COPILOT_GITHUB_TOKEN" not in workflow
+    assert "/agents/repos" not in workflow
     assert "copilot-requests: write" not in workflow
-    assert "GH_TOKEN: ${{ github.token }}" not in workflow
 
 
 def test_product_development_is_single_flight_and_fail_closed():
-    """New work starts only when no PR or active/unknown task exists."""
+    """New work starts only when no PR exists, with credentials kept from the agent."""
     workflow = _workflow("hourly-product-development.yml")
 
     assert 'cron: "41 * * * *"' in workflow
     assert "cancel-in-progress: false" in workflow
+    assert "group: hourly-product-development-${{ github.repository }}" in workflow
     assert '--state open --limit 1 --json number,url' in workflow
-    assert '"/agents/repos/${GITHUB_REPOSITORY}/tasks?per_page=100"' in workflow
-    assert 'reason=task_inventory_unavailable' in workflow
-    assert 'reason=active_agent_task' in workflow
-    assert '$state != "completed"' in workflow
-    assert '$state != "failed"' in workflow
-    assert '$state != "timed_out"' in workflow
-    assert '$state != "cancelled"' in workflow
-    assert "// \"unknown\"" in workflow
+    assert 'reason=open_pull_request' in workflow
+    assert "persist-credentials: false" in workflow
+    assert "env -u GH_TOKEN -u GITHUB_TOKEN -u REPOSITORY_TOKEN" in workflow
+    assert "sha256sum -c -" in workflow
+    assert 'OPENCODE_VERSION: "1.17.13"' in workflow
 
 
 def test_product_task_is_bounded_reviewable_and_commercially_focused():
-    """Every autonomous cycle creates one tested PR and never self-merges."""
+    """Every autonomous cycle proposes one tested PR and never self-merges."""
     workflow = _workflow("hourly-product-development.yml")
 
-    assert "create_pull_request: true" in workflow
     assert "Maintain 100% production" in workflow
     assert "statement and branch coverage" in workflow
     assert "Update CHANGELOG.md" in workflow
-    assert "Create exactly one bounded pull request" in workflow
+    assert "exactly one bounded pull request" in workflow
     assert "buyer-visible" in workflow
     assert "security-sensitive edge cases" in workflow
     assert "Do not merge, publish, or bypass" in workflow
-    assert "reviews. Create exactly one bounded pull request" in workflow
+    assert "gh pr create" in workflow
+    assert '--base "$DEFAULT_BRANCH"' in workflow
     assert "gh pr merge" not in workflow
