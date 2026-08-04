@@ -45,12 +45,29 @@ class _ResponseNode:
     children: list[_ResponseNode] = field(default_factory=list)
 
 
+def _sequence_number(message: Message) -> object:
+    """Return one message's sequence number for ordinary THREAD output."""
+    return message.sequence_number
+
+
+def _uid(message: Message) -> object:
+    """Return one message's unique identifier for UID THREAD output."""
+    return message.uid
+
+
 def _identifier_resolver(identifier: IdentifierResolver) -> _RawIdentifierResolver:
-    """Return a validated built-in or caller-supplied identifier resolver."""
-    if identifier == "sequence_number":
-        return lambda message: message.sequence_number
-    if identifier == "uid":
-        return lambda message: message.uid
+    """Return a validated built-in or caller-supplied identifier resolver.
+
+    Arbitrary callables are tested for callability before any equality operation,
+    so a resolver with hostile or domain-specific ``__eq__`` behavior remains a
+    safe public input.
+    """
+    if isinstance(identifier, str):
+        if identifier == "sequence_number":
+            return _sequence_number
+        if identifier == "uid":
+            return _uid
+        raise ValueError("identifier must be 'sequence_number', 'uid', or a callable")
     if callable(identifier):
         return identifier
     raise ValueError("identifier must be 'sequence_number', 'uid', or a callable")
