@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: bootstrap-ci-lock-${{ github.event.pull_request.number || github.ref }}
@@ -44,6 +44,20 @@ jobs:
           enable-cache: false
       - name: Compile the universal hash lock
         run: bash scripts/ci/compile_ci_lock.sh "$RUNNER_TEMP/ci.lock"
+      - name: Commit the trusted lock to the source branch
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/ci.lock" requirements/ci.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add requirements/ci.lock
+          git commit -m "build: add generated CI dependency lock"
+          git push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:${GITHUB_REF}"
       - name: Preserve the generated lock
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
