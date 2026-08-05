@@ -1,0 +1,278 @@
+name: Apply incremental snapshot hardening
+
+on:
+  pull_request:
+    types: [synchronize]
+    paths:
+      - .github/workflows/apply-snapshot-hardening.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-incremental-snapshot-hardening
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.number == 20 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feature/incremental-thread-index'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the exact pull-request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feature/incremental-thread-index
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements/ci.lock
+
+      - name: Install the reviewed CI lock
+        run: python -m pip install --require-hashes -r requirements/ci.lock
+
+      - name: Add focused snapshot regressions and prove RED
+        shell: bash
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_incremental_snapshot.py')
+          text = path.read_text(encoding='utf-8')
+          if 'import sys\n' not in text:
+              text = text.replace('import json\n', 'import json\nimport sys\n', 1)
+          anchor = '''    with pytest.raises(IncrementalThreadError, match="snapshot fields"):
+              IncrementalThreadIndex.restore(missing)
+
+
+          def test_restore_rejects_malformed_record_fields_and_duplicate_keys():
+          '''
+          addition = '''    with pytest.raises(IncrementalThreadError, match="snapshot fields"):
+              IncrementalThreadIndex.restore(missing)
+
+
+          @pytest.mark.parametrize("invalid_schema_version", [True, 1.0])
+          def test_restore_requires_an_exact_integer_schema_version(
+              invalid_schema_version: object,
+          ):
+              """Boolean and floating-point lookalikes cannot select a snapshot schema."""
+              snapshot = _index().snapshot()
+              snapshot["schema_version"] = invalid_schema_version
+
+              with pytest.raises(IncrementalThreadError, match="schema_version"):
+                  IncrementalThreadIndex.restore(snapshot)
+
+
+          def test_snapshot_reports_unencodable_unicode_as_a_domain_error():
+              """Lone surrogates fail closed instead of leaking a codec exception."""
+              index = IncrementalThreadIndex()
+              index.apply(
+                  MailboxChangeSet(
+                      expected_version=0,
+                      additions=(
+                          IndexedMessage(
+                              "surrogate_key",
+                              Message(message_id="surrogate", subject="bad\\ud800subject"),
+                          ),
+                      ),
+                  )
+              )
+
+              with pytest.raises(IncrementalThreadError, match="JSON-safe"):
+                  index.snapshot()
+
+
+          def test_restore_reports_excessive_json_nesting_as_a_domain_error():
+              """Hostile nesting cannot escape the snapshot boundary as RecursionError."""
+              nested: object = []
+              for _ in range(sys.getrecursionlimit() * 20):
+                  nested = [nested]
+              snapshot = {
+                  "schema_version": 1,
+                  "version": 0,
+                  "options": {
+                      "group_by_subject": False,
+                      "sort_by_sent_date": False,
+                  },
+                  "records": [],
+                  "unexpected": nested,
+              }
+
+              with pytest.raises(IncrementalThreadError, match="JSON-safe"):
+                  IncrementalThreadIndex.restore(snapshot)
+
+
+          def test_restore_rejects_malformed_record_fields_and_duplicate_keys():
+          '''
+          if anchor not in text:
+              raise SystemExit('snapshot regression insertion anchor changed')
+          path.write_text(text.replace(anchor, addition, 1), encoding='utf-8')
+          PY
+
+          set +e
+          python -m pytest -q tests/test_incremental_snapshot.py \
+            -k 'exact_integer_schema_version or unencodable_unicode or excessive_json_nesting' \
+            >"$RUNNER_TEMP/snapshot-red.log" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/snapshot-red.log"
+          if [ "$status" -eq 0 ]; then
+            echo 'The snapshot regressions unexpectedly passed before implementation.' >&2
+            exit 1
+          fi
+
+      - name: Implement the fail-closed snapshot boundary and documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/threadweave/incremental.py')
+          text = source.read_text(encoding='utf-8')
+          old = '''def _snapshot_json_bytes(value: object) -> bytes:
+              """Serialize a snapshot canonically or raise a bounded domain error."""
+              try:
+                  encoded = json.dumps(
+                      value,
+                      ensure_ascii=False,
+                      allow_nan=False,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+              except (TypeError, ValueError) as error:
+                  raise IncrementalThreadError("snapshot must contain only JSON-safe values") from error
+              return encoded.encode("utf-8")
+          '''
+          new = '''def _snapshot_json_bytes(value: object) -> bytes:
+              """Serialize a snapshot canonically or raise a bounded domain error."""
+              try:
+                  encoded = json.dumps(
+                      value,
+                      ensure_ascii=False,
+                      allow_nan=False,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+                  return encoded.encode("utf-8")
+              except (RecursionError, TypeError, UnicodeError, ValueError) as error:
+                  raise IncrementalThreadError(
+                      "snapshot must contain only JSON-safe values"
+                  ) from error
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('snapshot serializer anchor changed')
+          text = text.replace(old, new, 1)
+          old = '''        if snapshot["schema_version"] != _SNAPSHOT_SCHEMA_VERSION:
+                      raise IncrementalThreadError("unsupported snapshot schema_version")
+          '''
+          new = '''        schema_version = snapshot["schema_version"]
+                  if (
+                      isinstance(schema_version, bool)
+                      or not isinstance(schema_version, int)
+                      or schema_version != _SNAPSHOT_SCHEMA_VERSION
+                  ):
+                      raise IncrementalThreadError("unsupported snapshot schema_version")
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('schema-version anchor changed')
+          source.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          changelog = Path('CHANGELOG.md')
+          text = changelog.read_text(encoding='utf-8')
+          anchor = (
+              '- Add deterministic 100,000-message incremental-versus-full-rebuild benchmark\n'
+              '  evidence with projection parity, affected-message counts, wall time, and peak RSS.\n'
+          )
+          addition = (
+              anchor
+              + '- Harden incremental snapshot publication and restore so schema versions require\n'
+              + '  exact non-boolean integers and hostile nesting or unencodable Unicode fails\n'
+              + '  closed with `IncrementalThreadError` instead of leaking runtime exceptions.\n'
+          )
+          if text.count(anchor) != 1:
+              raise SystemExit('CHANGELOG insertion anchor changed')
+          changelog.write_text(text.replace(anchor, addition, 1), encoding='utf-8')
+
+          docs = Path('docs/incremental-threading.md')
+          text = docs.read_text(encoding='utf-8')
+          anchor = (
+              'Payload objects and derived graph pointers are never serialized. Restored\n'
+              'messages therefore have `payload=None`. Date values use an explicit tagged text\n'
+              'or ISO-8601 datetime representation. Restore rejects unknown schema versions,\n'
+              'extra or missing fields, duplicate keys, malformed types, invalid external IDs,\n'
+              'and configured record or byte limits before publishing state.\n'
+          )
+          replacement = (
+              'Payload objects and derived graph pointers are never serialized. Restored\n'
+              'messages therefore have `payload=None`. Date values use an explicit tagged text\n'
+              'or ISO-8601 datetime representation. Schema versions must be exact non-boolean\n'
+              'integers. Restore rejects unknown versions, extra or missing fields, duplicate\n'
+              'keys, malformed types, invalid external IDs, hostile nesting, unencodable Unicode,\n'
+              'and configured record or byte limits through `IncrementalThreadError` before\n'
+              'publishing state.\n'
+          )
+          if text.count(anchor) != 1:
+              raise SystemExit('snapshot documentation anchor changed')
+          docs.write_text(text.replace(anchor, replacement, 1), encoding='utf-8')
+          PY
+
+      - name: Verify the complete repository
+        shell: bash
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          ruff check .
+          python -m compileall -q src tests scripts benchmarks
+          python -m doctest \
+            src/threadweave/collation.py \
+            src/threadweave/dates.py \
+            src/threadweave/headers.py \
+            src/threadweave/subject.py
+          coverage erase
+          coverage run --branch --source=scripts/ci -m pytest -q \
+            tests/test_autonomous_documentation.py \
+            tests/test_dependency_lock_contract.py \
+            tests/test_hourly_product_guard.py \
+            tests/test_hourly_product_guard_coverage.py \
+            tests/test_hourly_product_guard_return.py \
+            tests/test_nim_proxy.py \
+            tests/test_nim_tls_context.py \
+            tests/test_release_contract.py \
+            tests/test_release_contract_coverage.py \
+            tests/test_release_workflow.py
+          coverage report \
+            --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py,scripts/ci/release_contract.py \
+            --fail-under=100 \
+            --show-missing
+          coverage erase
+          coverage run -m pytest -q
+          coverage report --fail-under=100 --show-missing
+          python -m build --no-isolation
+          python -m pip check
+
+      - name: Commit the verified product fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'ThreadWeave verification bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            src/threadweave/incremental.py \
+            tests/test_incremental_snapshot.py \
+            docs/incremental-threading.md \
+            CHANGELOG.md
+          git diff --cached --check
+          git commit -m 'fix: harden incremental snapshot validation'
+          git push origin HEAD:feature/incremental-thread-index
