@@ -44,9 +44,8 @@ jobs:
           PYTHONPATH: src
         run: |
           set -euo pipefail
-          printf '%s  %s\n' \
-            'a1190b493a362ac3c9b0d26b8138e67c6f211be3a2fe16b3fde3e8e0afbf7ca7' \
-            'tools/pr20-cycle-test.patch' | sha256sum -c -
+          test "$(git hash-object tools/pr20-cycle-test.patch)" = \
+            '9d2456384c78d1c2ecefaec210ab167aa0b1ce63'
           git apply --check tools/pr20-cycle-test.patch
           git apply tools/pr20-cycle-test.patch
           set +e
@@ -64,9 +63,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s  %s\n' \
-            '59631c36acee10ca16359acb51041659f00b9a586515881ecd2129b440dd4b51' \
-            'tools/pr20-cycle-fix.patch' | sha256sum -c -
+          test "$(git hash-object tools/pr20-cycle-fix.patch)" = \
+            '119ecc9a08a98f633a2eed10611ddd40e92a91a5'
           git apply --check tools/pr20-cycle-fix.patch
           git apply tools/pr20-cycle-fix.patch
 
