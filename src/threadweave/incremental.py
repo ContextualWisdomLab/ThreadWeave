@@ -1,7 +1,7 @@
 """Incremental, identity-aware mailbox threading over the batch RFC engine.
 
 The batch :func:`threadweave.thread_messages` function remains the correctness
-oracle. This module adds an atomic state boundary that indexes caller-owned
+oracle.  This module adds an atomic state boundary that indexes caller-owned
 message keys, recomputes only affected connectivity components, reports explicit
 thread merge/split transitions, and snapshots JSON-safe metadata without caller
 payloads.
@@ -36,7 +36,10 @@ __all__ = [
 
 _batch_thread_messages = thread_messages
 _MAX_MESSAGE_KEY_LENGTH = 512
-_MAX_EXTERNAL_ID_LENGTH = 1024
+_MAX_EXTERNAL_ID_LENGTH = 255
+_OBJECT_ID_CHARACTERS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+)
 _MAX_IMAP_NUMBER = 4_294_967_295
 _DEFAULT_MAX_SNAPSHOT_RECORDS = 1_000_000
 _DEFAULT_MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
@@ -83,8 +86,8 @@ def _validated_identifier(
         raise IncrementalThreadError(
             f"{name} must be a non-empty string of at most {maximum_length} characters"
         )
-    if any(ord(character) < 32 or ord(character) == 127 for character in value):
-        raise IncrementalThreadError(f"{name} must not contain control characters")
+    if any(not character.isprintable() for character in value):
+        raise IncrementalThreadError(f"{name} must contain only printable characters")
     return value
 
 
@@ -101,13 +104,20 @@ def _validated_message_key(value: object) -> str:
 
 
 def _validated_external_id(value: object, name: str) -> str | None:
-    """Return one optional bounded external object identifier."""
-    return _validated_identifier(
+    """Return one optional RFC 8474 ``objectid`` value."""
+    validated = _validated_identifier(
         value,
         name,
         allow_none=True,
         maximum_length=_MAX_EXTERNAL_ID_LENGTH,
     )
+    if validated is not None and any(
+        character not in _OBJECT_ID_CHARACTERS for character in validated
+    ):
+        raise IncrementalThreadError(
+            f"{name} must use only ASCII letters, digits, underscore, or hyphen"
+        )
+    return validated
 
 
 def _tuple_without_duplicate_keys(
@@ -424,19 +434,29 @@ def _validate_effective_sequence_numbers(
 
 
 def _validate_external_identities(records: Mapping[str, IndexedMessage]) -> None:
-    """Require every shared EMAILID to carry one identical THREADID value."""
+    """Enforce RFC 8474 EMAILID/THREADID consistency and namespace separation."""
     thread_id_by_email_id: dict[str, str | None] = {}
+    email_ids: set[str] = set()
+    thread_ids: set[str] = set()
     for record in records.values():
         email_id = record.email_id
-        if email_id is None:
-            continue
-        if email_id not in thread_id_by_email_id:
-            thread_id_by_email_id[email_id] = record.thread_id
-            continue
-        if thread_id_by_email_id[email_id] != record.thread_id:
-            raise ExternalIdentityError(
-                f"messages with EMAILID {email_id!r} must expose the same THREADID"
-            )
+        thread_id = record.thread_id
+        if email_id is not None:
+            email_ids.add(email_id)
+            if email_id not in thread_id_by_email_id:
+                thread_id_by_email_id[email_id] = thread_id
+            elif thread_id_by_email_id[email_id] != thread_id:
+                raise ExternalIdentityError(
+                    f"messages with EMAILID {email_id!r} must expose the same THREADID"
+                )
+        if thread_id is not None:
+            thread_ids.add(thread_id)
+    reused_values = email_ids & thread_ids
+    if reused_values:
+        raise ExternalIdentityError(
+            "EMAILID and THREADID must use disjoint ObjectID values: "
+            f"{sorted(reused_values)!r}"
+        )
 
 
 def _validate_replacement_identity(
@@ -592,7 +612,9 @@ def _root_order_key(
     first_key = projection.message_keys[0]
     message = records[first_key].message
     sequence_number = (
-        ranks[first_key] if message.sequence_number is None else message.sequence_number
+        ranks[first_key]
+        if message.sequence_number is None
+        else message.sequence_number
     )
     return (
         normalize_sent_date(message.sent_date, message.internal_date),
@@ -755,9 +777,7 @@ def _snapshot_json_bytes(value: object) -> bytes:
             separators=(",", ":"),
         )
     except (TypeError, ValueError) as error:
-        raise IncrementalThreadError(
-            "snapshot must contain only JSON-safe values"
-        ) from error
+        raise IncrementalThreadError("snapshot must contain only JSON-safe values") from error
     return encoded.encode("utf-8")
 
 
@@ -1044,7 +1064,9 @@ class IncrementalThreadIndex:
     def snapshot(self) -> dict[str, object]:
         """Return deterministic versioned JSON-safe state without payload objects."""
         if len(self._records) > self._max_snapshot_records:
-            raise IncrementalThreadError("snapshot exceeds max_snapshot_records")
+            raise IncrementalThreadError(
+                "snapshot exceeds max_snapshot_records"
+            )
         records: list[dict[str, object]] = []
         for key in self.message_keys:
             record = self._records[key]
