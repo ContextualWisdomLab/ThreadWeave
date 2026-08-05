@@ -20,7 +20,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'feature/incremental-thread-index'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Check out the exact pull-request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -28,15 +28,26 @@ jobs:
           ref: feature/incremental-thread-index
           fetch-depth: 1
 
-      - name: Verify and extract the sealed update
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements/ci.lock
+
+      - name: Decode, verify, and extract the sealed update
         shell: bash
+        env:
+          PR20_UPDATE_ARCHIVE: ${{ runner.temp }}/pr20-update.zip
         run: |
           set -euo pipefail
+          base64 --decode tools/pr20-update.zip >"$PR20_UPDATE_ARCHIVE"
           printf '%s  %s\n' \
             '2b18426b1afa0b8001753e1e3c372f9ec33af1ba793d7052fee07ec0aa174523' \
-            'tools/pr20-update.zip' | sha256sum -c -
+            "$PR20_UPDATE_ARCHIVE" | sha256sum -c -
           python - <<'PY'
           from pathlib import Path, PurePosixPath
+          import os
           import shutil
           import stat
           import tempfile
@@ -61,7 +72,7 @@ jobs:
               'tests/test_incremental_randomized_parity.py',
               'tests/test_subject_threading.py',
           }
-          archive = Path('tools/pr20-update.zip')
+          archive = Path(os.environ['PR20_UPDATE_ARCHIVE'])
           with zipfile.ZipFile(archive) as handle:
               infos = handle.infolist()
               names = {info.filename for info in infos}
@@ -87,10 +98,65 @@ jobs:
           Path('scripts/benchmarks/incremental_mailbox.py').chmod(0o755)
           PY
 
-      - name: Commit the extracted update and remove bootstrap material
+      - name: Install the reviewed CI lock
+        run: python -m pip install --require-hashes -r requirements/ci.lock
+
+      - name: Verify the extracted repository state
+        shell: bash
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          ruff check .
+          python -m compileall -q src tests scripts
+          python -m doctest \
+            src/threadweave/collation.py \
+            src/threadweave/dates.py \
+            src/threadweave/headers.py \
+            src/threadweave/subject.py
+          coverage erase
+          coverage run --branch --source=scripts/ci -m pytest -q \
+            tests/test_autonomous_documentation.py \
+            tests/test_dependency_lock_contract.py \
+            tests/test_hourly_product_guard.py \
+            tests/test_hourly_product_guard_coverage.py \
+            tests/test_hourly_product_guard_return.py \
+            tests/test_nim_proxy.py \
+            tests/test_nim_tls_context.py \
+            tests/test_release_contract.py \
+            tests/test_release_contract_coverage.py \
+            tests/test_release_workflow.py
+          coverage report \
+            --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py,scripts/ci/release_contract.py \
+            --fail-under=100 \
+            --show-missing
+          coverage erase
+          coverage run -m pytest -q
+          coverage report --fail-under=100 --show-missing
+          python -m build --no-isolation
+          python -m pip check
+          python scripts/benchmarks/incremental_mailbox.py \
+            --messages 10000 \
+            --component-size 100 \
+            --minimum-speedup 0 \
+            --output "$RUNNER_TEMP/incremental-benchmark.json"
+
+      - name: Commit the verified update and remove bootstrap material
         shell: bash
         run: |
           set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/ci.yml')
+          text = path.read_text(encoding='utf-8')
+          start = '  # BEGIN PR20 SEALED UPDATE\n'
+          end = '  # END PR20 SEALED UPDATE\n'
+          if start in text or end in text:
+              before, remainder = text.split(start, 1)
+              _, after = remainder.split(end, 1)
+              path.write_text(before + after, encoding='utf-8')
+          PY
           rm -f \
             tools/pr20-update.zip \
             .github/workflows/apply-pr20-update.yml \
@@ -100,5 +166,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git diff --cached --check
-          git commit -m 'feat: harden incremental parity and benchmark evidence'
+          git commit -m 'perf: harden incremental mailbox updates'
           git push origin HEAD:feature/incremental-thread-index
