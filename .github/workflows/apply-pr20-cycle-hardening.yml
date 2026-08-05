@@ -44,29 +44,161 @@ jobs:
           PYTHONPATH: src
         run: |
           set -euo pipefail
-          test "$(git hash-object tools/pr20-cycle-test.patch)" = \
-            '9d2456384c78d1c2ecefaec210ab167aa0b1ce63'
-          git apply --check tools/pr20-cycle-test.patch
-          git apply tools/pr20-cycle-test.patch
+          test "$(git hash-object src/threadweave/incremental.py)" = \
+            'd5a851bd835bfa1b6acc00b7ac20608e6abeb4f9'
           set +e
-          pytest -q tests/test_incremental_snapshot.py \
-            -k restore_rejects_cyclic_plain_containers_without_hanging
+          timeout 2s python - <<'PY'
+          from threadweave import IncrementalThreadIndex
+
+          cycle = {}
+          cycle["self"] = cycle
+          IncrementalThreadIndex.restore(cycle)
+          PY
           red_status="$?"
           set -e
-          if [ "$red_status" -eq 0 ]; then
-            echo 'The regression test unexpectedly passed before the fix.' >&2
+          if [ "$red_status" -ne 124 ]; then
+            echo "Expected the pre-fix restore call to time out; status=$red_status" >&2
             exit 1
           fi
-          echo 'Observed the expected pre-fix timeout/failure.' >>"$GITHUB_STEP_SUMMARY"
+          echo 'Observed the expected pre-fix non-terminating traversal.' \
+            >>"$GITHUB_STEP_SUMMARY"
 
-      - name: Apply the minimal iterative cycle detector
+      - name: Apply the minimal iterative cycle detector and regression tests
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git hash-object tools/pr20-cycle-fix.patch)" = \
-            '119ecc9a08a98f633a2eed10611ddd40e92a91a5'
-          git apply --check tools/pr20-cycle-fix.patch
-          git apply tools/pr20-cycle-fix.patch
+          test "$(git hash-object tests/test_incremental_snapshot.py)" = \
+            '9020bd2953811ebcb814cc0aeaf7f1035e4992e2'
+          test "$(git hash-object CHANGELOG.md)" = \
+            'a93e06da23a04c9a4d484c8478283be075771aa8'
+          test "$(git hash-object docs/incremental-threading.md)" = \
+            'd72b48dbeeb4f64a4c78b58151775a010b1b4d1a'
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('src/threadweave/incremental.py')
+          source = source_path.read_text(encoding='utf-8')
+          old_source = '''    pending = [value]
+              while pending:
+                  current = pending.pop()
+                  if type(current) is dict:
+                      pending.extend(dict.values(current))
+                  elif type(current) is list:
+                      pending.extend(current)
+                  elif current is None or isinstance(current, (str, int, float, bool)):
+                      continue
+                  else:
+                      raise IncrementalThreadError(
+                          "snapshot must contain only plain JSON containers and scalar values"
+                      )
+          '''
+          new_source = '''    pending = [(value, False)]
+              active_containers: set[int] = set()
+              while pending:
+                  current, exiting = pending.pop()
+                  if type(current) in {dict, list}:
+                      identity = id(current)
+                      if exiting:
+                          active_containers.remove(identity)
+                          continue
+                      if identity in active_containers:
+                          raise IncrementalThreadError(
+                              "snapshot must not contain cyclic JSON containers"
+                          )
+                      active_containers.add(identity)
+                      pending.append((current, True))
+                      children = dict.values(current) if type(current) is dict else current
+                      pending.extend((child, False) for child in children)
+                  elif current is None or isinstance(current, (str, int, float, bool)):
+                      continue
+                  else:
+                      raise IncrementalThreadError(
+                          "snapshot must contain only plain JSON containers and scalar values"
+                      )
+          '''
+          if source.count(old_source) != 1:
+              raise SystemExit('unexpected plain-container guard source state')
+          source_path.write_text(source.replace(old_source, new_source), encoding='utf-8')
+
+          test_path = Path('tests/test_incremental_snapshot.py')
+          tests = test_path.read_text(encoding='utf-8')
+          import_anchor = 'import pytest\n\n'
+          if 'import threadweave.incremental as incremental_module\n' not in tests:
+              if tests.count(import_anchor) != 1:
+                  raise SystemExit('unexpected snapshot test import state')
+              tests = tests.replace(
+                  import_anchor,
+                  'import pytest\nimport threadweave.incremental as incremental_module\n\n',
+              )
+          test_name = 'def test_plain_container_guard_rejects_cycles_and_allows_shared_values():'
+          if test_name in tests:
+              raise SystemExit('cycle regression test already exists')
+          tests += '''
+
+          def test_plain_container_guard_rejects_cycles_and_allows_shared_values():
+              """The iterative guard distinguishes cycles from shared acyclic values."""
+              mapping_cycle: dict[str, object] = {}
+              mapping_cycle["self"] = mapping_cycle
+              with pytest.raises(IncrementalThreadError, match="cyclic"):
+                  IncrementalThreadIndex.restore(mapping_cycle)
+
+              list_cycle: list[object] = []
+              list_cycle.append(list_cycle)
+              nested_cycle = {
+                  "schema_version": 1,
+                  "version": 0,
+                  "options": {
+                      "group_by_subject": False,
+                      "sort_by_sent_date": False,
+                  },
+                  "records": list_cycle,
+              }
+              with pytest.raises(IncrementalThreadError, match="cyclic"):
+                  IncrementalThreadIndex.restore(nested_cycle)
+
+              shared: list[object] = [{"value": 1}]
+              incremental_module._require_plain_json_containers(
+                  {"first": shared, "second": shared}
+              )
+          '''
+          test_path.write_text(tests, encoding='utf-8')
+
+          changelog_path = Path('CHANGELOG.md')
+          changelog = changelog_path.read_text(encoding='utf-8')
+          changelog_anchor = '''## Unreleased
+
+          - Reject dictionary and list subclasses at the incremental snapshot restore
+          '''
+          changelog_replacement = '''## Unreleased
+
+          - Reject cyclic built-in dictionaries and lists at the incremental snapshot
+            restore boundary without recursion or unbounded traversal.
+          - Reject dictionary and list subclasses at the incremental snapshot restore
+          '''
+          if changelog.count(changelog_anchor) != 1:
+              raise SystemExit('unexpected CHANGELOG state')
+          changelog_path.write_text(
+              changelog.replace(changelog_anchor, changelog_replacement),
+              encoding='utf-8',
+          )
+
+          docs_path = Path('docs/incremental-threading.md')
+          docs = docs_path.read_text(encoding='utf-8')
+          docs_anchor = '''subclasses are rejected before serialization so hostile ``items`` or iterator
+          overrides cannot execute inside the restore boundary.
+          '''
+          docs_replacement = '''subclasses are rejected before serialization so hostile ``items`` or iterator
+          overrides cannot execute inside the restore boundary. Cyclic built-in containers
+          are detected with an iterative active-path guard and fail without recursion or
+          unbounded traversal; repeated acyclic references remain valid JSON input.
+          '''
+          if docs.count(docs_anchor) != 1:
+              raise SystemExit('unexpected incremental documentation state')
+          docs_path.write_text(
+              docs.replace(docs_anchor, docs_replacement),
+              encoding='utf-8',
+          )
+          PY
 
       - name: Verify the fixed repository state
         shell: bash
@@ -75,7 +207,7 @@ jobs:
         run: |
           set -euo pipefail
           pytest -q tests/test_incremental_snapshot.py \
-            -k 'cyclic_plain_containers or plain_container_guard'
+            -k plain_container_guard_rejects_cycles
           ruff check .
           python -m compileall -q src tests scripts benchmarks
           python -m doctest \
