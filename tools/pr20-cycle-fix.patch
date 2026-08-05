@@ -1,0 +1,105 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index a93e06d..52a8987 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
+ ## Unreleased
+ 
++- Reject cyclic built-in dictionaries and lists at the incremental snapshot
++  restore boundary without recursion or unbounded traversal.
+ - Reject dictionary and list subclasses at the incremental snapshot restore
+   boundary before JSON encoding can invoke untrusted iterator overrides.
+ - Serialize every read and write on one `IncrementalThreadIndex` with a
+diff --git a/docs/incremental-threading.md b/docs/incremental-threading.md
+index d72b48d..e19d7f2 100644
+--- a/docs/incremental-threading.md
++++ b/docs/incremental-threading.md
+@@ -202,7 +202,9 @@ integers. Restore rejects unknown versions, extra or missing fields, duplicate
+ keys, malformed types, invalid external IDs, hostile nesting, unencodable Unicode,
+ and configured record or byte limits through `IncrementalThreadError` before
+ publishing state. Only built-in JSON dictionaries and lists are accepted; container
+-subclasses are rejected before serialization so hostile ``items`` or iterator
+-overrides cannot execute inside the restore boundary.
++subclasses are rejected before serialization so hostile ``items`` or iterator
++overrides cannot execute inside the restore boundary. Cyclic built-in containers
++are detected with an iterative active-path guard and fail without recursion or
++unbounded traversal; repeated acyclic references remain valid JSON input.
+ 
+ ## Correctness and operational boundaries
+ 
+diff --git a/src/threadweave/incremental.py b/src/threadweave/incremental.py
+index d5a851b..c91fcb6 100644
+--- a/src/threadweave/incremental.py
++++ b/src/threadweave/incremental.py
+@@ -804,15 +804,29 @@ def _require_plain_json_containers(value: object) -> None:
+     values.  Requiring exact container types prevents untrusted ``items`` or
+     iterator overrides from executing inside the restore boundary.
+     """
+-    pending = [value]
++    pending = [(value, False)]
++    active_containers: set[int] = set()
+     while pending:
+-        current = pending.pop()
+-        if type(current) is dict:
+-            pending.extend(dict.values(current))
+-        elif type(current) is list:
+-            pending.extend(current)
++        current, exiting = pending.pop()
++        if type(current) in {dict, list}:
++            identity = id(current)
++            if exiting:
++                active_containers.remove(identity)
++                continue
++            if identity in active_containers:
++                raise IncrementalThreadError(
++                    "snapshot must not contain cyclic JSON containers"
++                )
++            active_containers.add(identity)
++            pending.append((current, True))
++            children = (
++                dict.values(current)
++                if type(current) is dict
++                else current
++            )
++            pending.extend((child, False) for child in children)
+         elif current is None or isinstance(current, (str, int, float, bool)):
+             continue
+         else:
+diff --git a/tests/test_incremental_snapshot.py b/tests/test_incremental_snapshot.py
+index 0ef4ea1..b5e0c47 100644
+--- a/tests/test_incremental_snapshot.py
++++ b/tests/test_incremental_snapshot.py
+@@ -8,6 +8,7 @@ from copy import deepcopy
+ from datetime import datetime, timezone
+ 
+ import pytest
++import threadweave.incremental as incremental_module
+ 
+ from threadweave import (
+     IncrementalThreadError,
+@@ -372,3 +373,24 @@ def test_restore_rejects_cyclic_plain_containers_without_hanging():
+         check=False,
+     )
+     assert result.returncode == 0, result.stderr
++
++
++def test_plain_container_guard_rejects_cycles_and_allows_shared_values():
++    """The iterative guard distinguishes cycles from repeated acyclic values."""
++    mapping_cycle: dict[str, object] = {}
++    mapping_cycle["self"] = mapping_cycle
++    with pytest.raises(IncrementalThreadError, match="cyclic"):
++        incremental_module._require_plain_json_containers(mapping_cycle)
++
++    list_cycle: list[object] = []
++    list_cycle.append(list_cycle)
++    with pytest.raises(IncrementalThreadError, match="cyclic"):
++        incremental_module._require_plain_json_containers(list_cycle)
++
++    shared: list[object] = [{"value": 1}]
++    incremental_module._require_plain_json_containers(
++        {
++            "first": shared,
++            "second": shared,
++        }
++    )
