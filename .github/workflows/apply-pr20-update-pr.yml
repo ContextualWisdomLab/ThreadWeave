@@ -113,6 +113,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -f .github/workflows/incremental-benchmark.yml
           rm -f tools/pr20-update.zip
           rm -f tools/pr20-review-fixes.part-01 tools/pr20-review-fixes.part-02
           rm -f tools/pr20-review-fixes.part-03 tools/pr20-review-fixes.part-04
@@ -123,6 +124,10 @@ jobs:
           git config user.name 'ThreadWeave verification bot'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
+          if git diff --cached --name-only | grep -q '^\.github/workflows/'; then
+            echo 'Refusing to push workflow changes with the repository token.' >&2
+            exit 1
+          fi
           git diff --cached --check
           git commit -m 'perf: harden incremental mailbox updates'
           git push origin HEAD:feature/incremental-thread-index
