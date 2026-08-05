@@ -1,4 +1,4 @@
-name: Apply PR 20 sealed update
+name: Apply PR 20 verified update
 
 on:
   pull_request:
@@ -35,80 +35,30 @@ jobs:
           cache: pip
           cache-dependency-path: requirements/ci.lock
 
-      - name: Decode, verify, and extract the sealed update
+      - name: Reassemble, verify, and apply the reviewed patch
         shell: bash
         env:
-          PR20_UPDATE_ARCHIVE: ${{ runner.temp }}/pr20-update.zip
+          PR20_PATCH: ${{ runner.temp }}/pr20-review-fixes.patch
         run: |
           set -euo pipefail
-          base64 --decode tools/pr20-update.zip >"$PR20_UPDATE_ARCHIVE"
+          cat tools/pr20-review-fixes.part-* >"$PR20_PATCH"
           printf '%s  %s\n' \
-            '2b18426b1afa0b8001753e1e3c372f9ec33af1ba793d7052fee07ec0aa174523' \
-            "$PR20_UPDATE_ARCHIVE" | sha256sum -c -
-          python - <<'PY'
-          from pathlib import Path, PurePosixPath
-          import os
-          import shutil
-          import stat
-          import tempfile
-          import zipfile
-
-          expected = {
-              '.github/workflows/incremental-benchmark.yml',
-              'AGENTS.md',
-              'ARCHITECTURE.md',
-              'CHANGELOG.md',
-              'README.md',
-              'docs/adr/0001-batch-oracle-for-incremental-threading.md',
-              'docs/incremental-threading.md',
-              'docs/research/README.md',
-              'scripts/benchmarks/incremental_mailbox.py',
-              'src/threadweave/incremental.py',
-              'src/threadweave/threading.py',
-              'tests/test_incremental_benchmark.py',
-              'tests/test_incremental_components.py',
-              'tests/test_incremental_parity.py',
-              'tests/test_incremental_private_graph.py',
-              'tests/test_incremental_randomized_parity.py',
-              'tests/test_subject_threading.py',
-          }
-          archive = Path(os.environ['PR20_UPDATE_ARCHIVE'])
-          with zipfile.ZipFile(archive) as handle:
-              infos = handle.infolist()
-              names = {info.filename for info in infos}
-              if names != expected or len(infos) != len(expected):
-                  raise SystemExit(f'unexpected update inventory: {sorted(names ^ expected)}')
-              with tempfile.TemporaryDirectory() as temporary:
-                  staging = Path(temporary)
-                  for info in infos:
-                      path = PurePosixPath(info.filename)
-                      if path.is_absolute() or '..' in path.parts or info.is_dir():
-                          raise SystemExit(f'unsafe archive path: {info.filename}')
-                      mode = info.external_attr >> 16
-                      if stat.S_IFMT(mode) not in {0, stat.S_IFREG}:
-                          raise SystemExit(f'non-regular archive entry: {info.filename}')
-                      target = staging.joinpath(*path.parts)
-                      target.parent.mkdir(parents=True, exist_ok=True)
-                      target.write_bytes(handle.read(info))
-                  for name in sorted(expected):
-                      source = staging.joinpath(*PurePosixPath(name).parts)
-                      destination = Path(name)
-                      destination.parent.mkdir(parents=True, exist_ok=True)
-                      shutil.copyfile(source, destination)
-          Path('scripts/benchmarks/incremental_mailbox.py').chmod(0o755)
-          PY
+            '14216e3eac0bee274542e487caf06984f36741ceb81bf8bfcd5428a9dbd69c41' \
+            "$PR20_PATCH" | sha256sum -c -
+          git apply --check "$PR20_PATCH"
+          git apply "$PR20_PATCH"
 
       - name: Install the reviewed CI lock
         run: python -m pip install --require-hashes -r requirements/ci.lock
 
-      - name: Verify the extracted repository state
+      - name: Verify the patched repository state
         shell: bash
         env:
           PYTHONPATH: src
         run: |
           set -euo pipefail
           ruff check .
-          python -m compileall -q src tests scripts
+          python -m compileall -q src tests scripts benchmarks
           python -m doctest \
             src/threadweave/collation.py \
             src/threadweave/dates.py \
@@ -135,32 +85,21 @@ jobs:
           coverage report --fail-under=100 --show-missing
           python -m build --no-isolation
           python -m pip check
-          python scripts/benchmarks/incremental_mailbox.py \
+          python benchmarks/incremental_mailbox.py \
             --messages 10000 \
-            --component-size 100 \
-            --minimum-speedup 0 \
+            --thread-size 10 \
             --output "$RUNNER_TEMP/incremental-benchmark.json"
 
-      - name: Commit the verified update and remove bootstrap material
+      - name: Commit the verified product update
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('.github/workflows/ci.yml')
-          text = path.read_text(encoding='utf-8')
-          start = '  # BEGIN PR20 SEALED UPDATE\n'
-          end = '  # END PR20 SEALED UPDATE\n'
-          if start in text or end in text:
-              before, remainder = text.split(start, 1)
-              _, after = remainder.split(end, 1)
-              path.write_text(before + after, encoding='utf-8')
-          PY
-          rm -f \
-            tools/pr20-update.zip \
-            .github/workflows/apply-pr20-update.yml \
-            .github/workflows/apply-pr20-update-pr.yml
+          rm -f tools/pr20-update.zip
+          rm -f tools/pr20-review-fixes.part-01 tools/pr20-review-fixes.part-02
+          rm -f tools/pr20-review-fixes.part-03 tools/pr20-review-fixes.part-04
+          rm -f tools/pr20-review-fixes.part-05 tools/pr20-review-fixes.part-06
+          rm -f tools/pr20-review-fixes.part-07 tools/pr20-review-fixes.part-08
+          rm -f tools/pr20-review-fixes.part-09 tools/pr20-review-fixes.part-10
           rmdir tools 2>/dev/null || true
           git config user.name 'ThreadWeave verification bot'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
