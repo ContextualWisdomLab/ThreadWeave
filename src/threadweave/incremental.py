@@ -808,9 +808,11 @@ def _snapshot_json_bytes(value: object) -> bytes:
             sort_keys=True,
             separators=(",", ":"),
         )
-    except (TypeError, ValueError) as error:
-        raise IncrementalThreadError("snapshot must contain only JSON-safe values") from error
-    return encoded.encode("utf-8")
+        return encoded.encode("utf-8")
+    except (RecursionError, TypeError, UnicodeError, ValueError) as error:
+        raise IncrementalThreadError(
+            "snapshot must contain only JSON-safe values"
+        ) from error
 
 
 def _required_fields(value: Mapping[str, object], expected: set[str], name: str) -> None:
@@ -1220,7 +1222,12 @@ class IncrementalThreadIndex:
             {"schema_version", "version", "options", "records"},
             "snapshot",
         )
-        if snapshot["schema_version"] != _SNAPSHOT_SCHEMA_VERSION:
+        schema_version = snapshot["schema_version"]
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != _SNAPSHOT_SCHEMA_VERSION
+        ):
             raise IncrementalThreadError("unsupported snapshot schema_version")
         version = _validated_nonnegative_integer(snapshot["version"], "version")
         options = snapshot["options"]

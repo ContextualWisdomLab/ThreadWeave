@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from copy import deepcopy
 from datetime import datetime, timezone
 
@@ -147,6 +148,57 @@ def test_restore_rejects_unknown_root_fields_and_schema_versions():
     del missing["records"]
     with pytest.raises(IncrementalThreadError, match="snapshot fields"):
         IncrementalThreadIndex.restore(missing)
+
+
+@pytest.mark.parametrize("invalid_schema_version", [True, 1.0])
+def test_restore_requires_an_exact_integer_schema_version(
+    invalid_schema_version: object,
+):
+    """Boolean and floating-point lookalikes cannot select a snapshot schema."""
+    snapshot = _index().snapshot()
+    snapshot["schema_version"] = invalid_schema_version
+
+    with pytest.raises(IncrementalThreadError, match="schema_version"):
+        IncrementalThreadIndex.restore(snapshot)
+
+
+def test_snapshot_reports_unencodable_unicode_as_a_domain_error():
+    """Lone surrogates fail closed instead of leaking a codec exception."""
+    index = IncrementalThreadIndex()
+    index.apply(
+        MailboxChangeSet(
+            expected_version=0,
+            additions=(
+                IndexedMessage(
+                    "surrogate_key",
+                    Message(message_id="surrogate", subject="bad\ud800subject"),
+                ),
+            ),
+        )
+    )
+
+    with pytest.raises(IncrementalThreadError, match="JSON-safe"):
+        index.snapshot()
+
+
+def test_restore_reports_excessive_json_nesting_as_a_domain_error():
+    """Hostile nesting cannot escape the snapshot boundary as RecursionError."""
+    nested: object = []
+    for _ in range(sys.getrecursionlimit() * 20):
+        nested = [nested]
+    snapshot = {
+        "schema_version": 1,
+        "version": 0,
+        "options": {
+            "group_by_subject": False,
+            "sort_by_sent_date": False,
+        },
+        "records": [],
+        "unexpected": nested,
+    }
+
+    with pytest.raises(IncrementalThreadError, match="JSON-safe"):
+        IncrementalThreadIndex.restore(snapshot)
 
 
 def test_restore_rejects_malformed_record_fields_and_duplicate_keys():

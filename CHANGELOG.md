@@ -19,6 +19,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   touched, and defer complete forest materialization until a caller requests it.
 - Add deterministic 100,000-message incremental-versus-full-rebuild benchmark
   evidence with projection parity, affected-message counts, wall time, and peak RSS.
+- Harden incremental snapshot publication and restore so schema versions require
+  exact non-boolean integers and hostile nesting or unencodable Unicode fails
+  closed with `IncrementalThreadError` instead of leaking runtime exceptions.
 
 - Add an atomic `IncrementalThreadIndex` for mailbox additions, replacements,
   and removals with stable caller message keys, affected-component

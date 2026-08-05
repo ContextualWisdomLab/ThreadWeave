@@ -196,9 +196,11 @@ Schema version 1 stores:
 
 Payload objects and derived graph pointers are never serialized. Restored
 messages therefore have `payload=None`. Date values use an explicit tagged text
-or ISO-8601 datetime representation. Restore rejects unknown schema versions,
-extra or missing fields, duplicate keys, malformed types, invalid external IDs,
-and configured record or byte limits before publishing state.
+or ISO-8601 datetime representation. Schema versions must be exact non-boolean
+integers. Restore rejects unknown versions, extra or missing fields, duplicate
+keys, malformed types, invalid external IDs, hostile nesting, unencodable Unicode,
+and configured record or byte limits through `IncrementalThreadError` before
+publishing state.
 
 ## Correctness and operational boundaries
 
