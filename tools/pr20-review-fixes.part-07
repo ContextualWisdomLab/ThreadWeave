@@ -1,0 +1,189 @@
+-        ranks = _current_ranks(positions)
++        ranks = (
++            _current_ranks(positions)
++            if self._sort_by_sent_date
++            else positions
++        )
+         if self._sort_by_sent_date:
+             _validate_effective_sequence_numbers(records, ranks)
+ 
+@@ -992,17 +1086,6 @@ class IncrementalThreadIndex:
+             for component_id, keys in self._keys_by_component.items()
+             if component_id in unaffected_component_ids
+         }
+-        roots_by_component = {
+-            component_id: roots
+-            for component_id, roots in self._roots_by_component.items()
+-            if component_id in unaffected_component_ids
+-        }
+-        projections_by_component = {
+-            component_id: projections
+-            for component_id, projections in self._projections_by_component.items()
+-            if component_id in unaffected_component_ids
+-        }
+-
+         for keys in _partition_components(
+             current_candidate_keys,
+             positions,
+@@ -1010,24 +1093,16 @@ class IncrementalThreadIndex:
+             keys_by_token,
+         ):
+             component_id = keys[0]
+-            roots, projections = _build_component(
+-                keys,
+-                records,
+-                ranks,
+-                group_by_subject=self._group_by_subject,
+-                sort_by_sent_date=self._sort_by_sent_date,
+-            )
+             keys_by_component[component_id] = keys
+-            roots_by_component[component_id] = roots
+-            projections_by_component[component_id] = projections
+             for key in keys:
+                 component_by_key[key] = component_id
+ 
+-        roots, projections = _compose_forest(
+-            roots_by_component,
+-            projections_by_component,
++        after_affected_keys = _ordered_keys(current_candidate_keys, positions)
++        _, after_affected_projections = _build_forest(
++            after_affected_keys,
+             records,
+             ranks,
++            group_by_subject=self._group_by_subject,
+             sort_by_sent_date=self._sort_by_sent_date,
+         )
+         affected_positions = {
+@@ -1043,8 +1118,8 @@ class IncrementalThreadIndex:
+             previous_version,
+             version,
+             affected,
+-            self._projections,
+-            projections,
++            before_affected_projections,
++            after_affected_projections,
+         )
+ 
+         self._records = records
+@@ -1054,10 +1129,8 @@ class IncrementalThreadIndex:
+         self._keys_by_token = keys_by_token
+         self._component_by_key = component_by_key
+         self._keys_by_component = keys_by_component
+-        self._roots_by_component = roots_by_component
+-        self._projections_by_component = projections_by_component
+-        self._roots = roots
+-        self._projections = projections
++        self._roots = None
++        self._projections = None
+         self._version = version
+         return delta
+ 
+diff --git a/tests/test_incremental_benchmark.py b/tests/test_incremental_benchmark.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..4dbe6eb248dba15d9c17b7bfc6f17c1a126f4d34
+--- /dev/null
++++ b/tests/test_incremental_benchmark.py
+@@ -0,0 +1,65 @@
++"""Contract tests for the mailbox-scale incremental benchmark."""
++
++from __future__ import annotations
++
++import importlib.util
++import json
++import sys
++from pathlib import Path
++
++import pytest
++
++ROOT = Path(__file__).parents[1]
++BENCHMARK_PATH = ROOT / "benchmarks" / "incremental_mailbox.py"
++SPEC = importlib.util.spec_from_file_location(
++    "threadweave_incremental_benchmark",
++    BENCHMARK_PATH,
++)
++assert SPEC is not None and SPEC.loader is not None
++benchmark = importlib.util.module_from_spec(SPEC)
++sys.modules[SPEC.name] = benchmark
++SPEC.loader.exec_module(benchmark)
++
++
++def test_small_benchmark_proves_projection_parity_and_reports_resources():
++    """The CI-sized run emits matching digests and complete evidence fields."""
++    result = benchmark.run_benchmark(1_000, 10)
++
++    assert result["schema_version"] == 1
++    assert result["message_count"] == 1_001
++    assert result["incremental"]["projection_sha256"] == (
++        result["full_rebuild"]["projection_sha256"]
++    )
++    assert result["incremental"]["affected_message_count"] == 21
++    assert result["incremental"]["delta_apply_seconds"] >= 0
++    assert result["incremental"]["peak_rss_bytes"] > 0
++    assert result["full_rebuild"]["full_rebuild_seconds"] >= 0
++    assert result["full_rebuild"]["peak_rss_bytes"] > 0
++
++
++def test_benchmark_validates_size_contracts():
++    """Invalid or undersized workloads fail before spawning workers."""
++    with pytest.raises(ValueError, match="message_count"):
++        benchmark.run_benchmark(0, 10)
++    with pytest.raises(ValueError, match="thread_size"):
++        benchmark.run_benchmark(100, 0)
++    with pytest.raises(ValueError, match="two complete threads"):
++        benchmark.run_benchmark(10, 10)
++
++
++def test_main_writes_deterministic_json_shape(tmp_path: Path):
++    """The command-line entry point writes one parseable evidence document."""
++    output = tmp_path / "benchmark.json"
++    assert benchmark.main(
++        [
++            "--messages",
++            "1000",
++            "--thread-size",
++            "10",
++            "--output",
++            str(output),
++        ]
++    ) == 0
++    parsed = json.loads(output.read_text(encoding="utf-8"))
++    assert parsed["schema_version"] == 1
++    assert parsed["message_count"] == 1_001
+diff --git a/tests/test_incremental_benchmark_workflow.py b/tests/test_incremental_benchmark_workflow.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3c9120d934c6d9a2f3d4834c452d78cf4438a9bf
+--- /dev/null
++++ b/tests/test_incremental_benchmark_workflow.py
+@@ -0,0 +1,56 @@
++"""Governance contract for the mailbox-scale benchmark workflow."""
++
++from pathlib import Path
++
++WORKFLOW = (
++    Path(__file__).parents[1]
++    / ".github"
++    / "workflows"
++    / "incremental-benchmark.yml"
++)
++
++
++def _workflow() -> str:
++    """Return the workflow source without adding a YAML parser dependency."""
++    return WORKFLOW.read_text(encoding="utf-8")
++
++
++def test_benchmark_is_manual_and_scheduled_with_a_100k_default():
++    """Operators can reproduce evidence while a weekly run catches regressions."""
++    workflow = _workflow()
++    assert "workflow_dispatch:" in workflow
++    assert 'default: "100000"' in workflow
++    assert 'cron: "17 3 * * 1"' in workflow
++    assert "cancel-in-progress: true" in workflow
++
++
++def test_benchmark_uses_immutable_actions_and_the_reviewed_dependency_lock():
++    """Performance evidence runs through the same pinned supply-chain boundary."""
++    workflow = _workflow()
++    required_actions = {
++        "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920",
++        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
