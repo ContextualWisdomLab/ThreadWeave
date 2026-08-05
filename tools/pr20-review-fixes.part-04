@@ -1,0 +1,153 @@
+-walk every message in unrelated components.
++Unchanged components retain their existing internal `Container` roots. Applying a
++change does not eagerly rebuild the complete public forest: only the affected old
++and new component views are composed for `ThreadDelta`. The complete ordered forest
++is materialized once, on demand, when `roots` or `projections` is requested. Public
++roots are defensive structural copies; editing their parent, child, or message
++metadata cannot corrupt internal state, while caller payload objects remain shared by
++reference. Internal implicit sent-date ranks are cleared before roots are exposed, so
++ordinary IMAP `THREAD` output still requires real caller-supplied sequence numbers.
+ 
+ `ThreadDelta.affected_message_keys` reports the candidate region. The delta also
+ contains added, removed, and structurally updated projections. A metadata-only
+@@ -179,11 +183,13 @@ It also covers RFC 5051 subject buckets, RFC 5256 sent-date ordering, ordinary a
+ UID THREAD output, duplicate and missing Message-ID values, deep chains,
+ optimistic conflicts, hostile snapshots, and payload omission.
+ 
+-A separate scheduled/manual benchmark is required before this feature is released
+-as a performance claim. It must exercise at least 100,000 records and report wall
+-time, peak RSS, affected-message count, and a full-rebuild comparison. The
+-incremental contract promises that unrelated records are not passed to the batch
+-threader; it does not promise constant-time global root presentation.
++`benchmarks/incremental_mailbox.py` runs incremental and full-rebuild scenarios in
++separate processes, requires identical projection hashes, and reports wall time, peak
++RSS, affected-message count, and full-view materialization time. The scheduled/manual
++workflow defaults to 100,000 existing messages and stores the JSON evidence for 90
++days. The update contract promises that unrelated records are not passed to the batch
++threader; full-view materialization remains proportional to the number of roots and is
++therefore reported separately from delta application.
+ 
+ ## References
+ 
+diff --git a/src/threadweave/incremental.py b/src/threadweave/incremental.py
+index 9150bab749b0c1d87772feca12275d37ad765694..fe9adeaba587f08ccc7a4a33f75722bbbc70c2de 100644
+--- a/src/threadweave/incremental.py
++++ b/src/threadweave/incremental.py
+@@ -369,22 +369,30 @@ def _connectivity_tokens(
+     return frozenset(tokens)
+ 
+ 
+-def _copy_token_buckets(
+-    buckets: Mapping[str, set[str]],
+-) -> dict[str, set[str]]:
+-    """Return independent mutable copies of reverse token buckets."""
+-    return {token: set(keys) for token, keys in buckets.items()}
++def _writable_token_bucket(
++    token: str,
++    keys_by_token: dict[str, set[str]],
++    copied_tokens: set[str],
++) -> set[str]:
++    """Return one copy-on-write reverse bucket owned by the transaction."""
++    if token not in copied_tokens:
++        keys_by_token[token] = set(keys_by_token.get(token, set()))
++        copied_tokens.add(token)
++    elif token not in keys_by_token:
++        keys_by_token[token] = set()
++    return keys_by_token[token]
+ 
+ 
+ def _remove_key_from_buckets(
+     key: str,
+     tokens_by_key: dict[str, frozenset[str]],
+     keys_by_token: dict[str, set[str]],
++    copied_tokens: set[str],
+ ) -> frozenset[str]:
+-    """Remove one key from copied token indexes and return its old tokens."""
++    """Remove one key from transaction-owned token buckets."""
+     old_tokens = tokens_by_key.pop(key, frozenset())
+     for token in old_tokens:
+-        bucket = keys_by_token[token]
++        bucket = _writable_token_bucket(token, keys_by_token, copied_tokens)
+         bucket.discard(key)
+         if not bucket:
+             del keys_by_token[token]
+@@ -396,11 +404,12 @@ def _add_key_to_buckets(
+     tokens: frozenset[str],
+     tokens_by_key: dict[str, frozenset[str]],
+     keys_by_token: dict[str, set[str]],
++    copied_tokens: set[str],
+ ) -> None:
+-    """Insert one key into copied forward and reverse token indexes."""
++    """Insert one key through transaction-owned copy-on-write buckets."""
+     tokens_by_key[key] = tokens
+     for token in tokens:
+-        keys_by_token.setdefault(token, set()).add(key)
++        _writable_token_bucket(token, keys_by_token, copied_tokens).add(key)
+ 
+ 
+ def _ordered_keys(keys: Iterable[str], positions: Mapping[str, int]) -> tuple[str, ...]:
+@@ -497,8 +506,9 @@ def _partition_components(
+     """Partition candidate keys into deterministic current connectivity components."""
+     remaining = set(keys)
+     components: list[tuple[str, ...]] = []
+-    while remaining:
+-        seed = min(remaining, key=lambda key: (positions[key], key))
++    for seed in _ordered_keys(keys, positions):
++        if seed not in remaining:
++            continue
+         component = {seed}
+         queue = [seed]
+         remaining.remove(seed)
+@@ -531,6 +541,59 @@ def _message_for_batch(message: Message, sequence_number: int | None) -> Message
+     )
+ 
+ 
++def _public_message_copy(message: Message) -> Message:
++    """Copy structural message metadata while retaining the caller payload."""
++    return Message(
++        message_id=message.message_id,
++        in_reply_to=message.in_reply_to,
++        references=message.references,
++        subject=message.subject,
++        payload=message.payload,
++        sent_date=message.sent_date,
++        internal_date=message.internal_date,
++        sequence_number=message.sequence_number,
++        uid=message.uid,
++    )
++
++
++def _public_forest_copy(roots: Iterable[Container]) -> tuple[Container, ...]:
++    """Return a loop-safe defensive copy of the index's internal forest."""
++    copied_roots: list[Container] = []
++    seen: set[int] = set()
++    for root in roots:
++        root_identity = id(root)
++        if root_identity in seen:
++            raise IncrementalThreadError(
++                "internal thread forest contains a shared or cyclic container"
++            )
++        root_copy = Container(
++            message=None
++            if root.message is None
++            else _public_message_copy(root.message)
++        )
++        copied_roots.append(root_copy)
++        seen.add(root_identity)
++        stack: list[tuple[Container, Container]] = [(root, root_copy)]
++        while stack:
++            source, target = stack.pop()
++            for child in source.children:
++                child_identity = id(child)
++                if child_identity in seen:
++                    raise IncrementalThreadError(
++                        "internal thread forest contains a shared or cyclic container"
++                    )
++                child_copy = Container(
++                    message=None
++                    if child.message is None
++                    else _public_message_copy(child.message),
++                    parent=target,
++                )
++                target.children.append(child_copy)
++                seen.add(child_identity)
