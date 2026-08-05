@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from collections.abc import Iterable
 
 import threadweave.incremental as incremental_module
@@ -226,7 +228,7 @@ def test_unrelated_components_are_not_passed_to_the_batch_delegate(monkeypatch):
         MailboxChangeSet(expected_version=1, replacements=(replacement,))
     )
 
-    assert calls == [("a", "b")]
+    assert calls == [("a", "b"), ("a", "b")]
     assert all("x" not in call and "y" not in call for call in calls)
 
 
@@ -243,3 +245,86 @@ def test_noop_change_set_advances_no_version_and_returns_empty_delta():
     assert delta.updated_threads == ()
     assert delta.merges == ()
     assert delta.splits == ()
+
+
+def test_delta_classification_receives_only_affected_component_projections(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Unrelated roots never enter one small change's delta classifier."""
+    records = tuple(
+        _record(f"key_{index}", message_id=f"message_{index}")
+        for index in range(128)
+    )
+    index = IncrementalThreadIndex()
+    index.apply(MailboxChangeSet(expected_version=0, additions=records))
+
+    original = incremental_module._thread_delta
+    observed_sizes: list[tuple[int, int]] = []
+
+    def recording_delta(*args):
+        """Record old/new projection counts before delegating."""
+        observed_sizes.append((len(args[3]), len(args[4])))
+        return original(*args)
+
+    monkeypatch.setattr(incremental_module, "_thread_delta", recording_delta)
+    index.apply(
+        MailboxChangeSet(
+            expected_version=1,
+            additions=(
+                _record(
+                    "new_key",
+                    message_id="new_message",
+                    references=("message_0",),
+                ),
+            ),
+        )
+    )
+
+    assert observed_sizes == [(1, 1)]
+
+
+
+def test_small_delta_defers_the_complete_canonical_batch_view(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Apply batches only affected records until a full view is requested."""
+    records = tuple(
+        _record(f"key_{index}", message_id=f"message_{index}")
+        for index in range(128)
+    )
+    index = IncrementalThreadIndex()
+    index.apply(MailboxChangeSet(expected_version=0, additions=records))
+
+    original = incremental_module._batch_thread_messages
+    observed_message_counts: list[int] = []
+
+    def recording_batch(messages, **options):
+        """Record each canonical batch size before delegating."""
+        materialized = tuple(messages)
+        observed_message_counts.append(len(materialized))
+        return original(materialized, **options)
+
+    monkeypatch.setattr(
+        incremental_module,
+        "_batch_thread_messages",
+        recording_batch,
+    )
+    index.apply(
+        MailboxChangeSet(
+            expected_version=1,
+            additions=(
+                _record(
+                    "new_key",
+                    message_id="new_message",
+                    references=("message_0",),
+                ),
+            ),
+        )
+    )
+
+    assert observed_message_counts == [1, 2]
+    assert len(index.projections) == 128
+    assert observed_message_counts == [1, 2, 129]
+    assert len(index.projections) == 128
+    assert len(index.roots) == 128
+    assert observed_message_counts == [1, 2, 129]

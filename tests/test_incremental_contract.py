@@ -171,6 +171,43 @@ def test_structural_metadata_is_copied_while_payload_remains_caller_owned():
     assert indexed.payload is message.payload
 
 
+def test_public_roots_are_defensive_structural_copies():
+    """Caller graph edits cannot corrupt the index's reusable internal forest."""
+    payload = object()
+    index = IncrementalThreadIndex()
+    index.apply(
+        MailboxChangeSet(
+            expected_version=0,
+            additions=(
+                _record(
+                    "root",
+                    message_id="root",
+                    subject="Original",
+                    payload=payload,
+                ),
+                _record(
+                    "child",
+                    message_id="child",
+                    references=("root",),
+                ),
+            ),
+        )
+    )
+
+    exposed = index.roots
+    exposed[0].message.subject = "Mutated"
+    exposed[0].children.clear()
+
+    current = index.roots
+    assert current is not exposed
+    assert current[0] is not exposed[0]
+    assert current[0].message is not exposed[0].message
+    assert current[0].message.subject == "Original"
+    assert current[0].message.payload is payload
+    assert [child.message.payload for child in current[0].children] == ["child"]
+    assert index.projections[0].message_keys == ("root", "child")
+
+
 def test_reported_external_identity_is_immutable_on_replacement():
     """RFC 8474 identity metadata cannot disappear or change after exposure."""
     index = IncrementalThreadIndex()

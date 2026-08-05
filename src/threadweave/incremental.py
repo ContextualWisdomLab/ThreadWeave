@@ -17,7 +17,6 @@ from typing import Literal
 
 from threadweave.collation import unicode_casemap_key
 from threadweave.container import Container
-from threadweave.dates import normalize_sent_date
 from threadweave.headers import extract_reference_ids, normalize_message_id
 from threadweave.subject import normalize_subject
 from threadweave.threading import Message, thread_messages
@@ -369,22 +368,30 @@ def _connectivity_tokens(
     return frozenset(tokens)
 
 
-def _copy_token_buckets(
-    buckets: Mapping[str, set[str]],
-) -> dict[str, set[str]]:
-    """Return independent mutable copies of reverse token buckets."""
-    return {token: set(keys) for token, keys in buckets.items()}
+def _writable_token_bucket(
+    token: str,
+    keys_by_token: dict[str, set[str]],
+    copied_tokens: set[str],
+) -> set[str]:
+    """Return one copy-on-write reverse bucket owned by the transaction."""
+    if token not in copied_tokens:
+        keys_by_token[token] = set(keys_by_token.get(token, set()))
+        copied_tokens.add(token)
+    elif token not in keys_by_token:
+        keys_by_token[token] = set()
+    return keys_by_token[token]
 
 
 def _remove_key_from_buckets(
     key: str,
     tokens_by_key: dict[str, frozenset[str]],
     keys_by_token: dict[str, set[str]],
+    copied_tokens: set[str],
 ) -> frozenset[str]:
-    """Remove one key from copied token indexes and return its old tokens."""
+    """Remove one key from transaction-owned token buckets."""
     old_tokens = tokens_by_key.pop(key, frozenset())
     for token in old_tokens:
-        bucket = keys_by_token[token]
+        bucket = _writable_token_bucket(token, keys_by_token, copied_tokens)
         bucket.discard(key)
         if not bucket:
             del keys_by_token[token]
@@ -396,11 +403,12 @@ def _add_key_to_buckets(
     tokens: frozenset[str],
     tokens_by_key: dict[str, frozenset[str]],
     keys_by_token: dict[str, set[str]],
+    copied_tokens: set[str],
 ) -> None:
-    """Insert one key into copied forward and reverse token indexes."""
+    """Insert one key through transaction-owned copy-on-write buckets."""
     tokens_by_key[key] = tokens
     for token in tokens:
-        keys_by_token.setdefault(token, set()).add(key)
+        _writable_token_bucket(token, keys_by_token, copied_tokens).add(key)
 
 
 def _ordered_keys(keys: Iterable[str], positions: Mapping[str, int]) -> tuple[str, ...]:
@@ -497,8 +505,9 @@ def _partition_components(
     """Partition candidate keys into deterministic current connectivity components."""
     remaining = set(keys)
     components: list[tuple[str, ...]] = []
-    while remaining:
-        seed = min(remaining, key=lambda key: (positions[key], key))
+    for seed in _ordered_keys(keys, positions):
+        if seed not in remaining:
+            continue
         component = {seed}
         queue = [seed]
         remaining.remove(seed)
@@ -529,6 +538,59 @@ def _message_for_batch(message: Message, sequence_number: int | None) -> Message
         sequence_number=sequence_number,
         uid=message.uid,
     )
+
+
+def _public_message_copy(message: Message) -> Message:
+    """Copy structural message metadata while retaining the caller payload."""
+    return Message(
+        message_id=message.message_id,
+        in_reply_to=message.in_reply_to,
+        references=message.references,
+        subject=message.subject,
+        payload=message.payload,
+        sent_date=message.sent_date,
+        internal_date=message.internal_date,
+        sequence_number=message.sequence_number,
+        uid=message.uid,
+    )
+
+
+def _public_forest_copy(roots: Iterable[Container]) -> tuple[Container, ...]:
+    """Return a loop-safe defensive copy of the index's internal forest."""
+    copied_roots: list[Container] = []
+    seen: set[int] = set()
+    for root in roots:
+        root_identity = id(root)
+        if root_identity in seen:
+            raise IncrementalThreadError(
+                "internal thread forest contains a shared or cyclic container"
+            )
+        root_copy = Container(
+            message=None
+            if root.message is None
+            else _public_message_copy(root.message)
+        )
+        copied_roots.append(root_copy)
+        seen.add(root_identity)
+        stack: list[tuple[Container, Container]] = [(root, root_copy)]
+        while stack:
+            source, target = stack.pop()
+            for child in source.children:
+                child_identity = id(child)
+                if child_identity in seen:
+                    raise IncrementalThreadError(
+                        "internal thread forest contains a shared or cyclic container"
+                    )
+                child_copy = Container(
+                    message=None
+                    if child.message is None
+                    else _public_message_copy(child.message),
+                    parent=target,
+                )
+                target.children.append(child_copy)
+                seen.add(child_identity)
+                stack.append((child, child_copy))
+    return tuple(copied_roots)
 
 
 def _projection_for_root(
@@ -565,7 +627,7 @@ def _projection_for_root(
     return ThreadProjection(tuple(message_keys), thread_ids)
 
 
-def _build_component(
+def _build_forest(
     keys: tuple[str, ...],
     records: Mapping[str, IndexedMessage],
     ranks: Mapping[str, int],
@@ -573,7 +635,7 @@ def _build_component(
     group_by_subject: bool,
     sort_by_sent_date: bool,
 ) -> tuple[tuple[Container, ...], tuple[ThreadProjection, ...]]:
-    """Run the canonical batch engine for one affected component."""
+    """Run the canonical batch engine for one ordered record subset."""
     messages: list[Message] = []
     key_by_message_identity: dict[int, str] = {}
     for key in keys:
@@ -593,72 +655,10 @@ def _build_component(
     projections = tuple(
         _projection_for_root(root, key_by_message_identity, records) for root in roots
     )
+    for key, message in zip(keys, messages):
+        if records[key].message.sequence_number is None:
+            message.sequence_number = None
     return roots, projections
-
-
-def _root_order_key(
-    root: Container,
-    projection: ThreadProjection,
-    records: Mapping[str, IndexedMessage],
-    ranks: Mapping[str, int],
-    *,
-    sort_by_sent_date: bool,
-) -> tuple[object, ...]:
-    """Return the same global root-order contract used by the batch algorithm."""
-    if not sort_by_sent_date:
-        return (min(ranks[key] for key in projection.message_keys),)
-    if not projection.message_keys:
-        return (normalize_sent_date(None), 0, 0)
-    first_key = projection.message_keys[0]
-    message = records[first_key].message
-    sequence_number = (
-        ranks[first_key]
-        if message.sequence_number is None
-        else message.sequence_number
-    )
-    return (
-        normalize_sent_date(message.sent_date, message.internal_date),
-        sequence_number,
-        ranks[first_key],
-    )
-
-
-def _compose_forest(
-    roots_by_component: Mapping[str, tuple[Container, ...]],
-    projections_by_component: Mapping[str, tuple[ThreadProjection, ...]],
-    records: Mapping[str, IndexedMessage],
-    ranks: Mapping[str, int],
-    *,
-    sort_by_sent_date: bool,
-) -> tuple[tuple[Container, ...], tuple[ThreadProjection, ...]]:
-    """Compose reusable component outputs into one deterministic global forest."""
-    entries: list[tuple[tuple[object, ...], Container, ThreadProjection]] = []
-    for component_id, roots in roots_by_component.items():
-        projections = projections_by_component[component_id]
-        for root, projection in zip(roots, projections):
-            entries.append(
-                (
-                    _root_order_key(
-                        root,
-                        projection,
-                        records,
-                        ranks,
-                        sort_by_sent_date=sort_by_sent_date,
-                    ),
-                    root,
-                    projection,
-                )
-            )
-    entries.sort(key=lambda entry: entry[0])
-    return (
-        tuple(entry[1] for entry in entries),
-        tuple(entry[2] for entry in entries),
-    )
-
-
-def _projection_overlap(first: ThreadProjection, second: ThreadProjection) -> bool:
-    """Return whether two projections share any immutable caller message key."""
-    return bool(set(first.message_keys) & set(second.message_keys))
 
 
 def _transition_thread_ids(
@@ -677,54 +677,85 @@ def _transition_thread_ids(
     )
 
 
+def _projection_membership(
+    projections: Sequence[ThreadProjection],
+    name: str,
+) -> dict[str, int]:
+    """Index each caller key once and reject overlapping root projections."""
+    membership: dict[str, int] = {}
+    for projection_index, projection in enumerate(projections):
+        for message_key in projection.message_keys:
+            if message_key in membership:
+                raise IncrementalThreadError(
+                    f"{name} projections contain duplicate message_key: {message_key}"
+                )
+            membership[message_key] = projection_index
+    return membership
+
+
 def _thread_delta(
     previous_version: int,
     version: int,
     affected_message_keys: tuple[str, ...],
-    before: tuple[ThreadProjection, ...],
-    after: tuple[ThreadProjection, ...],
+    before: Sequence[ThreadProjection],
+    after: Sequence[ThreadProjection],
 ) -> ThreadDelta:
-    """Classify deterministic projection additions, removals, updates, and transitions."""
+    """Classify projection changes and transitions in linear message-key work."""
+    before_tuple = tuple(before)
+    after_tuple = tuple(after)
+    before_membership = _projection_membership(before_tuple, "before")
+    after_membership = _projection_membership(after_tuple, "after")
+
+    before_by_after: list[set[int]] = [set() for _ in after_tuple]
+    after_by_before: list[set[int]] = [set() for _ in before_tuple]
+    for message_key, after_index in after_membership.items():
+        before_index = before_membership.get(message_key)
+        if before_index is not None:
+            before_by_after[after_index].add(before_index)
+            after_by_before[before_index].add(after_index)
+
+    before_values = set(before_tuple)
     added = tuple(
         projection
-        for projection in after
-        if not any(_projection_overlap(projection, old) for old in before)
+        for projection, overlaps in zip(after_tuple, before_by_after)
+        if not overlaps
     )
     removed = tuple(
         projection
-        for projection in before
-        if not any(_projection_overlap(projection, new) for new in after)
+        for projection, overlaps in zip(before_tuple, after_by_before)
+        if not overlaps
     )
     updated = tuple(
         projection
-        for projection in after
-        if projection not in before
-        and any(_projection_overlap(projection, old) for old in before)
+        for projection, overlaps in zip(after_tuple, before_by_after)
+        if overlaps and projection not in before_values
     )
-    merges: list[ThreadTransition] = []
-    for projection in after:
-        overlapping = tuple(old for old in before if _projection_overlap(projection, old))
-        if len(overlapping) > 1:
-            merges.append(
-                ThreadTransition(
-                    "merge",
-                    overlapping,
-                    (projection,),
-                    _transition_thread_ids(overlapping, (projection,)),
-                )
-            )
-    splits: list[ThreadTransition] = []
-    for projection in before:
-        overlapping = tuple(new for new in after if _projection_overlap(projection, new))
-        if len(overlapping) > 1:
-            splits.append(
-                ThreadTransition(
-                    "split",
-                    (projection,),
-                    overlapping,
-                    _transition_thread_ids((projection,), overlapping),
-                )
-            )
+    merges = tuple(
+        ThreadTransition(
+            "merge",
+            tuple(before_tuple[index] for index in sorted(overlaps)),
+            (projection,),
+            _transition_thread_ids(
+                tuple(before_tuple[index] for index in sorted(overlaps)),
+                (projection,),
+            ),
+        )
+        for projection, overlaps in zip(after_tuple, before_by_after)
+        if len(overlaps) > 1
+    )
+    splits = tuple(
+        ThreadTransition(
+            "split",
+            (projection,),
+            tuple(after_tuple[index] for index in sorted(overlaps)),
+            _transition_thread_ids(
+                (projection,),
+                tuple(after_tuple[index] for index in sorted(overlaps)),
+            ),
+        )
+        for projection, overlaps in zip(before_tuple, after_by_before)
+        if len(overlaps) > 1
+    )
     return ThreadDelta(
         previous_version,
         version,
@@ -732,8 +763,8 @@ def _thread_delta(
         added,
         removed,
         updated,
-        tuple(merges),
-        tuple(splits),
+        merges,
+        splits,
     )
 
 
@@ -821,14 +852,31 @@ class IncrementalThreadIndex:
         self._keys_by_token: dict[str, set[str]] = {}
         self._component_by_key: dict[str, str] = {}
         self._keys_by_component: dict[str, tuple[str, ...]] = {}
-        self._roots_by_component: dict[str, tuple[Container, ...]] = {}
-        self._projections_by_component: dict[str, tuple[ThreadProjection, ...]] = {}
-        self._roots: tuple[Container, ...] = ()
-        self._projections: tuple[ThreadProjection, ...] = ()
+        self._roots: tuple[Container, ...] | None = ()
+        self._projections: tuple[ThreadProjection, ...] | None = ()
 
     def __len__(self) -> int:
         """Return the number of indexed caller message keys."""
         return len(self._records)
+
+    def _materialize_forest(self) -> None:
+        """Build and cache the complete canonical forest only when requested."""
+        if self._roots is not None and self._projections is not None:
+            return
+        ranks = (
+            _current_ranks(self._positions)
+            if self._sort_by_sent_date
+            else self._positions
+        )
+        roots, projections = _build_forest(
+            self.message_keys,
+            self._records,
+            ranks,
+            group_by_subject=self._group_by_subject,
+            sort_by_sent_date=self._sort_by_sent_date,
+        )
+        self._roots = roots
+        self._projections = projections
 
     @property
     def version(self) -> int:
@@ -842,12 +890,16 @@ class IncrementalThreadIndex:
 
     @property
     def roots(self) -> tuple[Container, ...]:
-        """Return the current transport-neutral thread roots."""
-        return self._roots
+        """Return defensive transport-neutral copies of current thread roots."""
+        self._materialize_forest()
+        assert self._roots is not None
+        return _public_forest_copy(self._roots)
 
     @property
     def projections(self) -> tuple[ThreadProjection, ...]:
         """Return deterministic caller-key projections for current roots."""
+        self._materialize_forest()
+        assert self._projections is not None
         return self._projections
 
     def apply(self, change_set: MailboxChangeSet) -> ThreadDelta:
@@ -870,12 +922,15 @@ class IncrementalThreadIndex:
         if not (
             change_set.additions or change_set.replacements or change_set.removals
         ):
-            return _thread_delta(
+            return ThreadDelta(
                 self._version,
                 self._version,
                 (),
-                self._projections,
-                self._projections,
+                (),
+                (),
+                (),
+                (),
+                (),
             )
 
         addition_keys = {record.message_key for record in change_set.additions}
@@ -913,7 +968,8 @@ class IncrementalThreadIndex:
         records = dict(self._records)
         positions = dict(self._positions)
         tokens_by_key = dict(self._tokens_by_key)
-        keys_by_token = _copy_token_buckets(self._keys_by_token)
+        keys_by_token = dict(self._keys_by_token)
+        copied_tokens: set[str] = set()
         next_position = self._next_position
         changed_existing_keys = replacement_keys | removal_keys
         candidate_seeds: set[str] = set()
@@ -924,7 +980,12 @@ class IncrementalThreadIndex:
             if component_id is not None:
                 candidate_seeds.update(self._keys_by_component[component_id])
             touched_tokens.update(
-                _remove_key_from_buckets(key, tokens_by_key, keys_by_token)
+                _remove_key_from_buckets(
+                    key,
+                    tokens_by_key,
+                    keys_by_token,
+                    copied_tokens,
+                )
             )
 
         for key in removal_keys:
@@ -942,6 +1003,7 @@ class IncrementalThreadIndex:
                 tokens,
                 tokens_by_key,
                 keys_by_token,
+                copied_tokens,
             )
             candidate_seeds.add(replacement.message_key)
         for addition in copied_additions:
@@ -958,6 +1020,7 @@ class IncrementalThreadIndex:
                 tokens,
                 tokens_by_key,
                 keys_by_token,
+                copied_tokens,
             )
             candidate_seeds.add(addition.message_key)
 
@@ -968,8 +1031,38 @@ class IncrementalThreadIndex:
             if component_id is not None:
                 candidate_seeds.update(self._keys_by_component[component_id])
 
+        old_component_ids = {
+            self._component_by_key[key]
+            for key in candidate_seeds
+            if key in self._component_by_key
+        }
+        old_ranks = (
+            _current_ranks(self._positions)
+            if self._sort_by_sent_date
+            else self._positions
+        )
+        before_affected_keys = _ordered_keys(
+            {
+                key
+                for component_id in old_component_ids
+                for key in self._keys_by_component[component_id]
+            },
+            self._positions,
+        )
+        _, before_affected_projections = _build_forest(
+            before_affected_keys,
+            self._records,
+            old_ranks,
+            group_by_subject=self._group_by_subject,
+            sort_by_sent_date=self._sort_by_sent_date,
+        )
+
         _validate_external_identities(records)
-        ranks = _current_ranks(positions)
+        ranks = (
+            _current_ranks(positions)
+            if self._sort_by_sent_date
+            else positions
+        )
         if self._sort_by_sent_date:
             _validate_effective_sequence_numbers(records, ranks)
 
@@ -992,17 +1085,6 @@ class IncrementalThreadIndex:
             for component_id, keys in self._keys_by_component.items()
             if component_id in unaffected_component_ids
         }
-        roots_by_component = {
-            component_id: roots
-            for component_id, roots in self._roots_by_component.items()
-            if component_id in unaffected_component_ids
-        }
-        projections_by_component = {
-            component_id: projections
-            for component_id, projections in self._projections_by_component.items()
-            if component_id in unaffected_component_ids
-        }
-
         for keys in _partition_components(
             current_candidate_keys,
             positions,
@@ -1010,24 +1092,16 @@ class IncrementalThreadIndex:
             keys_by_token,
         ):
             component_id = keys[0]
-            roots, projections = _build_component(
-                keys,
-                records,
-                ranks,
-                group_by_subject=self._group_by_subject,
-                sort_by_sent_date=self._sort_by_sent_date,
-            )
             keys_by_component[component_id] = keys
-            roots_by_component[component_id] = roots
-            projections_by_component[component_id] = projections
             for key in keys:
                 component_by_key[key] = component_id
 
-        roots, projections = _compose_forest(
-            roots_by_component,
-            projections_by_component,
+        after_affected_keys = _ordered_keys(current_candidate_keys, positions)
+        _, after_affected_projections = _build_forest(
+            after_affected_keys,
             records,
             ranks,
+            group_by_subject=self._group_by_subject,
             sort_by_sent_date=self._sort_by_sent_date,
         )
         affected_positions = {
@@ -1043,8 +1117,8 @@ class IncrementalThreadIndex:
             previous_version,
             version,
             affected,
-            self._projections,
-            projections,
+            before_affected_projections,
+            after_affected_projections,
         )
 
         self._records = records
@@ -1054,10 +1128,8 @@ class IncrementalThreadIndex:
         self._keys_by_token = keys_by_token
         self._component_by_key = component_by_key
         self._keys_by_component = keys_by_component
-        self._roots_by_component = roots_by_component
-        self._projections_by_component = projections_by_component
-        self._roots = roots
-        self._projections = projections
+        self._roots = None
+        self._projections = None
         self._version = version
         return delta
 

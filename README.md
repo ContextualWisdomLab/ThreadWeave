@@ -217,7 +217,10 @@ assert IncrementalThreadIndex.restore(index.snapshot()).projections == (
 
 Every affected component is recomputed through the canonical batch threader, and
 full-rebuild parity is the correctness oracle. Structural merges and splits are
-reported explicitly. Versioned snapshots omit arbitrary payloads and reject
+reported explicitly. `roots` returns a defensive structural copy, so callers may
+traverse or edit that graph without corrupting reusable index state; payload objects
+remain caller-owned references. Internal sent-date tie-break positions never become
+public IMAP sequence numbers. Versioned snapshots omit arbitrary payloads and reject
 unknown, malformed, or oversized input. See
 [`docs/incremental-threading.md`](docs/incremental-threading.md) for the atomicity,
 identity, snapshot, complexity, and RFC boundaries.
@@ -265,6 +268,9 @@ identity, snapshot, complexity, and RFC boundaries.
 - Graph operations, IMAP rendering, and incremental component traversal are
   iterative and identity-guarded; deep or cyclic malformed input cannot recurse
   indefinitely.
+- `benchmarks/incremental_mailbox.py` compares isolated incremental and full
+  rebuild processes at 100,000 messages, verifies an identical projection digest,
+  and records affected-message count, wall time, and peak RSS as JSON evidence.
 
 ## Reproducible CI supply chain
 

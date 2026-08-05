@@ -118,10 +118,14 @@ old component; a new bridge message includes every old component touched by its
 new tokens. The candidate region is repartitioned iteratively and each resulting
 component is processed by `thread_messages`.
 
-Unchanged components retain their existing `Container` roots. Building the
-ordered public root tuple still examines the component-root summaries so that
-batch-compatible global ordering is preserved; it does not re-run threading or
-walk every message in unrelated components.
+Unchanged components retain their existing internal `Container` roots. Applying a
+change does not eagerly rebuild the complete public forest: only the affected old
+and new component views are composed for `ThreadDelta`. The complete ordered forest
+is materialized once, on demand, when `roots` or `projections` is requested. Public
+roots are defensive structural copies; editing their parent, child, or message
+metadata cannot corrupt internal state, while caller payload objects remain shared by
+reference. Internal implicit sent-date ranks are cleared before roots are exposed, so
+ordinary IMAP `THREAD` output still requires real caller-supplied sequence numbers.
 
 `ThreadDelta.affected_message_keys` reports the candidate region. The delta also
 contains added, removed, and structurally updated projections. A metadata-only
@@ -179,11 +183,13 @@ It also covers RFC 5051 subject buckets, RFC 5256 sent-date ordering, ordinary a
 UID THREAD output, duplicate and missing Message-ID values, deep chains,
 optimistic conflicts, hostile snapshots, and payload omission.
 
-A separate scheduled/manual benchmark is required before this feature is released
-as a performance claim. It must exercise at least 100,000 records and report wall
-time, peak RSS, affected-message count, and a full-rebuild comparison. The
-incremental contract promises that unrelated records are not passed to the batch
-threader; it does not promise constant-time global root presentation.
+`benchmarks/incremental_mailbox.py` runs incremental and full-rebuild scenarios in
+separate processes, requires identical projection hashes, and reports wall time, peak
+RSS, affected-message count, and full-view materialization time. The scheduled/manual
+workflow defaults to 100,000 existing messages and stores the JSON evidence for 90
+days. The update contract promises that unrelated records are not passed to the batch
+threader; full-view materialization remains proportional to the number of roots and is
+therefore reported separately from delta application.
 
 ## References
 

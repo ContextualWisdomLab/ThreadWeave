@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Keep implicit RFC 5256 sent-date tie-break positions internal to the incremental
+  engine instead of exposing invented IMAP sequence numbers on public roots.
+- Return defensive structural copies from `IncrementalThreadIndex.roots` so caller
+  graph edits cannot corrupt reusable index state while payload objects remain
+  caller-owned references.
+- Replace quadratic disconnected-component partitioning and pairwise thread-delta
+  comparisons with bounded indexed passes, copy reverse-token buckets only when
+  touched, and defer complete forest materialization until a caller requests it.
+- Add deterministic 100,000-message incremental-versus-full-rebuild benchmark
+  evidence with projection parity, affected-message counts, wall time, and peak RSS.
+
 - Add an atomic `IncrementalThreadIndex` for mailbox additions, replacements,
   and removals with stable caller message keys, affected-component
   recomputation, batch-result parity, and explicit thread merge/split deltas.
