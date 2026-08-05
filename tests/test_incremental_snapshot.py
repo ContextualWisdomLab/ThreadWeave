@@ -282,3 +282,48 @@ def test_restore_rejects_non_mapping_and_non_json_safe_values():
     invalid["records"][0]["email_id"] = object()
     with pytest.raises(IncrementalThreadError, match="JSON"):
         IncrementalThreadIndex.restore(invalid)
+
+
+class _HostileDictionary(dict):
+    """Dictionary subclass whose iteration must never cross the snapshot boundary."""
+
+    def items(self):
+        """Raise if generic JSON encoding invokes subclass behavior."""
+        raise RuntimeError("hostile dictionary iteration")
+
+
+class _HostileList(list):
+    """List subclass whose iteration must never cross the snapshot boundary."""
+
+    def __iter__(self):
+        """Raise if generic JSON encoding invokes subclass behavior."""
+        raise RuntimeError("hostile list iteration")
+
+
+def test_restore_rejects_container_subclasses_before_they_execute():
+    """Only plain JSON containers may enter the untrusted snapshot decoder."""
+    root = _HostileDictionary(
+        {
+            "schema_version": 1,
+            "version": 0,
+            "options": {
+                "group_by_subject": False,
+                "sort_by_sent_date": False,
+            },
+            "records": [],
+        }
+    )
+    with pytest.raises(IncrementalThreadError, match="plain JSON containers"):
+        IncrementalThreadIndex.restore(root)
+
+    nested = {
+        "schema_version": 1,
+        "version": 0,
+        "options": {
+            "group_by_subject": False,
+            "sort_by_sent_date": False,
+        },
+        "records": _HostileList(),
+    }
+    with pytest.raises(IncrementalThreadError, match="plain JSON containers"):
+        IncrementalThreadIndex.restore(nested)

@@ -798,6 +798,28 @@ def _decoded_date(value: object, name: str) -> str | datetime | None:
     raise IncrementalThreadError(f"{name} date kind is unsupported")
 
 
+def _require_plain_json_containers(value: object) -> None:
+    """Reject executable container subclasses before JSON serialization.
+
+    JSON-decoded state consists of built-in dictionaries, lists, and scalar
+    values.  Requiring exact container types prevents untrusted ``items`` or
+    iterator overrides from executing inside the restore boundary.
+    """
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if type(current) is dict:
+            pending.extend(dict.values(current))
+        elif type(current) is list:
+            pending.extend(current)
+        elif current is None or isinstance(current, (str, int, float, bool)):
+            continue
+        else:
+            raise IncrementalThreadError(
+                "snapshot must contain only plain JSON containers and scalar values"
+            )
+
+
 def _snapshot_json_bytes(value: object) -> bytes:
     """Serialize a snapshot canonically or raise a bounded domain error."""
     try:
@@ -1215,6 +1237,7 @@ class IncrementalThreadIndex:
         )
         if not isinstance(snapshot, Mapping):
             raise IncrementalThreadError("snapshot must be a mapping")
+        _require_plain_json_containers(snapshot)
         if len(_snapshot_json_bytes(snapshot)) > max_bytes:
             raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
         _required_fields(

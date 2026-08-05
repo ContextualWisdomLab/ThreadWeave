@@ -200,7 +200,9 @@ or ISO-8601 datetime representation. Schema versions must be exact non-boolean
 integers. Restore rejects unknown versions, extra or missing fields, duplicate
 keys, malformed types, invalid external IDs, hostile nesting, unencodable Unicode,
 and configured record or byte limits through `IncrementalThreadError` before
-publishing state.
+publishing state. Only built-in JSON dictionaries and lists are accepted; container
+subclasses are rejected before serialization so hostile ``items`` or iterator
+overrides cannot execute inside the restore boundary.
 
 ## Correctness and operational boundaries
 

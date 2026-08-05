@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Reject dictionary and list subclasses at the incremental snapshot restore
+  boundary before JSON encoding can invoke untrusted iterator overrides.
 - Serialize every read and write on one `IncrementalThreadIndex` with a
   process-local reentrant lock so same-version concurrent writers yield one
   commit and one explicit conflict, while readers observe only committed state.
