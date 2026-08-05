@@ -1,0 +1,156 @@
+         incremental._projection_for_root(child, {}, {"a": record})
+ 
+ 
+-def test_empty_projection_has_an_earliest_safe_sent_date_key():
+-    """A malformed empty projection remains deterministically sortable."""
+-    key = incremental._root_order_key(
+-        Container(),
+-        ThreadProjection(()),
+-        {},
++
++
++def test_thread_delta_scans_projection_sequences_a_bounded_number_of_times():
++    """Large independent forests avoid pairwise projection comparisons."""
++
++    class CountingSequence:
++        """Wrap projections and record full-sequence operations."""
++
++        def __init__(self, values: tuple[ThreadProjection, ...]) -> None:
++            """Store values with zeroed iteration and membership counters."""
++            self.values = values
++            self.iterations = 0
++            self.membership_checks = 0
++
++        def __iter__(self):
++            """Iterate while recording one full-sequence pass."""
++            self.iterations += 1
++            return iter(self.values)
++
++        def __len__(self) -> int:
++            """Return the wrapped projection count."""
++            return len(self.values)
++
++        def __getitem__(self, index: int) -> ThreadProjection:
++            """Return one wrapped projection by position."""
++            return self.values[index]
++
++        def __contains__(self, value: object) -> bool:
++            """Record whole-sequence membership checks."""
++            self.membership_checks += 1
++            return value in self.values
++
++    projection_count = 128
++    values = tuple(
++        ThreadProjection((f"message_{index}",))
++        for index in range(projection_count)
++    )
++    before = CountingSequence(values)
++    after = CountingSequence(values + (ThreadProjection(("new_message",)),))
++
++    delta = incremental._thread_delta(0, 1, ("new_message",), before, after)
++
++    assert delta.added_threads == (ThreadProjection(("new_message",)),)
++    assert before.iterations <= 2
++    assert after.iterations <= 2
++    assert before.membership_checks == 0
++    assert after.membership_checks == 0
++
++
++def test_projection_membership_rejects_duplicate_keys_between_roots():
++    """Malformed projections cannot make merge/split classification ambiguous."""
++    with pytest.raises(IncrementalThreadError, match="duplicate message_key"):
++        incremental._thread_delta(
++            0,
++            1,
++            (),
++            (
++                ThreadProjection(("shared",)),
++                ThreadProjection(("shared",)),
++            ),
++            (),
++        )
++
++
++def test_reverse_token_buckets_are_copied_only_when_mutated():
++    """Atomic changes preserve every shared pre-transaction bucket."""
++    original = {"token": {"a", "b"}}
++    overlay = dict(original)
++    tokens_by_key = {"a": frozenset({"token"})}
++    copied_tokens: set[str] = set()
++
++    incremental._remove_key_from_buckets(
++        "a",
++        tokens_by_key,
++        overlay,
++        copied_tokens,
++    )
++    incremental._add_key_to_buckets(
++        "c",
++        frozenset({"token"}),
++        tokens_by_key,
++        overlay,
++        copied_tokens,
++    )
++
++    assert original == {"token": {"a", "b"}}
++    assert overlay == {"token": {"b", "c"}}
++    assert copied_tokens == {"token"}
++
++
++def test_component_partition_reads_positions_linearly_for_disconnected_keys():
++    """Disconnected mailboxes avoid a repeated-minimum quadratic scan."""
++
++    class CountingPositions(dict[str, int]):
++        """Count position lookups performed by the partitioner."""
++
++        def __init__(self, values: dict[str, int]) -> None:
++            """Create the mapping with a zeroed lookup counter."""
++            super().__init__(values)
++            self.lookups = 0
++
++        def __getitem__(self, key: str) -> int:
++            """Return one position while recording algorithmic work."""
++            self.lookups += 1
++            return super().__getitem__(key)
++
++    key_count = 128
++    keys = {f"message_{index}" for index in range(key_count)}
++    positions = CountingPositions(
++        {key: index for index, key in enumerate(sorted(keys), start=1)}
++    )
++    components = incremental._partition_components(
++        keys,
++        positions,
++        {key: frozenset() for key in keys},
+         {},
+-        sort_by_sent_date=True,
+     )
+-    assert key == (incremental.normalize_sent_date(None), 0, 0)
++
++    assert len(components) == key_count
++    assert positions.lookups <= key_count * 2
++
++
++def test_public_forest_copy_rejects_shared_and_cyclic_internal_nodes():
++    """Defensive copies fail closed if derived graph invariants are corrupted."""
++    index = IncrementalThreadIndex()
++    shared = Container(message=Message(message_id="shared"))
++    index._roots = (shared, shared)
++    with pytest.raises(IncrementalThreadError, match="shared or cyclic"):
++        _ = index.roots
++
++    cyclic = Container(message=Message(message_id="cyclic"))
++    cyclic.children = [cyclic]
++    index._roots = (cyclic,)
++    with pytest.raises(IncrementalThreadError, match="shared or cyclic"):
++        _ = index.roots
++
++    root = Container(message=Message(message_id="root"))
++    root.children = [Container(parent=root)]
++    index._roots = (root,)
++    copied = index.roots
++    assert copied[0].children[0].message is None
++    assert copied[0].children[0].parent is copied[0]
+ 
+ 
+ def test_replacement_recovers_when_derived_component_mapping_is_missing():
