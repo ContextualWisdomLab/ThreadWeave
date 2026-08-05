@@ -3,8 +3,8 @@
 Assemble flat iterables of email messages into conversation trees using Jamie
 Zawinski's container algorithm and RFC 5256 REFERENCES semantics, on top of RFC
 5322 identification-field parsing, RFC 5051 Unicode casemap comparison, exact
-RFC 5256 base-subject extraction, optional sent-date ordering, and IMAP THREAD
-response serialization.
+RFC 5256 base-subject extraction, optional sent-date ordering, IMAP THREAD
+response serialization, and atomic incremental mailbox updates.
 
     from threadweave import Message, thread_messages
 
@@ -16,9 +16,9 @@ response serialization.
     # -> one root Container; a is an ancestor of b, b of c.
 
 The RFC 5322 header primitives (:mod:`threadweave.headers`) are extracted
-behaviour-preserving from the naruon control plane; the threading, subject,
-collation, date, and protocol-projection layers are standalone implementations
-grounded in published standards.
+behaviour-preserving from the naruon control plane; the threading, incremental,
+subject, collation, date, and protocol-projection layers are standalone
+implementations grounded in published standards.
 """
 
 from threadweave.adapters import message_from_email, thread_email_messages
@@ -30,6 +30,17 @@ from threadweave.headers import (
     extract_reference_ids,
     generate_email_fingerprint,
     normalize_message_id,
+)
+from threadweave.incremental import (
+    ExternalIdentityError,
+    IncrementalThreadError,
+    IncrementalThreadIndex,
+    IndexedMessage,
+    MailboxChangeSet,
+    ThreadDelta,
+    ThreadProjection,
+    ThreadTransition,
+    VersionConflictError,
 )
 from threadweave.imap import (
     IdentifierResolver,
@@ -52,10 +63,19 @@ __version__ = "0.2.0"
 __all__ = [
     "Container",
     "DateValue",
+    "ExternalIdentityError",
     "IdentifierResolver",
+    "IncrementalThreadError",
+    "IncrementalThreadIndex",
+    "IndexedMessage",
+    "MailboxChangeSet",
     "Message",
     "MessageFilter",
+    "ThreadDelta",
+    "ThreadProjection",
     "ThreadSerializationError",
+    "ThreadTransition",
+    "VersionConflictError",
     "decode_header_text",
     "extract_reference_ids",
     "generate_email_fingerprint",
