@@ -38,9 +38,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s  %s\n' \
-            '2b18426b1afa0b8001753e1e3c372f9ec33af1ba793d7052fee07ec0aa174523' \
-            'tools/pr20-update.zip' | sha256sum -c -
+          expected_blob='bfa40ba28d1ac6b77da14e6e11e5c16b5c160d22'
+          actual_blob="$(git hash-object tools/pr20-update.zip)"
+          test "$actual_blob" = "$expected_blob"
           python - <<'PY'
           from pathlib import Path, PurePosixPath
           import shutil
