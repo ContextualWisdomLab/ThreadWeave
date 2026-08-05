@@ -143,6 +143,9 @@ jobs:
           cd "$temp_dir"
           python - <<'PY'
           from threadweave import (
+              IncrementalThreadIndex,
+              IndexedMessage,
+              MailboxChangeSet,
               Message,
               __version__,
               serialize_thread_response,
@@ -170,6 +173,39 @@ jobs:
               "later@example.com",
           ]
           assert serialize_thread_response(roots) == "* THREAD (1)(2)\r\n"
+
+          index = IncrementalThreadIndex()
+          delta = index.apply(
+              MailboxChangeSet(
+                  expected_version=0,
+                  additions=(
+                      IndexedMessage(
+                          "root-key",
+                          Message(message_id="root", sequence_number=1, uid=101),
+                          email_id="Email_101",
+                          thread_id="Thread_7",
+                      ),
+                      IndexedMessage(
+                          "reply-key",
+                          Message(
+                              message_id="reply",
+                              references=["root"],
+                              sequence_number=2,
+                              uid=102,
+                          ),
+                          email_id="Email_102",
+                          thread_id="Thread_7",
+                      ),
+                  ),
+              )
+          )
+          assert delta.version == 1
+          assert index.projections[0].message_keys == ("root-key", "reply-key")
+          assert serialize_thread_response(index.roots, identifier="uid") == (
+              "* THREAD (101 102)\r\n"
+          )
+          restored = IncrementalThreadIndex.restore(index.snapshot())
+          assert restored.projections == index.projections
           PY
       - run: python -m pip check
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
