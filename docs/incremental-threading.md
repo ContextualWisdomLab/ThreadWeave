@@ -202,7 +202,9 @@ keys, malformed types, invalid external IDs, hostile nesting, unencodable Unicod
 and configured record or byte limits through `IncrementalThreadError` before
 publishing state. Only built-in JSON dictionaries and lists are accepted; container
 subclasses are rejected before serialization so hostile ``items`` or iterator
-overrides cannot execute inside the restore boundary.
+overrides cannot execute inside the restore boundary. Cyclic built-in containers
+are detected with an iterative active-path guard and fail without recursion or
+unbounded traversal; repeated acyclic references remain valid JSON input.
 
 ## Correctness and operational boundaries
 

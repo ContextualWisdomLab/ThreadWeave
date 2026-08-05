@@ -8,6 +8,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 
 import pytest
+import threadweave.incremental as incremental_module
 
 from threadweave import (
     IncrementalThreadError,
@@ -327,3 +328,30 @@ def test_restore_rejects_container_subclasses_before_they_execute():
     }
     with pytest.raises(IncrementalThreadError, match="plain JSON containers"):
         IncrementalThreadIndex.restore(nested)
+
+
+def test_plain_container_guard_rejects_cycles_and_allows_shared_values():
+    """The iterative guard distinguishes cycles from shared acyclic values."""
+    mapping_cycle: dict[str, object] = {}
+    mapping_cycle["self"] = mapping_cycle
+    with pytest.raises(IncrementalThreadError, match="cyclic"):
+        IncrementalThreadIndex.restore(mapping_cycle)
+
+    list_cycle: list[object] = []
+    list_cycle.append(list_cycle)
+    nested_cycle = {
+        "schema_version": 1,
+        "version": 0,
+        "options": {
+            "group_by_subject": False,
+            "sort_by_sent_date": False,
+        },
+        "records": list_cycle,
+    }
+    with pytest.raises(IncrementalThreadError, match="cyclic"):
+        IncrementalThreadIndex.restore(nested_cycle)
+
+    shared: list[object] = [{"value": 1}]
+    incremental_module._require_plain_json_containers(
+        {"first": shared, "second": shared}
+    )

@@ -805,13 +805,23 @@ def _require_plain_json_containers(value: object) -> None:
     values.  Requiring exact container types prevents untrusted ``items`` or
     iterator overrides from executing inside the restore boundary.
     """
-    pending = [value]
+    pending = [(value, False)]
+    active_containers: set[int] = set()
     while pending:
-        current = pending.pop()
-        if type(current) is dict:
-            pending.extend(dict.values(current))
-        elif type(current) is list:
-            pending.extend(current)
+        current, exiting = pending.pop()
+        if type(current) in {dict, list}:
+            identity = id(current)
+            if exiting:
+                active_containers.remove(identity)
+                continue
+            if identity in active_containers:
+                raise IncrementalThreadError(
+                    "snapshot must not contain cyclic JSON containers"
+                )
+            active_containers.add(identity)
+            pending.append((current, True))
+            children = dict.values(current) if type(current) is dict else current
+            pending.extend((child, False) for child in children)
         elif current is None or isinstance(current, (str, int, float, bool)):
             continue
         else:

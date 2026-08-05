@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Reject cyclic built-in dictionaries and lists at the incremental snapshot
+  restore boundary without recursion or unbounded traversal.
 - Reject dictionary and list subclasses at the incremental snapshot restore
   boundary before JSON encoding can invoke untrusted iterator overrides.
 - Serialize every read and write on one `IncrementalThreadIndex` with a
