@@ -51,16 +51,8 @@ jobs:
           text = path.read_text(encoding='utf-8')
           if 'import sys\n' not in text:
               text = text.replace('import json\n', 'import json\nimport sys\n', 1)
-          anchor = '''    with pytest.raises(IncrementalThreadError, match="snapshot fields"):
-              IncrementalThreadIndex.restore(missing)
-
-
-          def test_restore_rejects_malformed_record_fields_and_duplicate_keys():
-          '''
-          addition = '''    with pytest.raises(IncrementalThreadError, match="snapshot fields"):
-              IncrementalThreadIndex.restore(missing)
-
-
+          marker = '\ndef test_restore_rejects_malformed_record_fields_and_duplicate_keys():\n'
+          block = '''
           @pytest.mark.parametrize("invalid_schema_version", [True, 1.0])
           def test_restore_requires_an_exact_integer_schema_version(
               invalid_schema_version: object,
@@ -111,12 +103,10 @@ jobs:
               with pytest.raises(IncrementalThreadError, match="JSON-safe"):
                   IncrementalThreadIndex.restore(snapshot)
 
-
-          def test_restore_rejects_malformed_record_fields_and_duplicate_keys():
           '''
-          if anchor not in text:
-              raise SystemExit('snapshot regression insertion anchor changed')
-          path.write_text(text.replace(anchor, addition, 1), encoding='utf-8')
+          if text.count(marker) != 1:
+              raise SystemExit('snapshot regression insertion marker changed')
+          path.write_text(text.replace(marker, block + marker, 1), encoding='utf-8')
           PY
 
           set +e
@@ -140,50 +130,51 @@ jobs:
 
           source = Path('src/threadweave/incremental.py')
           text = source.read_text(encoding='utf-8')
-          old = '''def _snapshot_json_bytes(value: object) -> bytes:
-              """Serialize a snapshot canonically or raise a bounded domain error."""
-              try:
-                  encoded = json.dumps(
-                      value,
-                      ensure_ascii=False,
-                      allow_nan=False,
-                      sort_keys=True,
-                      separators=(",", ":"),
-                  )
-              except (TypeError, ValueError) as error:
-                  raise IncrementalThreadError("snapshot must contain only JSON-safe values") from error
-              return encoded.encode("utf-8")
-          '''
-          new = '''def _snapshot_json_bytes(value: object) -> bytes:
-              """Serialize a snapshot canonically or raise a bounded domain error."""
-              try:
-                  encoded = json.dumps(
-                      value,
-                      ensure_ascii=False,
-                      allow_nan=False,
-                      sort_keys=True,
-                      separators=(",", ":"),
-                  )
-                  return encoded.encode("utf-8")
-              except (RecursionError, TypeError, UnicodeError, ValueError) as error:
-                  raise IncrementalThreadError(
-                      "snapshot must contain only JSON-safe values"
-                  ) from error
-          '''
+          old = (
+              '    try:\n'
+              '        encoded = json.dumps(\n'
+              '            value,\n'
+              '            ensure_ascii=False,\n'
+              '            allow_nan=False,\n'
+              '            sort_keys=True,\n'
+              '            separators=(",", ":"),\n'
+              '        )\n'
+              '    except (TypeError, ValueError) as error:\n'
+              '        raise IncrementalThreadError('
+              '"snapshot must contain only JSON-safe values") from error\n'
+              '    return encoded.encode("utf-8")\n'
+          )
+          new = (
+              '    try:\n'
+              '        encoded = json.dumps(\n'
+              '            value,\n'
+              '            ensure_ascii=False,\n'
+              '            allow_nan=False,\n'
+              '            sort_keys=True,\n'
+              '            separators=(",", ":"),\n'
+              '        )\n'
+              '        return encoded.encode("utf-8")\n'
+              '    except (RecursionError, TypeError, UnicodeError, ValueError) as error:\n'
+              '        raise IncrementalThreadError(\n'
+              '            "snapshot must contain only JSON-safe values"\n'
+              '        ) from error\n'
+          )
           if text.count(old) != 1:
               raise SystemExit('snapshot serializer anchor changed')
           text = text.replace(old, new, 1)
-          old = '''        if snapshot["schema_version"] != _SNAPSHOT_SCHEMA_VERSION:
-                      raise IncrementalThreadError("unsupported snapshot schema_version")
-          '''
-          new = '''        schema_version = snapshot["schema_version"]
-                  if (
-                      isinstance(schema_version, bool)
-                      or not isinstance(schema_version, int)
-                      or schema_version != _SNAPSHOT_SCHEMA_VERSION
-                  ):
-                      raise IncrementalThreadError("unsupported snapshot schema_version")
-          '''
+          old = (
+              '        if snapshot["schema_version"] != _SNAPSHOT_SCHEMA_VERSION:\n'
+              '            raise IncrementalThreadError("unsupported snapshot schema_version")\n'
+          )
+          new = (
+              '        schema_version = snapshot["schema_version"]\n'
+              '        if (\n'
+              '            isinstance(schema_version, bool)\n'
+              '            or not isinstance(schema_version, int)\n'
+              '            or schema_version != _SNAPSHOT_SCHEMA_VERSION\n'
+              '        ):\n'
+              '            raise IncrementalThreadError("unsupported snapshot schema_version")\n'
+          )
           if text.count(old) != 1:
               raise SystemExit('schema-version anchor changed')
           source.write_text(text.replace(old, new, 1), encoding='utf-8')
