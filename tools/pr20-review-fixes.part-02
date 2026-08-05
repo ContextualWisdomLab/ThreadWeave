@@ -1,0 +1,159 @@
++delta-application time, full-view materialization time, full-rebuild time, affected
++message count, root count, and peak RSS. Scheduled evidence defaults to 100,000
++existing messages.
++
++## Integration policy
++
++Naruon and other services should own persistence, tenancy, authentication,
++mailbox synchronization, and external stable-ID policy. They pass immutable caller
++keys and `Message` metadata into ThreadWeave and consume `ThreadDelta`, snapshots,
++or IMAP presentation output through public interfaces.
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index eb33f4732b41b1e84a8b3a8c25c4be2da11d1885..07cd9add2a0d9dbf0ce36e2c7ca9d903dcb37c27 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
+ ## Unreleased
+ 
++- Keep implicit RFC 5256 sent-date tie-break positions internal to the incremental
++  engine instead of exposing invented IMAP sequence numbers on public roots.
++- Return defensive structural copies from `IncrementalThreadIndex.roots` so caller
++  graph edits cannot corrupt reusable index state while payload objects remain
++  caller-owned references.
++- Replace quadratic disconnected-component partitioning and pairwise thread-delta
++  comparisons with bounded indexed passes, copy reverse-token buckets only when
++  touched, and defer complete forest materialization until a caller requests it.
++- Add deterministic 100,000-message incremental-versus-full-rebuild benchmark
++  evidence with projection parity, affected-message counts, wall time, and peak RSS.
++
+ - Add an atomic `IncrementalThreadIndex` for mailbox additions, replacements,
+   and removals with stable caller message keys, affected-component
+   recomputation, batch-result parity, and explicit thread merge/split deltas.
+diff --git a/CLAUDE.md b/CLAUDE.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..bf19006c7fd0bec0b0dea473c3dec2e02274d0b7
+--- /dev/null
++++ b/CLAUDE.md
+@@ -0,0 +1,19 @@
++# Claude / Coding-Agent Instructions
++
++Read and follow [`AGENTS.md`](AGENTS.md) as the canonical repository policy. Do not
++create a second, conflicting rule set here.
++
++For every change:
++
++1. Preserve the batch threader as the correctness oracle.
++2. Work test-first and retain 100% production statement and branch coverage.
++3. Add beginner-readable docstrings to every authored production callable.
++4. Keep runtime dependencies at zero unless an approved architecture decision says
++   otherwise.
++5. Update `CHANGELOG.md`, user documentation, and standards references when public
++   behavior changes.
++6. Never bypass current-head CI, security scans, independent review, release
++   identity checks, or the release-blocker contract.
++7. GitHub product-development automation uses the isolated NVIDIA NIM/OpenCode
++   boundary. Do not introduce `COPILOT_GITHUB_TOKEN` or alter existing review-agent
++   credentials.
+diff --git a/README.md b/README.md
+index 416381a0f054801540ea68d9da1687d02914d898..8f839a24cb608dea83ac9197a669c3cff4f57c74 100644
+--- a/README.md
++++ b/README.md
+@@ -217,7 +217,10 @@ assert IncrementalThreadIndex.restore(index.snapshot()).projections == (
+ 
+ Every affected component is recomputed through the canonical batch threader, and
+ full-rebuild parity is the correctness oracle. Structural merges and splits are
+-reported explicitly. Versioned snapshots omit arbitrary payloads and reject
++reported explicitly. `roots` returns a defensive structural copy, so callers may
++traverse or edit that graph without corrupting reusable index state; payload objects
++remain caller-owned references. Internal sent-date tie-break positions never become
++public IMAP sequence numbers. Versioned snapshots omit arbitrary payloads and reject
+ unknown, malformed, or oversized input. See
+ [`docs/incremental-threading.md`](docs/incremental-threading.md) for the atomicity,
+ identity, snapshot, complexity, and RFC boundaries.
+@@ -265,6 +268,9 @@ identity, snapshot, complexity, and RFC boundaries.
+ - Graph operations, IMAP rendering, and incremental component traversal are
+   iterative and identity-guarded; deep or cyclic malformed input cannot recurse
+   indefinitely.
++- `benchmarks/incremental_mailbox.py` compares isolated incremental and full
++  rebuild processes at 100,000 messages, verifies an identical projection digest,
++  and records affected-message count, wall time, and peak RSS as JSON evidence.
+ 
+ ## Reproducible CI supply chain
+ 
+diff --git a/benchmarks/incremental_mailbox.py b/benchmarks/incremental_mailbox.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..063aed022704c48cd22e64c236584145090634e9
+--- /dev/null
++++ b/benchmarks/incremental_mailbox.py
+@@ -0,0 +1,232 @@
++"""Deterministic mailbox-scale benchmark for the incremental threading layer.
++
++The parent process runs incremental and full-rebuild workers separately so each
++scenario reports its own peak resident-set size. Both workers hash the same
++caller-key projection to prove structural parity without serializing a 100,000-
++message forest between processes.
++"""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import resource
++import subprocess
++import sys
++from collections.abc import Iterable
++from time import perf_counter
++
++from threadweave import (
++    Container,
++    IncrementalThreadIndex,
++    IndexedMessage,
++    MailboxChangeSet,
++    Message,
++    thread_messages,
++)
++
++
++def _records(message_count: int, thread_size: int) -> tuple[IndexedMessage, ...]:
++    """Create deterministic thread chains with caller keys retained as payloads."""
++    records: list[IndexedMessage] = []
++    for index in range(message_count):
++        position = index % thread_size
++        references = () if position == 0 else (f"message_{index - 1}",)
++        records.append(
++            IndexedMessage(
++                f"key_{index}",
++                Message(
++                    message_id=f"message_{index}",
++                    references=references,
++                    payload=f"key_{index}",
++                ),
++            )
++        )
++    return tuple(records)
++
++
++def _bridge_record(thread_size: int) -> IndexedMessage:
++    """Return one message that joins the first two deterministic components."""
++    return IndexedMessage(
++        "bridge_key",
++        Message(
++            message_id="bridge_message",
++            references=(
++                f"message_{thread_size - 1}",
++                f"message_{(thread_size * 2) - 1}",
++            ),
++            payload="bridge_key",
++        ),
++    )
++
++
++def _projection_digest(projections: Iterable[tuple[str, ...]]) -> str:
++    """Hash ordered root projections with unambiguous length framing."""
++    digest = hashlib.sha256()
++    for projection in projections:
++        digest.update(len(projection).to_bytes(8, "big"))
++        for message_key in projection:
++            encoded = message_key.encode("utf-8")
