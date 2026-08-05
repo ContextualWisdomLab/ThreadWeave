@@ -40,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s  %s\n' \
-            '62798654e77832717e98f1153306afce24df107c4cadb993087b0897bd8b9973' \
+            'b4938487f6d8e37157ef6bbfe59f1b52b7db27ce782147053918068640fbbc8e' \
             'tools/pr20-concurrency-fix.patch' | sha256sum -c -
           git apply --check tools/pr20-concurrency-fix.patch
           git apply tools/pr20-concurrency-fix.patch
