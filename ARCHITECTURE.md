@@ -43,6 +43,11 @@ is maintained in incremental code.
 ## State and mutation policy
 
 - `IndexedMessage.message_key` is caller-owned and immutable across revisions.
+- Public reads, snapshots, and `apply` calls on one index are serialized by an
+  in-process reentrant lock. Two transactions targeting one version cannot both
+  commit; the later transaction observes the new version and fails explicitly.
+- The process-local lock is not a distributed lock. Naruon or another host must
+  serialize durable writes across processes and persist the optimistic version.
 - `apply` validates and computes on isolated transaction state, then commits once.
 - Reverse connectivity buckets use copy-on-write mutation.
 - Complete root/projection views are lazy caches invalidated by a successful change.
@@ -70,6 +75,7 @@ existing messages.
 ## Integration policy
 
 Naruon and other services should own persistence, tenancy, authentication,
-mailbox synchronization, and external stable-ID policy. They pass immutable caller
-keys and `Message` metadata into ThreadWeave and consume `ThreadDelta`, snapshots,
-or IMAP presentation output through public interfaces.
+mailbox synchronization, distributed write serialization, and external stable-ID
+policy. They pass immutable caller keys and `Message` metadata into ThreadWeave and
+consume `ThreadDelta`, snapshots, or IMAP presentation output through public
+interfaces.

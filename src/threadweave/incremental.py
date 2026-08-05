@@ -13,6 +13,7 @@ import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from _thread import RLock
 from typing import Literal
 
 from threadweave.collation import unicode_casemap_key
@@ -834,6 +835,7 @@ class IncrementalThreadIndex:
             raise IncrementalThreadError("group_by_subject must be a boolean")
         if not isinstance(sort_by_sent_date, bool):
             raise IncrementalThreadError("sort_by_sent_date must be a boolean")
+        self._state_lock = RLock()
         self._group_by_subject = group_by_subject
         self._sort_by_sent_date = sort_by_sent_date
         self._max_snapshot_records = _validated_positive_limit(
@@ -857,7 +859,8 @@ class IncrementalThreadIndex:
 
     def __len__(self) -> int:
         """Return the number of indexed caller message keys."""
-        return len(self._records)
+        with self._state_lock:
+            return len(self._records)
 
     def _materialize_forest(self) -> None:
         """Build and cache the complete canonical forest only when requested."""
@@ -881,29 +884,37 @@ class IncrementalThreadIndex:
     @property
     def version(self) -> int:
         """Return the optimistic mailbox-state version."""
-        return self._version
+        with self._state_lock:
+            return self._version
 
     @property
     def message_keys(self) -> tuple[str, ...]:
         """Return current caller keys in stable batch input order."""
-        return _ordered_keys(self._records, self._positions)
+        with self._state_lock:
+            return _ordered_keys(self._records, self._positions)
 
     @property
     def roots(self) -> tuple[Container, ...]:
         """Return defensive transport-neutral copies of current thread roots."""
-        self._materialize_forest()
-        assert self._roots is not None
-        return _public_forest_copy(self._roots)
+        with self._state_lock:
+            self._materialize_forest()
+            assert self._roots is not None
+            return _public_forest_copy(self._roots)
 
     @property
     def projections(self) -> tuple[ThreadProjection, ...]:
         """Return deterministic caller-key projections for current roots."""
-        self._materialize_forest()
-        assert self._projections is not None
-        return self._projections
+        with self._state_lock:
+            self._materialize_forest()
+            assert self._projections is not None
+            return self._projections
 
     def apply(self, change_set: MailboxChangeSet) -> ThreadDelta:
         """Atomically apply one optimistic mailbox change set.
+
+        Concurrent callers are serialized. A second writer using the same
+        ``expected_version`` observes the first commit and raises
+        :class:`VersionConflictError` instead of interleaving copied state.
 
         Raises:
             VersionConflictError: ``expected_version`` is stale.
@@ -912,6 +923,11 @@ class IncrementalThreadIndex:
             ExternalIdentityError: Reported EMAILID/THREADID metadata changes or
                 conflicts across equal EMAILID values.
         """
+        with self._state_lock:
+            return self._apply_locked(change_set)
+
+    def _apply_locked(self, change_set: MailboxChangeSet) -> ThreadDelta:
+        """Apply one change while ``_state_lock`` protects every state field."""
         if not isinstance(change_set, MailboxChangeSet):
             raise IncrementalThreadError("change_set must be a MailboxChangeSet")
         if change_set.expected_version != self._version:
@@ -1135,6 +1151,11 @@ class IncrementalThreadIndex:
 
     def snapshot(self) -> dict[str, object]:
         """Return deterministic versioned JSON-safe state without payload objects."""
+        with self._state_lock:
+            return self._snapshot_locked()
+
+    def _snapshot_locked(self) -> dict[str, object]:
+        """Build one snapshot while ``_state_lock`` protects current state."""
         if len(self._records) > self._max_snapshot_records:
             raise IncrementalThreadError(
                 "snapshot exceeds max_snapshot_records"

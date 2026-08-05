@@ -102,6 +102,31 @@ assert updated.version == 2
 with the old version therefore fails explicitly instead of duplicating records or
 edges. An empty change set is idempotent and does not advance the version.
 
+### Concurrent access
+
+All public reads and writes on one index acquire the same process-local reentrant
+lock. A transaction owns that lock from optimistic-version validation through the
+single state publication point. A second writer using the same version therefore
+waits, observes the committed version, and raises `VersionConflictError`; a reader
+waits and sees either the complete old state or the complete new state.
+
+```mermaid
+flowchart LR
+    W1[Writer A: expected version n] --> L[Per-index reentrant lock]
+    W2[Writer B: expected version n] --> L
+    R[Reader: roots, projections, snapshot] --> L
+    L --> V{Validate current version}
+    V -->|Writer A| C[Compute isolated transaction]
+    C --> P[Publish one committed state]
+    P --> O[Release lock]
+    V -->|Writer B after A| X[Explicit version conflict]
+    V -->|Reader| S[Return one committed snapshot]
+```
+
+The lock coordinates threads inside one Python process only. A host such as naruon
+must still serialize durable writes across workers or replicas and persist the
+optimistic version beside its mailbox state.
+
 ## Affected-component recomputation
 
 Each record contributes connectivity tokens for:

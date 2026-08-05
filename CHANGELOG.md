@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Serialize every read and write on one `IncrementalThreadIndex` with a
+  process-local reentrant lock so same-version concurrent writers yield one
+  commit and one explicit conflict, while readers observe only committed state.
 - Keep implicit RFC 5256 sent-date tie-break positions internal to the incremental
   engine instead of exposing invented IMAP sequence numbers on public roots.
 - Return defensive structural copies from `IncrementalThreadIndex.roots` so caller
