@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Add an atomic `IncrementalThreadIndex` for mailbox additions, replacements,
+  and removals with stable caller message keys, affected-component
+  recomputation, batch-result parity, and explicit thread merge/split deltas.
+- Add strict RFC 8474 `EMAILID` and `THREADID` handoff, including immutable
+  values, exact ObjectID grammar, disjoint namespaces, and consistent THREADID
+  values for equal EMAILIDs.
+- Add versioned, bounded, JSON-safe incremental snapshots that omit arbitrary
+  caller payloads and rebuild derived graph state through validated metadata.
+
 ## [0.2.0] - 2026-08-04
 
 - Add iterative RFC 5256 `THREAD` and `UID THREAD` response serialization with
