@@ -1,0 +1,255 @@
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index cfce2c1..e7c1bad 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -43,6 +43,11 @@ is maintained in incremental code.
+ ## State and mutation policy
+ 
+ - `IndexedMessage.message_key` is caller-owned and immutable across revisions.
++- Public reads, snapshots, and `apply` calls on one index are serialized by an
++  in-process reentrant lock. Two transactions targeting one version cannot both
++  commit; the later transaction observes the new version and fails explicitly.
++- The process-local lock is not a distributed lock. Naruon or another host must
++  serialize durable writes across processes and persist the optimistic version.
+ - `apply` validates and computes on isolated transaction state, then commits once.
+ - Reverse connectivity buckets use copy-on-write mutation.
+ - Complete root/projection views are lazy caches invalidated by a successful change.
+@@ -70,6 +75,7 @@ existing messages.
+ ## Integration policy
+ 
+ Naruon and other services should own persistence, tenancy, authentication,
+-mailbox synchronization, and external stable-ID policy. They pass immutable caller
+-keys and `Message` metadata into ThreadWeave and consume `ThreadDelta`, snapshots,
+-or IMAP presentation output through public interfaces.
++mailbox synchronization, distributed write serialization, and external stable-ID
++policy. They pass immutable caller keys and `Message` metadata into ThreadWeave and
++consume `ThreadDelta`, snapshots, or IMAP presentation output through public
++interfaces.
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 07cd9ad..4a4197f 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
+ ## Unreleased
+ 
++- Serialize in-process incremental readers and writers with a reentrant state lock,
++  so concurrent transactions targeting the same optimistic version produce one
++  commit and one explicit `VersionConflictError` instead of a silent lost update.
+ - Keep implicit RFC 5256 sent-date tie-break positions internal to the incremental
+   engine instead of exposing invented IMAP sequence numbers on public roots.
+ - Return defensive structural copies from `IncrementalThreadIndex.roots` so caller
+diff --git a/docs/incremental-threading.md b/docs/incremental-threading.md
+index 6aa08c2..4462f05 100644
+--- a/docs/incremental-threading.md
++++ b/docs/incremental-threading.md
+@@ -102,6 +102,13 @@ assert updated.version == 2
+ with the old version therefore fails explicitly instead of duplicating records or
+ edges. An empty change set is idempotent and does not advance the version.
+ 
++One `IncrementalThreadIndex` serializes public reads, snapshots, and mutations with
++an in-process reentrant lock. Two threads that submit the same expected version
++therefore cannot both commit: the first successful transaction advances the
++version and the second receives `VersionConflictError`. This lock is process-local;
++services that share mailbox state across processes or hosts must still serialize
++durable writes and persist the resulting version in their own storage layer.
++
+ ## Affected-component recomputation
+ 
+ Each record contributes connectivity tokens for:
+diff --git a/src/threadweave/incremental.py b/src/threadweave/incremental.py
+index b7fed9f..7fec91e 100644
+--- a/src/threadweave/incremental.py
++++ b/src/threadweave/incremental.py
+@@ -13,6 +13,7 @@ import json
+ from collections.abc import Iterable, Mapping, Sequence
+ from dataclasses import dataclass
+ from datetime import datetime
++from threading import RLock
+ from typing import Literal
+ 
+ from threadweave.collation import unicode_casemap_key
+@@ -834,6 +835,7 @@ class IncrementalThreadIndex:
+             raise IncrementalThreadError("group_by_subject must be a boolean")
+         if not isinstance(sort_by_sent_date, bool):
+             raise IncrementalThreadError("sort_by_sent_date must be a boolean")
++        self._state_lock = RLock()
+         self._group_by_subject = group_by_subject
+         self._sort_by_sent_date = sort_by_sent_date
+         self._max_snapshot_records = _validated_positive_limit(
+@@ -857,7 +859,8 @@ class IncrementalThreadIndex:
+ 
+     def __len__(self) -> int:
+         """Return the number of indexed caller message keys."""
+-        return len(self._records)
++        with self._state_lock:
++            return len(self._records)
+ 
+     def _materialize_forest(self) -> None:
+         """Build and cache the complete canonical forest only when requested."""
+@@ -881,30 +884,37 @@ class IncrementalThreadIndex:
+     @property
+     def version(self) -> int:
+         """Return the optimistic mailbox-state version."""
+-        return self._version
++        with self._state_lock:
++            return self._version
+ 
+     @property
+     def message_keys(self) -> tuple[str, ...]:
+         """Return current caller keys in stable batch input order."""
+-        return _ordered_keys(self._records, self._positions)
++        with self._state_lock:
++            return _ordered_keys(self._records, self._positions)
+ 
+     @property
+     def roots(self) -> tuple[Container, ...]:
+         """Return defensive transport-neutral copies of current thread roots."""
+-        self._materialize_forest()
+-        assert self._roots is not None
+-        return _public_forest_copy(self._roots)
++        with self._state_lock:
++            self._materialize_forest()
++            assert self._roots is not None
++            return _public_forest_copy(self._roots)
+ 
+     @property
+     def projections(self) -> tuple[ThreadProjection, ...]:
+         """Return deterministic caller-key projections for current roots."""
+-        self._materialize_forest()
+-        assert self._projections is not None
+-        return self._projections
++        with self._state_lock:
++            self._materialize_forest()
++            assert self._projections is not None
++            return self._projections
+ 
+     def apply(self, change_set: MailboxChangeSet) -> ThreadDelta:
+         """Atomically apply one optimistic mailbox change set.
+ 
++        Concurrent callers are serialized so two transactions targeting the same
++        version cannot both commit.
++
+         Raises:
+             VersionConflictError: ``expected_version`` is stale.
+             IncrementalThreadError: Key ownership, metadata, or graph processing
+@@ -912,6 +922,11 @@ class IncrementalThreadIndex:
+             ExternalIdentityError: Reported EMAILID/THREADID metadata changes or
+                 conflicts across equal EMAILID values.
+         """
++        with self._state_lock:
++            return self._apply_locked(change_set)
++
++    def _apply_locked(self, change_set: MailboxChangeSet) -> ThreadDelta:
++        """Apply one change while the index state lock is held."""
+         if not isinstance(change_set, MailboxChangeSet):
+             raise IncrementalThreadError("change_set must be a MailboxChangeSet")
+         if change_set.expected_version != self._version:
+@@ -1135,6 +1150,11 @@ class IncrementalThreadIndex:
+ 
+     def snapshot(self) -> dict[str, object]:
+         """Return deterministic versioned JSON-safe state without payload objects."""
++        with self._state_lock:
++            return self._snapshot_locked()
++
++    def _snapshot_locked(self) -> dict[str, object]:
++        """Build one snapshot while the index state lock is held."""
+         if len(self._records) > self._max_snapshot_records:
+             raise IncrementalThreadError(
+                 "snapshot exceeds max_snapshot_records"
+diff --git a/tests/test_incremental_concurrency.py b/tests/test_incremental_concurrency.py
+new file mode 100644
+index 0000000..395446d
+--- /dev/null
++++ b/tests/test_incremental_concurrency.py
+@@ -0,0 +1,90 @@
++"""Concurrency contracts for the incremental mailbox index."""
++
++from __future__ import annotations
++
++import threading
++
++import threadweave.incremental as incremental_module
++from threadweave import (
++    IncrementalThreadIndex,
++    IndexedMessage,
++    MailboxChangeSet,
++    Message,
++    VersionConflictError,
++)
++
++
++def _record(message_key: str) -> IndexedMessage:
++    """Return one independent indexed message for a concurrent update."""
++    return IndexedMessage(message_key, Message(message_id=message_key))
++
++
++def test_concurrent_writers_are_serialized_by_optimistic_version(monkeypatch):
++    """Two writers targeting one version yield one commit and one conflict."""
++    index = IncrementalThreadIndex()
++    real_copy = incremental_module._copied_indexed_message
++    first_entered = threading.Event()
++    second_entered = threading.Event()
++    release_first = threading.Event()
++    activity_lock = threading.Lock()
++    active_calls = 0
++    maximum_active_calls = 0
++
++    def controlled_copy(record: IndexedMessage) -> IndexedMessage:
++        """Expose whether two transactions copy records at the same time."""
++        nonlocal active_calls, maximum_active_calls
++        with activity_lock:
++            active_calls += 1
++            maximum_active_calls = max(maximum_active_calls, active_calls)
++            is_first_call = active_calls == 1
++            if is_first_call:
++                first_entered.set()
++            else:
++                second_entered.set()
++                release_first.set()
++        if is_first_call:
++            release_first.wait(timeout=1)
++        try:
++            return real_copy(record)
++        finally:
++            with activity_lock:
++                active_calls -= 1
++
++    monkeypatch.setattr(
++        incremental_module,
++        "_copied_indexed_message",
++        controlled_copy,
++    )
++
++    outcomes: list[tuple[str, object]] = []
++
++    def apply_record(message_key: str) -> None:
++        """Apply one expected-version-zero transaction and capture its outcome."""
++        try:
++            delta = index.apply(
++                MailboxChangeSet(
++                    expected_version=0,
++                    additions=(_record(message_key),),
++                )
++            )
++        except VersionConflictError as error:
++            outcomes.append(("conflict", error))
++        else:
++            outcomes.append(("committed", delta))
++
++    first = threading.Thread(target=apply_record, args=("first",))
++    second = threading.Thread(target=apply_record, args=("second",))
++    first.start()
++    assert first_entered.wait(timeout=1)
++    second.start()
++    if not second_entered.wait(timeout=0.1):
++        release_first.set()
++    first.join(timeout=2)
++    second.join(timeout=2)
++
++    assert not first.is_alive()
++    assert not second.is_alive()
++    assert maximum_active_calls == 1
++    assert sorted(kind for kind, _ in outcomes) == ["committed", "conflict"]
++    assert index.version == 1
++    assert len(index.message_keys) == 1
