@@ -35,7 +35,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements/ci.lock
 
-      - name: Reassemble, verify, and apply the reviewed patch
+      - name: Reassemble, verify, apply, and repair the reviewed patch
         shell: bash
         env:
           PR20_PATCH: ${{ runner.temp }}/pr20-review-fixes.patch
@@ -47,6 +47,25 @@ jobs:
             "$PR20_PATCH" | sha256sum -c -
           git apply --check "$PR20_PATCH"
           git apply "$PR20_PATCH"
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/threadweave/incremental.py')
+          source_text = source.read_text(encoding='utf-8')
+          obsolete = 'from threadweave.dates import normalize_sent_date\n'
+          if source_text.count(obsolete) != 1:
+              raise SystemExit('unexpected normalize_sent_date import state')
+          source.write_text(source_text.replace(obsolete, ''), encoding='utf-8')
+
+          tests = Path('tests/test_incremental_components.py')
+          test_text = tests.read_text(encoding='utf-8')
+          anchor = 'from __future__ import annotations\n\n'
+          if 'import pytest\n' not in test_text:
+              if test_text.count(anchor) != 1:
+                  raise SystemExit('unexpected incremental component import state')
+              test_text = test_text.replace(anchor, anchor + 'import pytest\n\n')
+          tests.write_text(test_text, encoding='utf-8')
+          PY
 
       - name: Install the reviewed CI lock
         run: python -m pip install --require-hashes -r requirements/ci.lock
