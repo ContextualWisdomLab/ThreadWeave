@@ -1,0 +1,122 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 2c55587..a93e06d 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
+ ## Unreleased
+ 
++- Reject dictionary and list subclasses at the incremental snapshot restore
++  boundary before JSON encoding can invoke untrusted iterator overrides.
+ - Serialize every read and write on one `IncrementalThreadIndex` with a
+   process-local reentrant lock so same-version concurrent writers yield one
+   commit and one explicit conflict, while readers observe only committed state.
+diff --git a/docs/incremental-threading.md b/docs/incremental-threading.md
+index 0aba4b3..d72b48d 100644
+--- a/docs/incremental-threading.md
++++ b/docs/incremental-threading.md
+@@ -200,7 +200,9 @@ or ISO-8601 datetime representation. Schema versions must be exact non-boolean
+ integers. Restore rejects unknown versions, extra or missing fields, duplicate
+ keys, malformed types, invalid external IDs, hostile nesting, unencodable Unicode,
+ and configured record or byte limits through `IncrementalThreadError` before
+-publishing state.
++publishing state. Only built-in JSON dictionaries and lists are accepted; container
++subclasses are rejected before serialization so hostile ``items`` or iterator
++overrides cannot execute inside the restore boundary.
+ 
+ ## Correctness and operational boundaries
+ 
+diff --git a/src/threadweave/incremental.py b/src/threadweave/incremental.py
+index 83e3773..d5a851b 100644
+--- a/src/threadweave/incremental.py
++++ b/src/threadweave/incremental.py
+@@ -798,6 +798,28 @@ def _decoded_date(value: object, name: str) -> str | datetime | None:
+     raise IncrementalThreadError(f"{name} date kind is unsupported")
+ 
+ 
++def _require_plain_json_containers(value: object) -> None:
++    """Reject executable container subclasses before JSON serialization.
++
++    JSON-decoded state consists of built-in dictionaries, lists, and scalar
++    values.  Requiring exact container types prevents untrusted ``items`` or
++    iterator overrides from executing inside the restore boundary.
++    """
++    pending = [value]
++    while pending:
++        current = pending.pop()
++        if type(current) is dict:
++            pending.extend(dict.values(current))
++        elif type(current) is list:
++            pending.extend(current)
++        elif current is None or isinstance(current, (str, int, float, bool)):
++            continue
++        else:
++            raise IncrementalThreadError(
++                "snapshot must contain only plain JSON containers and scalar values"
++            )
++
++
+ def _snapshot_json_bytes(value: object) -> bytes:
+     """Serialize a snapshot canonically or raise a bounded domain error."""
+     try:
+@@ -1215,6 +1237,7 @@ class IncrementalThreadIndex:
+         )
+         if not isinstance(snapshot, Mapping):
+             raise IncrementalThreadError("snapshot must be a mapping")
++        _require_plain_json_containers(snapshot)
+         if len(_snapshot_json_bytes(snapshot)) > max_bytes:
+             raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
+         _required_fields(
+diff --git a/tests/test_incremental_snapshot.py b/tests/test_incremental_snapshot.py
+index e7d73d0..9020bd2 100644
+--- a/tests/test_incremental_snapshot.py
++++ b/tests/test_incremental_snapshot.py
+@@ -282,3 +282,48 @@ def test_restore_rejects_non_mapping_and_non_json_safe_values():
+     invalid["records"][0]["email_id"] = object()
+     with pytest.raises(IncrementalThreadError, match="JSON"):
+         IncrementalThreadIndex.restore(invalid)
++
++
++class _HostileDictionary(dict):
++    """Dictionary subclass whose iteration must never cross the snapshot boundary."""
++
++    def items(self):
++        """Raise if generic JSON encoding invokes subclass behavior."""
++        raise RuntimeError("hostile dictionary iteration")
++
++
++class _HostileList(list):
++    """List subclass whose iteration must never cross the snapshot boundary."""
++
++    def __iter__(self):
++        """Raise if generic JSON encoding invokes subclass behavior."""
++        raise RuntimeError("hostile list iteration")
++
++
++def test_restore_rejects_container_subclasses_before_they_execute():
++    """Only plain JSON containers may enter the untrusted snapshot decoder."""
++    root = _HostileDictionary(
++        {
++            "schema_version": 1,
++            "version": 0,
++            "options": {
++                "group_by_subject": False,
++                "sort_by_sent_date": False,
++            },
++            "records": [],
++        }
++    )
++    with pytest.raises(IncrementalThreadError, match="plain JSON containers"):
++        IncrementalThreadIndex.restore(root)
++
++    nested = {
++        "schema_version": 1,
++        "version": 0,
++        "options": {
++            "group_by_subject": False,
++            "sort_by_sent_date": False,
++        },
++        "records": _HostileList(),
++    }
++    with pytest.raises(IncrementalThreadError, match="plain JSON containers"):
++        IncrementalThreadIndex.restore(nested)
