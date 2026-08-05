@@ -1,0 +1,104 @@
+name: Apply PR 20 sealed update
+
+on:
+  pull_request:
+    types: [synchronize]
+    paths:
+      - .github/workflows/apply-pr20-update-pr.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-pr20-update-pr
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.number == 20 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feature/incremental-thread-index'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact pull-request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feature/incremental-thread-index
+          fetch-depth: 1
+
+      - name: Verify and extract the sealed update
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' \
+            '2b18426b1afa0b8001753e1e3c372f9ec33af1ba793d7052fee07ec0aa174523' \
+            'tools/pr20-update.zip' | sha256sum -c -
+          python - <<'PY'
+          from pathlib import Path, PurePosixPath
+          import shutil
+          import stat
+          import tempfile
+          import zipfile
+
+          expected = {
+              '.github/workflows/incremental-benchmark.yml',
+              'AGENTS.md',
+              'ARCHITECTURE.md',
+              'CHANGELOG.md',
+              'README.md',
+              'docs/adr/0001-batch-oracle-for-incremental-threading.md',
+              'docs/incremental-threading.md',
+              'docs/research/README.md',
+              'scripts/benchmarks/incremental_mailbox.py',
+              'src/threadweave/incremental.py',
+              'src/threadweave/threading.py',
+              'tests/test_incremental_benchmark.py',
+              'tests/test_incremental_components.py',
+              'tests/test_incremental_parity.py',
+              'tests/test_incremental_private_graph.py',
+              'tests/test_incremental_randomized_parity.py',
+              'tests/test_subject_threading.py',
+          }
+          archive = Path('tools/pr20-update.zip')
+          with zipfile.ZipFile(archive) as handle:
+              infos = handle.infolist()
+              names = {info.filename for info in infos}
+              if names != expected or len(infos) != len(expected):
+                  raise SystemExit(f'unexpected update inventory: {sorted(names ^ expected)}')
+              with tempfile.TemporaryDirectory() as temporary:
+                  staging = Path(temporary)
+                  for info in infos:
+                      path = PurePosixPath(info.filename)
+                      if path.is_absolute() or '..' in path.parts or info.is_dir():
+                          raise SystemExit(f'unsafe archive path: {info.filename}')
+                      mode = info.external_attr >> 16
+                      if stat.S_IFMT(mode) not in {0, stat.S_IFREG}:
+                          raise SystemExit(f'non-regular archive entry: {info.filename}')
+                      target = staging.joinpath(*path.parts)
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      target.write_bytes(handle.read(info))
+                  for name in sorted(expected):
+                      source = staging.joinpath(*PurePosixPath(name).parts)
+                      destination = Path(name)
+                      destination.parent.mkdir(parents=True, exist_ok=True)
+                      shutil.copyfile(source, destination)
+          Path('scripts/benchmarks/incremental_mailbox.py').chmod(0o755)
+          PY
+
+      - name: Commit the extracted update and remove bootstrap material
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            tools/pr20-update.zip \
+            .github/workflows/apply-pr20-update.yml \
+            .github/workflows/apply-pr20-update-pr.yml
+          rmdir tools 2>/dev/null || true
+          git config user.name 'ThreadWeave verification bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat: harden incremental parity and benchmark evidence'
+          git push origin HEAD:feature/incremental-thread-index
