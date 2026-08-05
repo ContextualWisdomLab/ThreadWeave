@@ -1,9 +1,8 @@
 name: Apply PR 20 concurrency fix
 
 on:
-  push:
-    branches:
-      - feature/incremental-thread-index
+  pull_request:
+    types: [synchronize]
     paths:
       - .github/workflows/apply-pr20-concurrency-fix.yml
 
@@ -16,7 +15,10 @@ concurrency:
 
 jobs:
   apply-and-verify:
-    if: github.repository == 'ContextualWisdomLab/ThreadWeave'
+    if: >-
+      github.event.pull_request.number == 20 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feature/incremental-thread-index'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
