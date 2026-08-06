@@ -1,0 +1,285 @@
+name: Apply PR 20 allocation-free UTF-8 sizing
+
+on:
+  push:
+    branches:
+      - feature/incremental-thread-index
+    paths:
+      - .github/workflows/apply-pr20-utf8-size-hardening.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-pr20-utf8-size-hardening
+  cancel-in-progress: false
+
+jobs:
+  red-green-verify:
+    if: github.repository == 'ContextualWisdomLab/ThreadWeave'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the exact feature branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feature/incremental-thread-index
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements/ci.lock
+
+      - name: Install the reviewed CI lock
+        run: python -m pip install --require-hashes -r requirements/ci.lock
+
+      - name: Verify the reviewed baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object src/threadweave/incremental.py)" = \
+            'c388fc3ebaf153e2aa6961627f3852c9deab6c54'
+          test "$(git hash-object tests/test_incremental_snapshot.py)" = \
+            'd8d0db61e93c84e882e9aa55cf3ba5aadc2153ad'
+          test "$(git hash-object docs/incremental-threading.md)" = \
+            'cc6d7e5fc06ea5515b1808b246efd8a33d039999'
+          test "$(git hash-object README.md)" = \
+            'c42e0a1189caf1482363fadba1eb2b5293754451'
+          test "$(git hash-object CHANGELOG.md)" = \
+            '6ae633fb70f24f7886b2a813bff6a864613b42f8'
+
+      - name: Prove the full-chunk bytes copy occurs before the fix
+        shell: bash
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          python - <<'PYCODE'
+          import threadweave.incremental as incremental
+
+          class NoEncodeString(str):
+              def encode(self, encoding='utf-8', errors='strict'):
+                  raise AssertionError((encoding, errors))
+
+          class SingleChunkEncoder:
+              def __init__(self, **_options):
+                  pass
+
+              def iterencode(self, _value):
+                  yield NoEncodeString('"aé€😀"')
+
+          incremental.json.JSONEncoder = SingleChunkEncoder
+          try:
+              incremental._bounded_snapshot_json_size({}, 100)
+          except AssertionError:
+              pass
+          else:
+              raise SystemExit('expected the pre-fix helper to call str.encode')
+          PYCODE
+          echo 'Observed the expected pre-fix full-chunk encode call.' \
+            >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Apply the allocation-free UTF-8 sizing patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply - <<'PATCH'
+          --- a/src/threadweave/incremental.py
+          +++ b/src/threadweave/incremental.py
+          @@ -844,6 +844,36 @@
+                       )
+ 
+ 
+          +def _bounded_utf8_size(value: str, maximum_bytes: int) -> int:
+          +    """Count UTF-8 bytes up to a limit without allocating an encoded copy."""
+          +    if str.isascii(value):
+          +        return str.__len__(value)
+          +
+          +    encoded_bytes = 0
+          +    for index in range(str.__len__(value)):
+          +        code_point = ord(str.__getitem__(value, index))
+          +        if code_point <= 0x7F:
+          +            width = 1
+          +        elif code_point <= 0x7FF:
+          +            width = 2
+          +        elif 0xD800 <= code_point <= 0xDFFF:
+          +            raise UnicodeEncodeError(
+          +                "utf-8",
+          +                value,
+          +                index,
+          +                index + 1,
+          +                "surrogates not allowed",
+          +            )
+          +        elif code_point <= 0xFFFF:
+          +            width = 3
+          +        else:
+          +            width = 4
+          +        encoded_bytes += width
+          +        if encoded_bytes > maximum_bytes:
+          +            break
+          +    return encoded_bytes
+          +
+          +
+           def _bounded_snapshot_json_size(value: object, maximum_bytes: int) -> int:
+               """Return canonical UTF-8 size while stopping at the configured byte limit."""
+               encoder = json.JSONEncoder(
+          @@ -855,7 +885,10 @@
+               encoded_bytes = 0
+               try:
+                   for chunk in encoder.iterencode(value):
+          -            encoded_bytes += len(chunk.encode("utf-8"))
+          +            encoded_bytes += _bounded_utf8_size(
+          +                chunk,
+          +                maximum_bytes - encoded_bytes,
+          +            )
+                       if encoded_bytes > maximum_bytes:
+                           raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
+               except IncrementalThreadError:
+          --- a/tests/test_incremental_snapshot.py
+          +++ b/tests/test_incremental_snapshot.py
+          @@ -407,6 +407,35 @@
+                   IncrementalThreadIndex.restore(hostile_snapshot)
+ 
+ 
+          +def test_utf8_size_counting_avoids_chunk_encoding(monkeypatch):
+          +    """Large JSON chunks are counted without allocating an encoded bytes copy."""
+          +
+          +    class _NoEncodeString(str):
+          +        """Raise if the size checker calls ``str.encode`` on an encoder chunk."""
+          +
+          +        def encode(
+          +            self,
+          +            encoding: str = "utf-8",
+          +            errors: str = "strict",
+          +        ) -> bytes:
+          +            """Expose accidental full-chunk byte allocation as a test failure."""
+          +            raise AssertionError((encoding, errors))
+          +
+          +    class _SingleChunkEncoder:
+          +        """Yield one non-ASCII JSON chunk whose ``encode`` method is forbidden."""
+          +
+          +        def __init__(self, **_options: object) -> None:
+          +            """Accept the production encoder configuration."""
+          +
+          +        def iterencode(self, _value: object):
+          +            """Yield one representative built JSON string chunk."""
+          +            yield _NoEncodeString('"aé€😀"')
+          +
+          +    monkeypatch.setattr(incremental_module.json, "JSONEncoder", _SingleChunkEncoder)
+          +
+          +    assert incremental_module._bounded_snapshot_json_size({}, 100) == 12
+          +
+          +
+           def test_snapshot_size_validation_stops_at_the_utf8_limit(monkeypatch):
+               """Byte-limit enforcement stops the incremental encoder before later chunks."""
+               later_chunks_requested: list[bool] = []
+          --- a/docs/incremental-threading.md
+          +++ b/docs/incremental-threading.md
+          @@ -208,8 +208,9 @@
+           therefore rejects cyclic or reused built-in container identities with an iterative
+           active-path and seen-object guard. This prevents a compact Python DAG from expanding
+           exponentially during encoding. The configured UTF-8 byte limit is counted from
+          -incremental encoder chunks and aborts without materializing a second complete JSON
+          -string or byte array.
+          +incremental encoder chunks with allocation-free code-point width accounting. The
+          +check aborts without calling ``str.encode`` on a complete chunk or materializing a
+          +second complete JSON string or byte array.
+ 
+           ## Correctness and operational boundaries
+ 
+          --- a/README.md
+          +++ b/README.md
+          @@ -221,9 +221,9 @@
+           traverse or edit that graph without corrupting reusable index state; payload objects
+           remain caller-owned references. Internal sent-date tie-break positions never become
+           public IMAP sequence numbers. Versioned snapshots omit arbitrary payloads, reject
+          -unknown, malformed, cyclic, aliased, or oversized input, and stop UTF-8 size
+          -validation at the configured byte limit without building a second full serialized
+          -copy. See
+          +unknown, malformed, cyclic, aliased, or oversized input, and count UTF-8
+          +code-point width to stop at the configured byte limit without encoding a second
+          +full bytes copy. See
+           [`docs/incremental-threading.md`](docs/incremental-threading.md) for the atomicity,
+           identity, snapshot, complexity, and RFC boundaries.
+ 
+          --- a/CHANGELOG.md
+          +++ b/CHANGELOG.md
+          @@ -6,9 +6,10 @@
+ 
+           ## Unreleased
+ 
+          -- Bound incremental snapshot size checks to streaming UTF-8 encoding and reject
+          -  reused container identities so compact Python object graphs cannot trigger
+          -  exponential JSON expansion or a second full serialized copy in memory.
+          +- Bound incremental snapshot size checks to streaming UTF-8 code-point
+          +  accounting without encoding each JSON chunk into a second bytes object, and
+          +  reject reused container identities so compact Python object graphs cannot
+          +  trigger exponential JSON expansion.
+           - Reject cyclic built-in dictionaries and lists at the incremental snapshot
+             restore boundary without recursion or unbounded traversal.
+           - Reject container and scalar subclasses plus non-plain-string object keys at
+          PATCH
+          git diff --check
+
+      - name: Verify focused snapshot behavior
+        shell: bash
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          pytest -q tests/test_incremental_snapshot.py \
+            -k 'utf8_size_counting or size_validation or unencodable_unicode'
+
+      - name: Verify the complete repository
+        shell: bash
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          ruff check .
+          python -m compileall -q src tests scripts benchmarks
+          python -m doctest \
+            src/threadweave/collation.py \
+            src/threadweave/dates.py \
+            src/threadweave/headers.py \
+            src/threadweave/subject.py
+          coverage erase
+          coverage run --branch --source=scripts/ci -m pytest -q \
+            tests/test_autonomous_documentation.py \
+            tests/test_dependency_lock_contract.py \
+            tests/test_hourly_product_guard.py \
+            tests/test_hourly_product_guard_coverage.py \
+            tests/test_hourly_product_guard_return.py \
+            tests/test_nim_proxy.py \
+            tests/test_nim_tls_context.py \
+            tests/test_release_contract.py \
+            tests/test_release_contract_coverage.py \
+            tests/test_release_workflow.py
+          coverage report \
+            --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py,scripts/ci/release_contract.py \
+            --fail-under=100 \
+            --show-missing
+          coverage erase
+          coverage run -m pytest -q
+          coverage report --fail-under=100 --show-missing
+          python -m build --no-isolation
+          python -m pip check
+
+      - name: Commit the verified product update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'ThreadWeave verification bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            src/threadweave/incremental.py \
+            tests/test_incremental_snapshot.py \
+            docs/incremental-threading.md \
+            README.md \
+            CHANGELOG.md
+          git diff --cached --check
+          git commit -m 'perf: avoid snapshot UTF-8 bytes duplication'
+          git push origin HEAD:feature/incremental-thread-index
