@@ -1,0 +1,71 @@
+name: Repair PR 20 bounded overlay patch
+
+on:
+  push:
+    branches:
+      - feature/incremental-thread-index
+    paths:
+      - .github/workflows/repair-pr20-bounded-patch.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repair-pr20-bounded-overlay-patch
+  cancel-in-progress: false
+
+jobs:
+  repair-and-retrigger:
+    if: github.repository == 'ContextualWisdomLab/ThreadWeave'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact feature branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feature/incremental-thread-index
+          fetch-depth: 1
+
+      - name: Repair and validate the patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object tools/pr20-bounded-state-overlays.patch)" = \
+            '58f0da771cfc692f863d0d8381080f92574ae1bf'
+          test "$(git hash-object .github/workflows/apply-pr20-bounded-state-overlays.yml)" = \
+            '0d1eb08d4425db241b1de8704134f261f418d5c7'
+          python - <<'PYCODE'
+          from pathlib import Path
+
+          patch_path = Path('tools/pr20-bounded-state-overlays.patch')
+          patch = patch_path.read_text(encoding='utf-8')
+          old = '@@ -1094,64 +1197,103 @@ class IncrementalThreadIndex:'
+          new = '@@ -1094,64 +1197,87 @@ class IncrementalThreadIndex:'
+          if patch.count(old) != 1:
+              raise SystemExit('unexpected bounded-overlay patch header state')
+          patch_path.write_text(patch.replace(old, new), encoding='utf-8')
+
+          apply_path = Path('.github/workflows/apply-pr20-bounded-state-overlays.yml')
+          workflow = apply_path.read_text(encoding='utf-8')
+          marker = '# corrected-patch-trigger-v1\n'
+          if marker in workflow:
+              raise SystemExit('existing apply workflow already contains repair marker')
+          apply_path.write_text(workflow + '\n' + marker, encoding='utf-8')
+          PYCODE
+          git apply --check tools/pr20-bounded-state-overlays.patch
+          rm .github/workflows/repair-pr20-bounded-patch.yml
+          git diff --check
+
+      - name: Commit the repaired patch and retrigger product verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'ThreadWeave verification bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            tools/pr20-bounded-state-overlays.patch \
+            .github/workflows/apply-pr20-bounded-state-overlays.yml
+          git add -u .github/workflows/repair-pr20-bounded-patch.yml
+          git diff --cached --check
+          git commit -m 'ci: repair bounded overlay patch metadata'
+          git push origin HEAD:feature/incremental-thread-index
