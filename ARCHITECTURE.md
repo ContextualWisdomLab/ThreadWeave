@@ -48,8 +48,13 @@ is maintained in incremental code.
   commit; the later transaction observes the new version and fails explicitly.
 - The process-local lock is not a distributed lock. Naruon or another host must
   serialize durable writes across processes and persist the optimistic version.
-- `apply` validates and computes on isolated transaction state, then commits once.
-- Reverse connectivity buckets use copy-on-write mutation.
+- `apply` validates and computes on isolated transaction overlays, then commits once.
+- Default-mode updates retain the existing state-map objects and publish only touched
+  record, position, token, component, EMAILID, and THREADID entries.
+- Reverse connectivity buckets use copy-on-write mutation; RFC 8474 indexes retain
+  compact association/count state rather than one set object per message.
+- RFC sent-date ordering may still scan the mailbox to derive global ranks and reject
+  effective sequence-number collisions; the default first-appearance mode does not.
 - Complete root/projection views are lazy caches invalidated by a successful change.
 - `roots` returns a defensive structural copy; payload references stay caller-owned.
 - Snapshot schema version 1 contains structural metadata only, never payload objects
@@ -70,7 +75,8 @@ The deterministic benchmark runs incremental and full-rebuild workers in separat
 processes. It compares projection SHA-256 values and records initial-build time,
 delta-application time, full-view materialization time, full-rebuild time, affected
 message count, root count, and peak RSS. Scheduled evidence defaults to 100,000
-existing messages.
+existing messages. Focused performance contracts additionally reject default-mode
+small-delta implementations that iterate or replace unrelated state maps.
 
 ## Integration policy
 

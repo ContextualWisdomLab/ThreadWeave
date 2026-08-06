@@ -216,8 +216,11 @@ assert IncrementalThreadIndex.restore(index.snapshot()).projections == (
 ```
 
 Every affected component is recomputed through the canonical batch threader, and
-full-rebuild parity is the correctness oracle. Structural merges and splits are
-reported explicitly. `roots` returns a defensive structural copy, so callers may
+full-rebuild parity is the correctness oracle. Default-mode transactions stage
+records, positions, connectivity, component ownership, and RFC 8474 identity
+changes through bounded overlays; they do not copy or iterate unrelated mailbox
+state before one validated commit. Structural merges and splits are reported
+explicitly. `roots` returns a defensive structural copy, so callers may
 traverse or edit that graph without corrupting reusable index state; payload objects
 remain caller-owned references. Internal sent-date tie-break positions never become
 public IMAP sequence numbers. Versioned snapshots omit arbitrary payloads, reject

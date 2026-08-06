@@ -10,11 +10,11 @@ payloads.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from _thread import RLock
-from typing import Literal
+from typing import Literal, TypeVar
 
 from threadweave.collation import unicode_casemap_key
 from threadweave.container import Container
@@ -44,6 +44,57 @@ _MAX_IMAP_NUMBER = 4_294_967_295
 _DEFAULT_MAX_SNAPSHOT_RECORDS = 1_000_000
 _DEFAULT_MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
 _SNAPSHOT_SCHEMA_VERSION = 1
+
+_KeyT = TypeVar("_KeyT")
+_ValueT = TypeVar("_ValueT")
+
+
+class _OverlayMapping(Mapping[_KeyT, _ValueT]):
+    """Expose staged updates over a base mapping without copying unrelated entries."""
+
+    def __init__(
+        self,
+        base: Mapping[_KeyT, _ValueT],
+        updates: Mapping[_KeyT, _ValueT],
+        removals: frozenset[_KeyT] = frozenset(),
+    ) -> None:
+        """Retain immutable transaction views of one base mapping and its delta."""
+        self._base = base
+        self._updates = updates
+        self._removals = removals
+
+    def __getitem__(self, key: _KeyT) -> _ValueT:
+        """Return a staged value, excluding keys removed by the transaction."""
+        if key in self._updates:
+            return self._updates[key]
+        if key in self._removals:
+            raise KeyError(key)
+        return self._base[key]
+
+    def __iter__(self) -> Iterator[_KeyT]:
+        """Iterate the logical mapping only when a global operation requires it."""
+        for key in self._base:
+            if key not in self._removals and key not in self._updates:
+                yield key
+        yield from self._updates
+
+    def __len__(self) -> int:
+        """Return logical size from the bounded transaction delta."""
+        removed = sum(
+            1
+            for key in self._removals
+            if key in self._base and key not in self._updates
+        )
+        added = sum(1 for key in self._updates if key not in self._base)
+        return len(self._base) - removed + added
+
+    def __contains__(self, key: object) -> bool:
+        """Test logical membership without iterating the base mapping."""
+        if key in self._updates:
+            return True
+        if key in self._removals:
+            return False
+        return key in self._base
 
 
 class IncrementalThreadError(ValueError):
@@ -369,47 +420,172 @@ def _connectivity_tokens(
     return frozenset(tokens)
 
 
-def _writable_token_bucket(
-    token: str,
-    keys_by_token: dict[str, set[str]],
-    copied_tokens: set[str],
+def _writable_bucket(
+    bucket_key: str,
+    base_buckets: Mapping[str, set[str]],
+    bucket_updates: dict[str, set[str]],
 ) -> set[str]:
-    """Return one copy-on-write reverse bucket owned by the transaction."""
-    if token not in copied_tokens:
-        keys_by_token[token] = set(keys_by_token.get(token, set()))
-        copied_tokens.add(token)
-    elif token not in keys_by_token:
-        keys_by_token[token] = set()
-    return keys_by_token[token]
+    """Return one transaction-owned copy of a reverse-index bucket."""
+    if bucket_key not in bucket_updates:
+        bucket_updates[bucket_key] = set(base_buckets.get(bucket_key, set()))
+    return bucket_updates[bucket_key]
 
 
 def _remove_key_from_buckets(
     key: str,
-    tokens_by_key: dict[str, frozenset[str]],
-    keys_by_token: dict[str, set[str]],
-    copied_tokens: set[str],
-) -> frozenset[str]:
-    """Remove one key from transaction-owned token buckets."""
-    old_tokens = tokens_by_key.pop(key, frozenset())
-    for token in old_tokens:
-        bucket = _writable_token_bucket(token, keys_by_token, copied_tokens)
-        bucket.discard(key)
-        if not bucket:
-            del keys_by_token[token]
-    return old_tokens
+    bucket_keys: Iterable[str],
+    base_buckets: Mapping[str, set[str]],
+    bucket_updates: dict[str, set[str]],
+) -> None:
+    """Stage removal of one record key from selected reverse-index buckets."""
+    for bucket_key in bucket_keys:
+        _writable_bucket(bucket_key, base_buckets, bucket_updates).discard(key)
 
 
 def _add_key_to_buckets(
     key: str,
-    tokens: frozenset[str],
-    tokens_by_key: dict[str, frozenset[str]],
-    keys_by_token: dict[str, set[str]],
-    copied_tokens: set[str],
+    bucket_keys: Iterable[str],
+    base_buckets: Mapping[str, set[str]],
+    bucket_updates: dict[str, set[str]],
 ) -> None:
-    """Insert one key through transaction-owned copy-on-write buckets."""
-    tokens_by_key[key] = tokens
-    for token in tokens:
-        _writable_token_bucket(token, keys_by_token, copied_tokens).add(key)
+    """Stage insertion of one record key into selected reverse-index buckets."""
+    for bucket_key in bucket_keys:
+        _writable_bucket(bucket_key, base_buckets, bucket_updates).add(key)
+
+
+def _commit_bucket_updates(
+    target: dict[str, set[str]],
+    bucket_updates: Mapping[str, set[str]],
+) -> None:
+    """Publish touched reverse buckets and discard buckets that became empty."""
+    for bucket_key, values in bucket_updates.items():
+        if values:
+            target[bucket_key] = values
+        else:
+            target.pop(bucket_key, None)
+
+
+def _email_state_after(
+    email_id: str,
+    base_states: Mapping[str, tuple[str | None, int]],
+    state_updates: Mapping[str, tuple[str | None, int] | None],
+) -> tuple[str | None, int] | None:
+    """Return one staged EMAILID association and reference count."""
+    if email_id in state_updates:
+        return state_updates[email_id]
+    return base_states.get(email_id)
+
+
+def _thread_count_after(
+    thread_id: str,
+    base_counts: Mapping[str, int],
+    count_updates: Mapping[str, int],
+) -> int:
+    """Return one staged THREADID reference count."""
+    return count_updates.get(thread_id, base_counts.get(thread_id, 0))
+
+
+def _stage_external_identity(
+    record: IndexedMessage,
+    adjustment: Literal[-1, 1],
+    base_email_states: Mapping[str, tuple[str | None, int]],
+    email_state_updates: dict[str, tuple[str | None, int] | None],
+    base_thread_counts: Mapping[str, int],
+    thread_count_updates: dict[str, int],
+    touched_values: set[str],
+) -> None:
+    """Stage one record's RFC 8474 identity contribution without a global scan."""
+    email_id = record.email_id
+    if email_id is not None:
+        touched_values.add(email_id)
+        current_state = _email_state_after(
+            email_id,
+            base_email_states,
+            email_state_updates,
+        )
+        if adjustment < 0:
+            if current_state is None or current_state[0] != record.thread_id:
+                raise IncrementalThreadError("internal EMAILID index is inconsistent")
+            next_count = current_state[1] - 1
+            email_state_updates[email_id] = (
+                None
+                if next_count == 0
+                else (current_state[0], next_count)
+            )
+        else:
+            if current_state is not None and current_state[0] != record.thread_id:
+                raise ExternalIdentityError(
+                    f"messages with EMAILID {email_id!r} must expose the same THREADID"
+                )
+            email_state_updates[email_id] = (
+                record.thread_id,
+                1 if current_state is None else current_state[1] + 1,
+            )
+
+    thread_id = record.thread_id
+    if thread_id is not None:
+        touched_values.add(thread_id)
+        next_count = (
+            _thread_count_after(
+                thread_id,
+                base_thread_counts,
+                thread_count_updates,
+            )
+            + adjustment
+        )
+        if next_count < 0:
+            raise IncrementalThreadError("internal THREADID index is inconsistent")
+        thread_count_updates[thread_id] = next_count
+
+
+def _validate_touched_identity_namespaces(
+    touched_values: Iterable[str],
+    base_email_states: Mapping[str, tuple[str | None, int]],
+    email_state_updates: Mapping[str, tuple[str | None, int] | None],
+    base_thread_counts: Mapping[str, int],
+    thread_count_updates: Mapping[str, int],
+) -> None:
+    """Reject touched ObjectID values present in both RFC 8474 namespaces."""
+    reused_values = sorted(
+        identity_value
+        for identity_value in touched_values
+        if _email_state_after(
+            identity_value,
+            base_email_states,
+            email_state_updates,
+        )
+        is not None
+        and _thread_count_after(
+            identity_value,
+            base_thread_counts,
+            thread_count_updates,
+        )
+        > 0
+    )
+    if reused_values:
+        raise ExternalIdentityError(
+            "EMAILID and THREADID must use disjoint ObjectID values: "
+            f"{reused_values!r}"
+        )
+
+
+def _commit_external_identity_updates(
+    email_states: dict[str, tuple[str | None, int]],
+    email_state_updates: Mapping[str, tuple[str | None, int] | None],
+    thread_counts: dict[str, int],
+    thread_count_updates: Mapping[str, int],
+) -> None:
+    """Publish touched compact RFC 8474 indexes after transaction validation."""
+    for email_id, state in email_state_updates.items():
+        if state is None:
+            email_states.pop(email_id, None)
+        else:
+            email_states[email_id] = state
+    for thread_id, count in thread_count_updates.items():
+        if count == 0:
+            thread_counts.pop(thread_id, None)
+        else:
+            thread_counts[thread_id] = count
 
 
 def _ordered_keys(keys: Iterable[str], positions: Mapping[str, int]) -> tuple[str, ...]:
@@ -440,32 +616,6 @@ def _validate_effective_sequence_numbers(
                 f"duplicate sequence number: {sequence_number} ({previous}, {key})"
             )
         used[sequence_number] = key
-
-
-def _validate_external_identities(records: Mapping[str, IndexedMessage]) -> None:
-    """Enforce RFC 8474 EMAILID/THREADID consistency and namespace separation."""
-    thread_id_by_email_id: dict[str, str | None] = {}
-    email_ids: set[str] = set()
-    thread_ids: set[str] = set()
-    for record in records.values():
-        email_id = record.email_id
-        thread_id = record.thread_id
-        if email_id is not None:
-            email_ids.add(email_id)
-            if email_id not in thread_id_by_email_id:
-                thread_id_by_email_id[email_id] = thread_id
-            elif thread_id_by_email_id[email_id] != thread_id:
-                raise ExternalIdentityError(
-                    f"messages with EMAILID {email_id!r} must expose the same THREADID"
-                )
-        if thread_id is not None:
-            thread_ids.add(thread_id)
-    reused_values = email_ids & thread_ids
-    if reused_values:
-        raise ExternalIdentityError(
-            "EMAILID and THREADID must use disjoint ObjectID values: "
-            f"{sorted(reused_values)!r}"
-        )
 
 
 def _validate_replacement_identity(
@@ -965,6 +1115,8 @@ class IncrementalThreadIndex:
         self._next_position = 1
         self._tokens_by_key: dict[str, frozenset[str]] = {}
         self._keys_by_token: dict[str, set[str]] = {}
+        self._email_id_states: dict[str, tuple[str | None, int]] = {}
+        self._thread_id_counts: dict[str, int] = {}
         self._component_by_key: dict[str, str] = {}
         self._keys_by_component: dict[str, tuple[str, ...]] = {}
         self._roots: tuple[Container, ...] | None = ()
@@ -1065,10 +1217,11 @@ class IncrementalThreadIndex:
         addition_keys = {record.message_key for record in change_set.additions}
         replacement_keys = {record.message_key for record in change_set.replacements}
         removal_keys = set(change_set.removals)
-        existing_keys = set(self._records)
-        already_present = addition_keys & existing_keys
-        missing_replacements = replacement_keys - existing_keys
-        missing_removals = removal_keys - existing_keys
+        already_present = {key for key in addition_keys if key in self._records}
+        missing_replacements = {
+            key for key in replacement_keys if key not in self._records
+        }
+        missing_removals = {key for key in removal_keys if key not in self._records}
         if already_present:
             raise IncrementalThreadError(
                 f"addition keys already exist: {sorted(already_present)!r}"
@@ -1094,64 +1247,87 @@ class IncrementalThreadIndex:
                 replacement,
             )
 
-        records = dict(self._records)
-        positions = dict(self._positions)
-        tokens_by_key = dict(self._tokens_by_key)
-        keys_by_token = dict(self._keys_by_token)
-        copied_tokens: set[str] = set()
+        record_updates = {
+            record.message_key: record
+            for record in (*copied_replacements, *copied_additions)
+        }
+        records = _OverlayMapping(
+            self._records,
+            record_updates,
+            frozenset(removal_keys),
+        )
+        position_updates: dict[str, int] = {}
         next_position = self._next_position
+        for addition in copied_additions:
+            position_updates[addition.message_key] = next_position
+            next_position += 1
+        positions = _OverlayMapping(
+            self._positions,
+            position_updates,
+            frozenset(removal_keys),
+        )
+
+        token_updates: dict[str, frozenset[str]] = {}
+        token_bucket_updates: dict[str, set[str]] = {}
+        email_state_updates: dict[str, tuple[str | None, int] | None] = {}
+        thread_count_updates: dict[str, int] = {}
         changed_existing_keys = replacement_keys | removal_keys
         candidate_seeds: set[str] = set()
         touched_tokens: set[str] = set()
+        touched_identity_values: set[str] = set()
 
         for key in changed_existing_keys:
             component_id = self._component_by_key.get(key)
             if component_id is not None:
                 candidate_seeds.update(self._keys_by_component[component_id])
-            touched_tokens.update(
-                _remove_key_from_buckets(
-                    key,
-                    tokens_by_key,
-                    keys_by_token,
-                    copied_tokens,
-                )
+            old_tokens = self._tokens_by_key.get(key, frozenset())
+            touched_tokens.update(old_tokens)
+            _remove_key_from_buckets(
+                key,
+                old_tokens,
+                self._keys_by_token,
+                token_bucket_updates,
+            )
+            _stage_external_identity(
+                self._records[key],
+                -1,
+                self._email_id_states,
+                email_state_updates,
+                self._thread_id_counts,
+                thread_count_updates,
+                touched_identity_values,
             )
 
-        for key in removal_keys:
-            records.pop(key)
-            positions.pop(key)
-        for replacement in copied_replacements:
-            records[replacement.message_key] = replacement
+        for record in (*copied_replacements, *copied_additions):
             tokens = _connectivity_tokens(
-                replacement,
+                record,
                 group_by_subject=self._group_by_subject,
             )
+            token_updates[record.message_key] = tokens
             touched_tokens.update(tokens)
             _add_key_to_buckets(
-                replacement.message_key,
+                record.message_key,
                 tokens,
-                tokens_by_key,
-                keys_by_token,
-                copied_tokens,
+                self._keys_by_token,
+                token_bucket_updates,
             )
-            candidate_seeds.add(replacement.message_key)
-        for addition in copied_additions:
-            records[addition.message_key] = addition
-            positions[addition.message_key] = next_position
-            next_position += 1
-            tokens = _connectivity_tokens(
-                addition,
-                group_by_subject=self._group_by_subject,
+            _stage_external_identity(
+                record,
+                1,
+                self._email_id_states,
+                email_state_updates,
+                self._thread_id_counts,
+                thread_count_updates,
+                touched_identity_values,
             )
-            touched_tokens.update(tokens)
-            _add_key_to_buckets(
-                addition.message_key,
-                tokens,
-                tokens_by_key,
-                keys_by_token,
-                copied_tokens,
-            )
-            candidate_seeds.add(addition.message_key)
+            candidate_seeds.add(record.message_key)
+
+        tokens_by_key = _OverlayMapping(
+            self._tokens_by_key,
+            token_updates,
+            frozenset(removal_keys),
+        )
+        keys_by_token = _OverlayMapping(self._keys_by_token, token_bucket_updates)
 
         for token in touched_tokens:
             candidate_seeds.update(keys_by_token.get(token, set()))
@@ -1186,7 +1362,13 @@ class IncrementalThreadIndex:
             sort_by_sent_date=self._sort_by_sent_date,
         )
 
-        _validate_external_identities(records)
+        _validate_touched_identity_namespaces(
+            touched_identity_values,
+            self._email_id_states,
+            email_state_updates,
+            self._thread_id_counts,
+            thread_count_updates,
+        )
         ranks = (
             _current_ranks(positions)
             if self._sort_by_sent_date
@@ -1200,30 +1382,13 @@ class IncrementalThreadIndex:
             tokens_by_key,
             keys_by_token,
         )
-        old_candidate_keys = set(candidate_seeds)
-        candidate_keys = current_candidate_keys | old_candidate_keys
-
-        component_by_key = {
-            key: component_id
-            for key, component_id in self._component_by_key.items()
-            if key not in candidate_keys and key in records
-        }
-        unaffected_component_ids = set(component_by_key.values())
-        keys_by_component = {
-            component_id: keys
-            for component_id, keys in self._keys_by_component.items()
-            if component_id in unaffected_component_ids
-        }
-        for keys in _partition_components(
+        candidate_keys = current_candidate_keys | set(candidate_seeds)
+        new_components = _partition_components(
             current_candidate_keys,
             positions,
             tokens_by_key,
             keys_by_token,
-        ):
-            component_id = keys[0]
-            keys_by_component[component_id] = keys
-            for key in keys:
-                component_by_key[key] = component_id
+        )
 
         after_affected_keys = _ordered_keys(current_candidate_keys, positions)
         _, after_affected_projections = _build_forest(
@@ -1250,13 +1415,32 @@ class IncrementalThreadIndex:
             after_affected_projections,
         )
 
-        self._records = records
-        self._positions = positions
+        for key in removal_keys:
+            self._records.pop(key)
+            self._positions.pop(key)
+            self._tokens_by_key.pop(key, None)
+        self._records.update(record_updates)
+        self._positions.update(position_updates)
+        self._tokens_by_key.update(token_updates)
+        _commit_bucket_updates(self._keys_by_token, token_bucket_updates)
+        _commit_external_identity_updates(
+            self._email_id_states,
+            email_state_updates,
+            self._thread_id_counts,
+            thread_count_updates,
+        )
+
+        for component_id in old_component_ids:
+            self._keys_by_component.pop(component_id, None)
+        for key in candidate_keys:
+            self._component_by_key.pop(key, None)
+        for keys in new_components:
+            component_id = keys[0]
+            self._keys_by_component[component_id] = keys
+            for key in keys:
+                self._component_by_key[key] = component_id
+
         self._next_position = next_position
-        self._tokens_by_key = tokens_by_key
-        self._keys_by_token = keys_by_token
-        self._component_by_key = component_by_key
-        self._keys_by_component = keys_by_component
         self._roots = None
         self._projections = None
         self._version = version

@@ -152,27 +152,27 @@ def test_projection_membership_rejects_duplicate_keys_between_roots():
 def test_reverse_token_buckets_are_copied_only_when_mutated():
     """Atomic changes preserve every shared pre-transaction bucket."""
     original = {"token": {"a", "b"}}
-    overlay = dict(original)
-    tokens_by_key = {"a": frozenset({"token"})}
-    copied_tokens: set[str] = set()
+    updates: dict[str, set[str]] = {}
 
     incremental._remove_key_from_buckets(
         "a",
-        tokens_by_key,
-        overlay,
-        copied_tokens,
+        ("token",),
+        original,
+        updates,
     )
     incremental._add_key_to_buckets(
         "c",
-        frozenset({"token"}),
-        tokens_by_key,
-        overlay,
-        copied_tokens,
+        ("token",),
+        original,
+        updates,
     )
 
     assert original == {"token": {"a", "b"}}
-    assert overlay == {"token": {"b", "c"}}
-    assert copied_tokens == {"token"}
+    assert updates == {"token": {"b", "c"}}
+    incremental._commit_bucket_updates(original, updates)
+    assert original == {"token": {"b", "c"}}
+    incremental._commit_bucket_updates(original, {"token": set()})
+    assert original == {}
 
 
 def test_component_partition_reads_positions_linearly_for_disconnected_keys():
@@ -244,3 +244,133 @@ def test_replacement_recovers_when_derived_component_mapping_is_missing():
         )
     )
     assert index.projections[0].message_keys == ("a",)
+
+
+def test_default_delta_does_not_copy_or_iterate_unrelated_state_maps():
+    """A small default-mode update touches bounded state instead of the whole mailbox."""
+
+    class NoFullIterationDict(dict[str, object]):
+        """Permit keyed access and mutation while rejecting whole-map scans."""
+
+        def __iter__(self):
+            """Reject direct iteration over unrelated state."""
+            raise AssertionError("unexpected full-state iteration")
+
+        def keys(self):
+            """Reject key-view scans over unrelated state."""
+            raise AssertionError("unexpected full-state key scan")
+
+        def items(self):
+            """Reject item-view scans over unrelated state."""
+            raise AssertionError("unexpected full-state item scan")
+
+        def values(self):
+            """Reject value-view scans over unrelated state."""
+            raise AssertionError("unexpected full-state value scan")
+
+    records = tuple(
+        _record(
+            f"message_{index}",
+            Message(message_id=f"message_{index}"),
+            email_id=f"Email_{index}",
+            thread_id=f"Thread_{index}",
+        )
+        for index in range(128)
+    )
+    index = IncrementalThreadIndex()
+    index.apply(MailboxChangeSet(expected_version=0, additions=records))
+
+    state_names = (
+        "_records",
+        "_positions",
+        "_tokens_by_key",
+        "_keys_by_token",
+        "_email_id_states",
+        "_thread_id_counts",
+        "_component_by_key",
+        "_keys_by_component",
+    )
+    for name in state_names:
+        setattr(index, name, NoFullIterationDict(getattr(index, name)))
+    state_identities = {name: id(getattr(index, name)) for name in state_names}
+
+    delta = index.apply(
+        MailboxChangeSet(
+            expected_version=1,
+            replacements=(
+                _record(
+                    "message_0",
+                    Message(message_id="message_0", subject="updated"),
+                    email_id="Email_0",
+                    thread_id="Thread_0",
+                ),
+            ),
+        )
+    )
+
+    assert delta.affected_message_keys == ("message_0",)
+    assert index.version == 2
+    assert {name: id(getattr(index, name)) for name in state_names} == state_identities
+
+
+def test_external_identity_indexes_update_only_touched_namespaces():
+    """Identity removals and additions remain atomic without a mailbox-wide scan."""
+    index = IncrementalThreadIndex()
+    index.apply(
+        MailboxChangeSet(
+            expected_version=0,
+            additions=(
+                _record("a", email_id="Mail_A", thread_id="Thread_A"),
+                _record("b", email_id="Mail_B", thread_id="Thread_B"),
+            ),
+        )
+    )
+
+    index.apply(
+        MailboxChangeSet(
+            expected_version=1,
+            removals=("a",),
+            additions=(
+                _record("c", email_id="Thread_A", thread_id="Mail_A"),
+            ),
+        )
+    )
+
+    assert index._email_id_states == {
+        "Mail_B": ("Thread_B", 1),
+        "Thread_A": ("Mail_A", 1),
+    }
+    assert index._thread_id_counts == {"Thread_B": 1, "Mail_A": 1}
+
+    before = index.snapshot()
+    with pytest.raises(IncrementalThreadError, match="disjoint ObjectID"):
+        index.apply(
+            MailboxChangeSet(
+                expected_version=2,
+                additions=(
+                    _record("d", email_id="Thread_B", thread_id="Thread_D"),
+                ),
+            )
+        )
+    assert index.snapshot() == before
+
+
+def test_external_identity_index_corruption_fails_before_commit():
+    """Broken private identity indexes cannot be published by a transaction."""
+    index = IncrementalThreadIndex()
+    index.apply(
+        MailboxChangeSet(
+            expected_version=0,
+            additions=(
+                _record("a", email_id="Mail_A", thread_id="Thread_A"),
+            ),
+        )
+    )
+    index._email_id_states.clear()
+    with pytest.raises(IncrementalThreadError, match="EMAILID index"):
+        index.apply(MailboxChangeSet(expected_version=1, removals=("a",)))
+
+    index._email_id_states["Mail_A"] = ("Thread_A", 1)
+    index._thread_id_counts.clear()
+    with pytest.raises(IncrementalThreadError, match="THREADID index"):
+        index.apply(MailboxChangeSet(expected_version=1, removals=("a",)))

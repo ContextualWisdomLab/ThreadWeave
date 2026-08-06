@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Apply default-mode incremental deltas through bounded overlay mappings and
+  touched reverse indexes instead of cloning or scanning every mailbox state map;
+  unchanged records, positions, components, and RFC 8474 identity namespaces stay
+  in place until one validated commit.
 - Preflight incremental snapshot root fields and record counts before nested
   traversal, and cap plain-container validation by the configured byte limit so
   oversized hostile trees fail before JSON encoder construction.

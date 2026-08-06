@@ -143,9 +143,15 @@ old component; a new bridge message includes every old component touched by its
 new tokens. The candidate region is repartitioned iteratively and each resulting
 component is processed by `thread_messages`.
 
-Unchanged components retain their existing internal `Container` roots. Applying a
-change does not eagerly rebuild the complete public forest: only the affected old
-and new component views are composed for `ThreadDelta`. The complete ordered forest
+Unchanged components retain their existing internal `Container` roots. In the
+default first-appearance ordering mode, a transaction uses overlay mappings and
+copy-on-write reverse buckets for only the changed records and affected components.
+It does not clone or iterate the unrelated record, position, token, component,
+EMAILID, or THREADID maps before the single commit point. Sent-date ordering still
+requires a global rank and effective-sequence validation because IMAP ordering is a
+mailbox-wide contract. Applying a change does not eagerly rebuild the complete
+public forest: only the affected old and new component views are composed for
+`ThreadDelta`. The complete ordered forest
 is materialized once, on demand, when `roots` or `projections` is requested. Public
 roots are defensive structural copies; editing their parent, child, or message
 metadata cannot corrupt internal state, while caller payload objects remain shared by
