@@ -39,6 +39,6 @@ jobs:
         run: |
           set -o pipefail
           "${RUNNER_TEMP}/actionlint" \
-            -color never \
+            -color=false \
             .github/workflows/hourly-product-development.yml \
             2>&1 | tee "${RUNNER_TEMP}/actionlint-output.txt"
