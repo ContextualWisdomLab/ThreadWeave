@@ -798,20 +798,30 @@ def _decoded_date(value: object, name: str) -> str | datetime | None:
     raise IncrementalThreadError(f"{name} date kind is unsupported")
 
 
-def _require_plain_json_containers(value: object) -> None:
-    """Reject executable, cyclic, or aliased containers before serialization.
+def _require_plain_json_containers(
+    value: object,
+    *,
+    maximum_nodes: int | None = None,
+) -> None:
+    """Reject executable, cyclic, aliased, or structurally oversized JSON trees.
 
     JSON decoding produces a tree of built-in dictionaries, lists, string
     keys, and scalar values. Requiring exact runtime types prevents attacker-
     controlled iteration, comparison, or scalar subclasses from executing,
     while rejecting repeated container identities prevents a compact Python
-    object graph from expanding exponentially during JSON encoding.
+    object graph from expanding exponentially during JSON encoding. A node
+    ceiling derived from the byte limit bounds validation before serialization.
     """
     pending = [(value, False)]
     active_containers: set[int] = set()
     seen_containers: set[int] = set()
+    visited_nodes = 0
     while pending:
         current, exiting = pending.pop()
+        if not exiting:
+            visited_nodes += 1
+            if maximum_nodes is not None and visited_nodes > maximum_nodes:
+                raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
         if type(current) in {dict, list}:
             identity = id(current)
             if exiting:
@@ -900,10 +910,26 @@ def _bounded_snapshot_json_size(value: object, maximum_bytes: int) -> int:
     return encoded_bytes
 
 
-def _required_fields(value: Mapping[str, object], expected: set[str], name: str) -> None:
-    """Require an exact untrusted mapping field set."""
-    if set(value) != expected:
+def _required_plain_object(
+    value: object,
+    expected: set[str],
+    name: str,
+) -> dict[str, object]:
+    """Return one exact built-in JSON object with the required plain-string keys."""
+    if not isinstance(value, Mapping):
+        raise IncrementalThreadError(f"{name} must be a mapping")
+    if type(value) is not dict:
+        raise IncrementalThreadError(
+            "snapshot must contain only plain JSON containers and scalar values"
+        )
+    if dict.__len__(value) != len(expected):
         raise IncrementalThreadError(f"{name} fields do not match the schema")
+    keys = dict.keys(value)
+    if any(type(key) is not str for key in keys):
+        raise IncrementalThreadError("snapshot object keys must be plain strings")
+    if set(keys) != expected:
+        raise IncrementalThreadError(f"{name} fields do not match the schema")
+    return value
 
 
 class IncrementalThreadIndex:
@@ -1297,30 +1323,43 @@ class IncrementalThreadIndex:
             max_snapshot_bytes,
             "max_snapshot_bytes",
         )
-        if not isinstance(snapshot, Mapping):
-            raise IncrementalThreadError("snapshot must be a mapping")
-        _require_plain_json_containers(snapshot)
-        _bounded_snapshot_json_size(snapshot, max_bytes)
-        _required_fields(
+        snapshot_object = _required_plain_object(
             snapshot,
             {"schema_version", "version", "options", "records"},
             "snapshot",
         )
-        schema_version = snapshot["schema_version"]
+        raw_options = snapshot_object["options"]
+        if not isinstance(raw_options, Mapping):
+            raise IncrementalThreadError("snapshot options must be a mapping")
+        options = _required_plain_object(
+            raw_options,
+            {"group_by_subject", "sort_by_sent_date"},
+            "option",
+        )
+        encoded_records = snapshot_object["records"]
+        if not isinstance(encoded_records, list):
+            raise IncrementalThreadError("snapshot records must be a list")
+        if type(encoded_records) is not list:
+            raise IncrementalThreadError(
+                "snapshot must contain only plain JSON containers and scalar values"
+            )
+        if len(encoded_records) > max_records:
+            raise IncrementalThreadError("snapshot exceeds max_snapshot_records")
+        _require_plain_json_containers(
+            snapshot_object,
+            maximum_nodes=max_bytes,
+        )
+        _bounded_snapshot_json_size(snapshot_object, max_bytes)
+        schema_version = snapshot_object["schema_version"]
         if (
             isinstance(schema_version, bool)
             or not isinstance(schema_version, int)
             or schema_version != _SNAPSHOT_SCHEMA_VERSION
         ):
             raise IncrementalThreadError("unsupported snapshot schema_version")
-        version = _validated_nonnegative_integer(snapshot["version"], "version")
-        options = snapshot["options"]
-        if not isinstance(options, Mapping):
-            raise IncrementalThreadError("snapshot options must be a mapping")
-        _required_fields(
-            options,
-            {"group_by_subject", "sort_by_sent_date"},
-            "option",
+        version = _validated_nonnegative_integer(
+            snapshot_object["version"],
+            "version",
         )
         group_by_subject = options["group_by_subject"]
         sort_by_sent_date = options["sort_by_sent_date"]
@@ -1328,12 +1367,6 @@ class IncrementalThreadIndex:
             raise IncrementalThreadError("group_by_subject must be a boolean")
         if not isinstance(sort_by_sent_date, bool):
             raise IncrementalThreadError("sort_by_sent_date must be a boolean")
-        encoded_records = snapshot["records"]
-        if not isinstance(encoded_records, list):
-            raise IncrementalThreadError("snapshot records must be a list")
-        if len(encoded_records) > max_records:
-            raise IncrementalThreadError("snapshot exceeds max_snapshot_records")
-
         records: list[IndexedMessage] = []
         seen_keys: set[str] = set()
         record_fields = {"message_key", "email_id", "thread_id", "message"}
@@ -1348,17 +1381,21 @@ class IncrementalThreadIndex:
             "uid",
         }
         for encoded_record in encoded_records:
-            if not isinstance(encoded_record, Mapping):
-                raise IncrementalThreadError("snapshot record must be a mapping")
-            _required_fields(encoded_record, record_fields, "record")
+            encoded_record = _required_plain_object(
+                encoded_record,
+                record_fields,
+                "record",
+            )
             key = _validated_message_key(encoded_record["message_key"])
             if key in seen_keys:
                 raise IncrementalThreadError(f"duplicate message_key in snapshot: {key}")
             seen_keys.add(key)
             encoded_message = encoded_record["message"]
-            if not isinstance(encoded_message, Mapping):
-                raise IncrementalThreadError("snapshot message must be a mapping")
-            _required_fields(encoded_message, message_fields, "message")
+            encoded_message = _required_plain_object(
+                encoded_message,
+                message_fields,
+                "message",
+            )
             in_reply_to = encoded_message["in_reply_to"]
             references = encoded_message["references"]
             if not isinstance(in_reply_to, list) or not all(

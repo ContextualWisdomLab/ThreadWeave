@@ -194,8 +194,7 @@ def test_restore_reports_excessive_json_nesting_as_a_domain_error():
             "group_by_subject": False,
             "sort_by_sent_date": False,
         },
-        "records": [],
-        "unexpected": nested,
+        "records": nested,
     }
 
     with pytest.raises(IncrementalThreadError, match="JSON-safe"):
@@ -358,6 +357,18 @@ def test_plain_json_guard_rejects_executable_key_and_scalar_subclasses():
             {hostile_key: "value", "schema_version": 1}
         )
 
+    hostile_snapshot = {
+        "schema_version": 1,
+        "version": 0,
+        "options": {
+            "group_by_subject": False,
+            "sort_by_sent_date": False,
+        },
+        _HostileString("records"): [],
+    }
+    with pytest.raises(IncrementalThreadError, match="plain strings"):
+        IncrementalThreadIndex.restore(hostile_snapshot)
+
     with pytest.raises(IncrementalThreadError, match="scalar values"):
         incremental_module._require_plain_json_containers(
             {"value": _HostileString("hostile")}
@@ -368,8 +379,17 @@ def test_plain_container_guard_rejects_cycles_and_reused_containers():
     """JSON snapshots are trees: cycles and shared container identities fail closed."""
     mapping_cycle: dict[str, object] = {}
     mapping_cycle["self"] = mapping_cycle
+    mapping_snapshot = {
+        "schema_version": 1,
+        "version": 0,
+        "options": {
+            "group_by_subject": False,
+            "sort_by_sent_date": False,
+        },
+        "records": [mapping_cycle],
+    }
     with pytest.raises(IncrementalThreadError, match="cyclic"):
-        IncrementalThreadIndex.restore(mapping_cycle)
+        IncrementalThreadIndex.restore(mapping_snapshot)
 
     list_cycle: list[object] = []
     list_cycle.append(list_cycle)
@@ -457,3 +477,81 @@ def test_snapshot_size_validation_stops_at_the_utf8_limit(monkeypatch):
     with pytest.raises(IncrementalThreadError, match="max_snapshot_bytes"):
         incremental_module._bounded_snapshot_json_size({}, 3)
     assert later_chunks_requested == []
+
+
+def test_restore_checks_record_limit_before_nested_record_values():
+    """The record-count limit rejects an oversized list before nested traversal."""
+    snapshot = {
+        "schema_version": 1,
+        "version": 0,
+        "options": {
+            "group_by_subject": False,
+            "sort_by_sent_date": False,
+        },
+        "records": [object(), object()],
+    }
+
+    with pytest.raises(IncrementalThreadError, match="max_snapshot_records"):
+        IncrementalThreadIndex.restore(
+            snapshot,
+            max_snapshot_records=1,
+            max_snapshot_bytes=10_000,
+        )
+
+
+def test_restore_checks_root_fields_before_untrusted_extra_values():
+    """Unknown root fields fail before their nested values are traversed."""
+    snapshot = {
+        "schema_version": 1,
+        "version": 0,
+        "options": {
+            "group_by_subject": False,
+            "sort_by_sent_date": False,
+        },
+        "records": [],
+        "unexpected": [object()],
+    }
+
+    with pytest.raises(IncrementalThreadError, match="snapshot fields"):
+        IncrementalThreadIndex.restore(snapshot)
+
+    same_size_wrong_fields = {
+        "schema_version": 1,
+        "version": 0,
+        "options": {
+            "group_by_subject": False,
+            "sort_by_sent_date": False,
+        },
+        "unexpected": None,
+    }
+    with pytest.raises(IncrementalThreadError, match="snapshot fields"):
+        IncrementalThreadIndex.restore(same_size_wrong_fields)
+
+
+def test_restore_bounds_plain_container_scan_by_snapshot_byte_limit(monkeypatch):
+    """A small byte limit stops structural traversal before JSON encoding."""
+
+    class _ForbiddenEncoder:
+        """Expose an attempt to encode after the structural limit is exceeded."""
+
+        def __init__(self, **_options: object) -> None:
+            """Fail because bounded validation must reject before encoding."""
+            raise AssertionError("JSON encoder should not be constructed")
+
+    monkeypatch.setattr(incremental_module.json, "JSONEncoder", _ForbiddenEncoder)
+    snapshot = {
+        "schema_version": 1,
+        "version": 0,
+        "options": {
+            "group_by_subject": False,
+            "sort_by_sent_date": False,
+        },
+        "records": [None] * 100,
+    }
+
+    with pytest.raises(IncrementalThreadError, match="max_snapshot_bytes"):
+        IncrementalThreadIndex.restore(
+            snapshot,
+            max_snapshot_records=200,
+            max_snapshot_bytes=10,
+        )

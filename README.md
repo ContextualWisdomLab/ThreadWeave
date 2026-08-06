@@ -223,7 +223,8 @@ remain caller-owned references. Internal sent-date tie-break positions never bec
 public IMAP sequence numbers. Versioned snapshots omit arbitrary payloads, reject
 unknown, malformed, cyclic, aliased, or oversized input, and count UTF-8
 code-point width to stop at the configured byte limit without encoding a second
-full bytes copy. See
+full bytes copy. Restore checks the fixed root schema and record-count bound before
+nested traversal, then caps the structural scan with the same byte limit. See
 [`docs/incremental-threading.md`](docs/incremental-threading.md) for the atomicity,
 identity, snapshot, complexity, and RFC boundaries.
 

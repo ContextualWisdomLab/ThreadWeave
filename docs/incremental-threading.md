@@ -210,7 +210,11 @@ active-path and seen-object guard. This prevents a compact Python DAG from expan
 exponentially during encoding. The configured UTF-8 byte limit is counted from
 incremental encoder chunks with allocation-free code-point width accounting. The
 check aborts without calling ``str.encode`` on a complete chunk or materializing a
-second complete JSON string or byte array.
+second complete JSON string or byte array. Restore also preflights the exact
+root/options schema and the record-count limit before inspecting nested values. The
+plain-container walk stops when its visited-value count exceeds the configured byte
+limit; every JSON value requires at least one encoded byte, so that condition proves
+the snapshot is oversized before the JSON encoder is constructed.
 
 ## Correctness and operational boundaries
 

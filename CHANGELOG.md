@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Preflight incremental snapshot root fields and record counts before nested
+  traversal, and cap plain-container validation by the configured byte limit so
+  oversized hostile trees fail before JSON encoder construction.
 - Bound incremental snapshot size checks to streaming UTF-8 code-point
   accounting without encoding each JSON chunk into a second bytes object, and
   reject reused container identities so compact Python object graphs cannot
