@@ -1,4 +1,4 @@
-name: Diagnose hourly product workflow
+name: Diagnose repository workflows
 
 on:
   push:
@@ -34,11 +34,11 @@ jobs:
             "$archive" | sha256sum -c -
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
 
-      - name: Diagnose the hourly product-development workflow
+      - name: Diagnose every repository workflow
         shell: bash
         run: |
           set -o pipefail
           "${RUNNER_TEMP}/actionlint" \
             -color=false \
-            .github/workflows/hourly-product-development.yml \
+            .github/workflows/*.yml \
             2>&1 | tee "${RUNNER_TEMP}/actionlint-output.txt"
