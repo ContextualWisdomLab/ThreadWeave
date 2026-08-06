@@ -302,11 +302,23 @@ class _HostileList(list):
 
 
 class _HostileString(str):
-    """String subclass whose comparison must not run during sorted encoding."""
+    """String subclass whose comparisons must not run during sorted encoding."""
 
     def __lt__(self, _other: object) -> bool:
-        """Raise if JSON key sorting reaches attacker-controlled comparison."""
-        raise RuntimeError("hostile string comparison")
+        """Reject less-than comparison if sorted encoding reaches this key."""
+        raise TypeError("hostile string comparison")
+
+    def __le__(self, _other: object) -> bool:
+        """Reject less-than-or-equal comparison if encoding reaches this key."""
+        raise TypeError("hostile string comparison")
+
+    def __gt__(self, _other: object) -> bool:
+        """Reject greater-than comparison if sorted encoding reaches this key."""
+        raise TypeError("hostile string comparison")
+
+    def __ge__(self, _other: object) -> bool:
+        """Reject greater-than-or-equal comparison if encoding reaches this key."""
+        raise TypeError("hostile string comparison")
 
 
 def test_restore_rejects_container_subclasses_before_they_execute():
