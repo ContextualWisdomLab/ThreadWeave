@@ -26,7 +26,7 @@ jobs:
           ref: feature/incremental-thread-index
           fetch-depth: 1
 
-      - name: Repair and validate the patch
+      - name: Recalculate every unified-diff hunk count and validate the patch
         shell: bash
         run: |
           set -euo pipefail
@@ -35,22 +35,64 @@ jobs:
           test "$(git hash-object .github/workflows/apply-pr20-bounded-state-overlays.yml)" = \
             '0d1eb08d4425db241b1de8704134f261f418d5c7'
           python - <<'PYCODE'
+          from __future__ import annotations
+
+          import re
           from pathlib import Path
 
-          patch_path = Path('tools/pr20-bounded-state-overlays.patch')
-          patch = patch_path.read_text(encoding='utf-8')
-          old = '@@ -1094,64 +1197,103 @@ class IncrementalThreadIndex:'
-          new = '@@ -1094,64 +1197,87 @@ class IncrementalThreadIndex:'
-          if patch.count(old) != 1:
-              raise SystemExit('unexpected bounded-overlay patch header state')
-          patch_path.write_text(patch.replace(old, new), encoding='utf-8')
+          patch_path = Path("tools/pr20-bounded-state-overlays.patch")
+          lines = patch_path.read_text(encoding="utf-8").splitlines(keepends=True)
+          header_pattern = re.compile(
+              r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*?)(\n)?$"
+          )
+          repaired: list[str] = []
+          index = 0
+          repaired_hunks = 0
+          while index < len(lines):
+              line = lines[index]
+              match = header_pattern.match(line)
+              if match is None:
+                  repaired.append(line)
+                  index += 1
+                  continue
 
-          apply_path = Path('.github/workflows/apply-pr20-bounded-state-overlays.yml')
-          workflow = apply_path.read_text(encoding='utf-8')
-          marker = '# corrected-patch-trigger-v1\n'
+              body_start = index + 1
+              body_end = body_start
+              while body_end < len(lines):
+                  candidate = lines[body_end]
+                  if candidate.startswith("@@ ") or candidate.startswith("diff --git "):
+                      break
+                  body_end += 1
+
+              body = lines[body_start:body_end]
+              old_count = sum(
+                  1 for body_line in body if body_line.startswith((" ", "-"))
+              )
+              new_count = sum(
+                  1 for body_line in body if body_line.startswith((" ", "+"))
+              )
+              suffix = match.group(3)
+              newline = match.group(4) or ""
+              repaired.append(
+                  f"@@ -{match.group(1)},{old_count} "
+                  f"+{match.group(2)},{new_count} @@{suffix}{newline}"
+              )
+              repaired.extend(body)
+              repaired_hunks += 1
+              index = body_end
+
+          if repaired_hunks < 10:
+              raise SystemExit(f"unexpected hunk count: {repaired_hunks}")
+          patch_path.write_text("".join(repaired), encoding="utf-8")
+
+          apply_path = Path(
+              ".github/workflows/apply-pr20-bounded-state-overlays.yml"
+          )
+          workflow = apply_path.read_text(encoding="utf-8")
+          marker = "# corrected-patch-trigger-v2\n"
           if marker in workflow:
-              raise SystemExit('existing apply workflow already contains repair marker')
-          apply_path.write_text(workflow + '\n' + marker, encoding='utf-8')
+              raise SystemExit("existing apply workflow already contains repair marker")
+          apply_path.write_text(workflow + "\n" + marker, encoding="utf-8")
           PYCODE
           git apply --check tools/pr20-bounded-state-overlays.patch
           rm .github/workflows/repair-pr20-bounded-patch.yml
