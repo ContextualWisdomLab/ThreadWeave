@@ -98,8 +98,8 @@ jobs:
 
           IncrementalThreadIndex.restore(
               {
-                  HostileString("unexpected"): 1,
                   "schema_version": 1,
+                  HostileString("unexpected"): 1,
               }
           )
           PY
