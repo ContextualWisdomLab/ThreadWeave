@@ -34,7 +34,7 @@ jobs:
             "$archive" | sha256sum -c -
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
 
-      - name: Apply the known YAML-indentation correction only in the diagnostic workspace
+      - name: Apply known corrections only in the diagnostic workspace
         shell: bash
         run: |
           set -euo pipefail
@@ -43,14 +43,23 @@ jobs:
 
           path = Path('.github/workflows/hourly-product-development.yml')
           text = path.read_text(encoding='utf-8')
-          old = "          printf 'threadweave @ file://%s \\\n    --hash=sha256:%s\\n' \\\n"
-          new = "          printf 'threadweave @ file://%s \\\n            --hash=sha256:%s\\n' \\\n"
-          if text.count(old) != 1:
+          indentation_old = "          printf 'threadweave @ file://%s \\\n    --hash=sha256:%s\\n' \\\n"
+          indentation_new = "          printf 'threadweave @ file://%s \\\n            --hash=sha256:%s\\n' \\\n"
+          if text.count(indentation_old) != 1:
               raise SystemExit('unexpected hourly workflow indentation state')
-          path.write_text(text.replace(old, new), encoding='utf-8')
+          text = text.replace(indentation_old, indentation_new)
+
+          shellcheck_old = "            sudo -u '#65532' -g '#65532' env -i \\\n"
+          shellcheck_new = (
+              "            # shellcheck disable=SC2016 -- inner bash expands positional parameters.\n"
+              "            sudo -u '#65532' -g '#65532' env -i \\\n"
+          )
+          if text.count(shellcheck_old) != 1:
+              raise SystemExit('unexpected nested-shell state')
+          path.write_text(text.replace(shellcheck_old, shellcheck_new), encoding='utf-8')
           PY
 
-      - name: Diagnose every repository workflow after the known correction
+      - name: Diagnose every repository workflow after known corrections
         shell: bash
         run: |
           set -o pipefail
