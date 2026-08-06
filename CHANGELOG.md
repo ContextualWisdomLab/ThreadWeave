@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Record retained and transient traced allocation for each isolated incremental
+  benchmark delta so scheduled 100,000-message evidence detects mailbox-wide
+  copying regressions alongside wall time, affected-message count, and peak RSS.
 - Apply default-mode incremental deltas through bounded overlay mappings and
   touched reverse indexes instead of cloning or scanning every mailbox state map;
   unchanged records, positions, components, and RFC 8474 identity namespaces stay

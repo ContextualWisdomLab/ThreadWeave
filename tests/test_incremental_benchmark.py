@@ -32,6 +32,8 @@ def test_small_benchmark_proves_projection_parity_and_reports_resources():
     )
     assert result["incremental"]["affected_message_count"] == 21
     assert result["incremental"]["delta_apply_seconds"] >= 0
+    assert result["incremental"]["delta_retained_bytes"] >= 0
+    assert result["incremental"]["delta_transient_peak_bytes"] >= 0
     assert result["incremental"]["peak_rss_bytes"] > 0
     assert result["full_rebuild"]["full_rebuild_seconds"] >= 0
     assert result["full_rebuild"]["peak_rss_bytes"] > 0

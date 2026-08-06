@@ -232,8 +232,9 @@ optimistic conflicts, hostile snapshots, and payload omission.
 
 `benchmarks/incremental_mailbox.py` runs incremental and full-rebuild scenarios in
 separate processes, requires identical projection hashes, and reports wall time, peak
-RSS, affected-message count, and full-view materialization time. The scheduled/manual
-workflow defaults to 100,000 existing messages and stores the JSON evidence for 90
+RSS, affected-message count, delta retained/transient traced bytes, and full-view
+materialization time. The scheduled/manual workflow defaults to 100,000 existing
+messages and stores the JSON evidence for 90
 days. The update contract promises that unrelated records are not passed to the batch
 threader; full-view materialization remains proportional to the number of roots and is
 therefore reported separately from delta application.

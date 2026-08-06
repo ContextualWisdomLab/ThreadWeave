@@ -276,7 +276,8 @@ identity, snapshot, complexity, and RFC boundaries.
   indefinitely.
 - `benchmarks/incremental_mailbox.py` compares isolated incremental and full
   rebuild processes at 100,000 messages, verifies an identical projection digest,
-  and records affected-message count, wall time, and peak RSS as JSON evidence.
+  and records affected-message count, wall time, delta retained/transient traced
+bytes, and peak RSS as JSON evidence.
 
 ## Reproducible CI supply chain
 

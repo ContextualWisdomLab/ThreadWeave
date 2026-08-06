@@ -9,11 +9,13 @@ message forest between processes.
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import json
 import resource
 import subprocess
 import sys
+import tracemalloc
 from collections.abc import Iterable
 from time import perf_counter
 
@@ -108,11 +110,16 @@ def _incremental_worker(message_count: int, thread_size: int) -> dict[str, objec
     initial_seconds = perf_counter() - started
 
     bridge = _bridge_record(thread_size)
+    gc.collect()
+    tracemalloc.start()
+    baseline_current, _ = tracemalloc.get_traced_memory()
     started = perf_counter()
     delta = index.apply(
         MailboxChangeSet(expected_version=1, additions=(bridge,))
     )
     delta_seconds = perf_counter() - started
+    current_bytes, peak_bytes = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
 
     started = perf_counter()
     projections = tuple(
@@ -126,6 +133,8 @@ def _incremental_worker(message_count: int, thread_size: int) -> dict[str, objec
         "affected_message_count": len(delta.affected_message_keys),
         "initial_build_seconds": initial_seconds,
         "delta_apply_seconds": delta_seconds,
+        "delta_retained_bytes": current_bytes - baseline_current,
+        "delta_transient_peak_bytes": peak_bytes - baseline_current,
         "materialize_seconds": materialize_seconds,
         "peak_rss_bytes": _peak_rss_bytes(),
         "projection_sha256": _projection_digest(projections),

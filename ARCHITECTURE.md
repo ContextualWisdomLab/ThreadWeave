@@ -74,8 +74,9 @@ sequence numbers or UIDs.
 The deterministic benchmark runs incremental and full-rebuild workers in separate
 processes. It compares projection SHA-256 values and records initial-build time,
 delta-application time, full-view materialization time, full-rebuild time, affected
-message count, root count, and peak RSS. Scheduled evidence defaults to 100,000
-existing messages. Focused performance contracts additionally reject default-mode
+message count, root count, delta retained/transient traced bytes, and peak RSS.
+Scheduled evidence defaults to 100,000 existing messages. Focused performance
+contracts additionally reject default-mode
 small-delta implementations that iterate or replace unrelated state maps.
 
 ## Integration policy
