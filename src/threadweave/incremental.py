@@ -844,6 +844,36 @@ def _require_plain_json_containers(value: object) -> None:
             )
 
 
+def _bounded_utf8_size(value: str, maximum_bytes: int) -> int:
+    """Count UTF-8 bytes up to a limit without allocating an encoded copy."""
+    if str.isascii(value):
+        return str.__len__(value)
+
+    encoded_bytes = 0
+    for index in range(str.__len__(value)):
+        code_point = ord(str.__getitem__(value, index))
+        if code_point <= 0x7F:
+            width = 1
+        elif code_point <= 0x7FF:
+            width = 2
+        elif 0xD800 <= code_point <= 0xDFFF:
+            raise UnicodeEncodeError(
+                "utf-8",
+                value,
+                index,
+                index + 1,
+                "surrogates not allowed",
+            )
+        elif code_point <= 0xFFFF:
+            width = 3
+        else:
+            width = 4
+        encoded_bytes += width
+        if encoded_bytes > maximum_bytes:
+            break
+    return encoded_bytes
+
+
 def _bounded_snapshot_json_size(value: object, maximum_bytes: int) -> int:
     """Return canonical UTF-8 size while stopping at the configured byte limit."""
     encoder = json.JSONEncoder(
@@ -855,7 +885,10 @@ def _bounded_snapshot_json_size(value: object, maximum_bytes: int) -> int:
     encoded_bytes = 0
     try:
         for chunk in encoder.iterencode(value):
-            encoded_bytes += len(chunk.encode("utf-8"))
+            encoded_bytes += _bounded_utf8_size(
+                chunk,
+                maximum_bytes - encoded_bytes,
+            )
             if encoded_bytes > maximum_bytes:
                 raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
     except IncrementalThreadError:

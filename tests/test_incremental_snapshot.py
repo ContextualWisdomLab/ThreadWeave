@@ -407,6 +407,35 @@ def test_plain_container_guard_rejects_cycles_and_reused_containers():
         IncrementalThreadIndex.restore(hostile_snapshot)
 
 
+def test_utf8_size_counting_avoids_chunk_encoding(monkeypatch):
+    """Large JSON chunks are counted without allocating an encoded bytes copy."""
+
+    class _NoEncodeString(str):
+        """Raise if the size checker calls ``str.encode`` on an encoder chunk."""
+
+        def encode(
+            self,
+            encoding: str = "utf-8",
+            errors: str = "strict",
+        ) -> bytes:
+            """Expose accidental full-chunk byte allocation as a test failure."""
+            raise AssertionError((encoding, errors))
+
+    class _SingleChunkEncoder:
+        """Yield one non-ASCII JSON chunk whose ``encode`` method is forbidden."""
+
+        def __init__(self, **_options: object) -> None:
+            """Accept the production encoder configuration."""
+
+        def iterencode(self, _value: object):
+            """Yield one representative built JSON string chunk."""
+            yield _NoEncodeString('"aé€😀"')
+
+    monkeypatch.setattr(incremental_module.json, "JSONEncoder", _SingleChunkEncoder)
+
+    assert incremental_module._bounded_snapshot_json_size({}, 100) == 12
+
+
 def test_snapshot_size_validation_stops_at_the_utf8_limit(monkeypatch):
     """Byte-limit enforcement stops the incremental encoder before later chunks."""
     later_chunks_requested: list[bool] = []

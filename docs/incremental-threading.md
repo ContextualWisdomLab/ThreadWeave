@@ -208,8 +208,9 @@ objects, and scalar values rather than an identity-bearing object graph. ThreadW
 therefore rejects cyclic or reused built-in container identities with an iterative
 active-path and seen-object guard. This prevents a compact Python DAG from expanding
 exponentially during encoding. The configured UTF-8 byte limit is counted from
-incremental encoder chunks and aborts without materializing a second complete JSON
-string or byte array.
+incremental encoder chunks with allocation-free code-point width accounting. The
+check aborts without calling ``str.encode`` on a complete chunk or materializing a
+second complete JSON string or byte array.
 
 ## Correctness and operational boundaries
 

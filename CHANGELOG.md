@@ -6,9 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
-- Bound incremental snapshot size checks to streaming UTF-8 encoding and reject
-  reused container identities so compact Python object graphs cannot trigger
-  exponential JSON expansion or a second full serialized copy in memory.
+- Bound incremental snapshot size checks to streaming UTF-8 code-point
+  accounting without encoding each JSON chunk into a second bytes object, and
+  reject reused container identities so compact Python object graphs cannot
+  trigger exponential JSON expansion.
 - Reject cyclic built-in dictionaries and lists at the incremental snapshot
   restore boundary without recursion or unbounded traversal.
 - Reject container and scalar subclasses plus non-plain-string object keys at
