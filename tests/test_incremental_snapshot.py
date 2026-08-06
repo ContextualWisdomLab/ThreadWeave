@@ -301,6 +301,14 @@ class _HostileList(list):
         raise RuntimeError("hostile list iteration")
 
 
+class _HostileString(str):
+    """String subclass whose comparison must not run during sorted encoding."""
+
+    def __lt__(self, _other: object) -> bool:
+        """Raise if JSON key sorting reaches attacker-controlled comparison."""
+        raise RuntimeError("hostile string comparison")
+
+
 def test_restore_rejects_container_subclasses_before_they_execute():
     """Only plain JSON containers may enter the untrusted snapshot decoder."""
     root = _HostileDictionary(
@@ -330,8 +338,22 @@ def test_restore_rejects_container_subclasses_before_they_execute():
         IncrementalThreadIndex.restore(nested)
 
 
-def test_plain_container_guard_rejects_cycles_and_allows_shared_values():
-    """The iterative guard distinguishes cycles from shared acyclic values."""
+def test_plain_json_guard_rejects_executable_key_and_scalar_subclasses():
+    """Sorted JSON encoding cannot invoke attacker-controlled scalar methods."""
+    hostile_key = _HostileString("unexpected")
+    with pytest.raises(IncrementalThreadError, match="plain strings"):
+        incremental_module._require_plain_json_containers(
+            {hostile_key: "value", "schema_version": 1}
+        )
+
+    with pytest.raises(IncrementalThreadError, match="scalar values"):
+        incremental_module._require_plain_json_containers(
+            {"value": _HostileString("hostile")}
+        )
+
+
+def test_plain_container_guard_rejects_cycles_and_reused_containers():
+    """JSON snapshots are trees: cycles and shared container identities fail closed."""
     mapping_cycle: dict[str, object] = {}
     mapping_cycle["self"] = mapping_cycle
     with pytest.raises(IncrementalThreadError, match="cyclic"):
@@ -352,6 +374,45 @@ def test_plain_container_guard_rejects_cycles_and_allows_shared_values():
         IncrementalThreadIndex.restore(nested_cycle)
 
     shared: list[object] = [{"value": 1}]
-    incremental_module._require_plain_json_containers(
-        {"first": shared, "second": shared}
-    )
+    with pytest.raises(IncrementalThreadError, match="reused"):
+        incremental_module._require_plain_json_containers(
+            {"first": shared, "second": shared}
+        )
+
+    compact_graph: object = []
+    for _ in range(28):
+        compact_graph = [compact_graph, compact_graph]
+    hostile_snapshot = {
+        "schema_version": 1,
+        "version": 0,
+        "options": {
+            "group_by_subject": False,
+            "sort_by_sent_date": False,
+        },
+        "records": compact_graph,
+    }
+    with pytest.raises(IncrementalThreadError, match="reused"):
+        IncrementalThreadIndex.restore(hostile_snapshot)
+
+
+def test_snapshot_size_validation_stops_at_the_utf8_limit(monkeypatch):
+    """Byte-limit enforcement stops the incremental encoder before later chunks."""
+    later_chunks_requested: list[bool] = []
+
+    class _ChunkedEncoder:
+        """Yield one oversized UTF-8 chunk, then fail if iteration continues."""
+
+        def __init__(self, **_options: object) -> None:
+            """Accept the production encoder options used by the helper."""
+
+        def iterencode(self, _value: object):
+            """Yield one four-byte chunk and record any forbidden second request."""
+            yield '"é"'
+            later_chunks_requested.append(True)
+            raise AssertionError("encoder continued after the configured byte limit")
+
+    monkeypatch.setattr(incremental_module.json, "JSONEncoder", _ChunkedEncoder)
+
+    with pytest.raises(IncrementalThreadError, match="max_snapshot_bytes"):
+        incremental_module._bounded_snapshot_json_size({}, 3)
+    assert later_chunks_requested == []

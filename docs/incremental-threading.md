@@ -200,11 +200,16 @@ or ISO-8601 datetime representation. Schema versions must be exact non-boolean
 integers. Restore rejects unknown versions, extra or missing fields, duplicate
 keys, malformed types, invalid external IDs, hostile nesting, unencodable Unicode,
 and configured record or byte limits through `IncrementalThreadError` before
-publishing state. Only built-in JSON dictionaries and lists are accepted; container
-subclasses are rejected before serialization so hostile ``items`` or iterator
-overrides cannot execute inside the restore boundary. Cyclic built-in containers
-are detected with an iterative active-path guard and fail without recursion or
-unbounded traversal; repeated acyclic references remain valid JSON input.
+publishing state. Only built-in JSON dictionaries, lists, scalar values, and plain
+string object keys are accepted. Container, key, and scalar subclasses are rejected
+before serialization so hostile iteration, comparison, or conversion methods cannot
+execute inside the restore boundary. RFC 8259 represents JSON as nested arrays,
+objects, and scalar values rather than an identity-bearing object graph. ThreadWeave
+therefore rejects cyclic or reused built-in container identities with an iterative
+active-path and seen-object guard. This prevents a compact Python DAG from expanding
+exponentially during encoding. The configured UTF-8 byte limit is counted from
+incremental encoder chunks and aborts without materializing a second complete JSON
+string or byte array.
 
 ## Correctness and operational boundaries
 
@@ -223,6 +228,9 @@ threader; full-view materialization remains proportional to the number of roots 
 therefore reported separately from delta application.
 
 ## References
+
+Bray, T. (Ed.). (2017). *The JavaScript Object Notation (JSON) data interchange
+format* (RFC 8259). RFC Editor. https://doi.org/10.17487/RFC8259
 
 Gondwana, B. (2018). *IMAP extension for object identifiers* (RFC 8474). RFC
 Editor. https://doi.org/10.17487/RFC8474

@@ -799,14 +799,17 @@ def _decoded_date(value: object, name: str) -> str | datetime | None:
 
 
 def _require_plain_json_containers(value: object) -> None:
-    """Reject executable container subclasses before JSON serialization.
+    """Reject executable, cyclic, or aliased containers before serialization.
 
-    JSON-decoded state consists of built-in dictionaries, lists, and scalar
-    values.  Requiring exact container types prevents untrusted ``items`` or
-    iterator overrides from executing inside the restore boundary.
+    JSON decoding produces a tree of built-in dictionaries, lists, string
+    keys, and scalar values. Requiring exact runtime types prevents attacker-
+    controlled iteration, comparison, or scalar subclasses from executing,
+    while rejecting repeated container identities prevents a compact Python
+    object graph from expanding exponentially during JSON encoding.
     """
     pending = [(value, False)]
     active_containers: set[int] = set()
+    seen_containers: set[int] = set()
     while pending:
         current, exiting = pending.pop()
         if type(current) in {dict, list}:
@@ -818,11 +821,22 @@ def _require_plain_json_containers(value: object) -> None:
                 raise IncrementalThreadError(
                     "snapshot must not contain cyclic JSON containers"
                 )
+            if identity in seen_containers:
+                raise IncrementalThreadError(
+                    "snapshot must not contain reused JSON container objects"
+                )
+            if type(current) is dict and any(
+                type(key) is not str for key in dict.keys(current)
+            ):
+                raise IncrementalThreadError(
+                    "snapshot object keys must be plain strings"
+                )
+            seen_containers.add(identity)
             active_containers.add(identity)
             pending.append((current, True))
             children = dict.values(current) if type(current) is dict else current
             pending.extend((child, False) for child in children)
-        elif current is None or isinstance(current, (str, int, float, bool)):
+        elif current is None or type(current) in {str, int, float, bool}:
             continue
         else:
             raise IncrementalThreadError(
@@ -830,21 +844,27 @@ def _require_plain_json_containers(value: object) -> None:
             )
 
 
-def _snapshot_json_bytes(value: object) -> bytes:
-    """Serialize a snapshot canonically or raise a bounded domain error."""
+def _bounded_snapshot_json_size(value: object, maximum_bytes: int) -> int:
+    """Return canonical UTF-8 size while stopping at the configured byte limit."""
+    encoder = json.JSONEncoder(
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    encoded_bytes = 0
     try:
-        encoded = json.dumps(
-            value,
-            ensure_ascii=False,
-            allow_nan=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        return encoded.encode("utf-8")
+        for chunk in encoder.iterencode(value):
+            encoded_bytes += len(chunk.encode("utf-8"))
+            if encoded_bytes > maximum_bytes:
+                raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
+    except IncrementalThreadError:
+        raise
     except (RecursionError, TypeError, UnicodeError, ValueError) as error:
         raise IncrementalThreadError(
             "snapshot must contain only JSON-safe values"
         ) from error
+    return encoded_bytes
 
 
 def _required_fields(value: Mapping[str, object], expected: set[str], name: str) -> None:
@@ -1224,8 +1244,7 @@ class IncrementalThreadIndex:
             },
             "records": records,
         }
-        if len(_snapshot_json_bytes(snapshot)) > self._max_snapshot_bytes:
-            raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
+        _bounded_snapshot_json_size(snapshot, self._max_snapshot_bytes)
         return snapshot
 
     @classmethod
@@ -1248,8 +1267,7 @@ class IncrementalThreadIndex:
         if not isinstance(snapshot, Mapping):
             raise IncrementalThreadError("snapshot must be a mapping")
         _require_plain_json_containers(snapshot)
-        if len(_snapshot_json_bytes(snapshot)) > max_bytes:
-            raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
+        _bounded_snapshot_json_size(snapshot, max_bytes)
         _required_fields(
             snapshot,
             {"schema_version", "version", "options", "records"},

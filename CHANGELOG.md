@@ -6,10 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Bound incremental snapshot size checks to streaming UTF-8 encoding and reject
+  reused container identities so compact Python object graphs cannot trigger
+  exponential JSON expansion or a second full serialized copy in memory.
 - Reject cyclic built-in dictionaries and lists at the incremental snapshot
   restore boundary without recursion or unbounded traversal.
-- Reject dictionary and list subclasses at the incremental snapshot restore
-  boundary before JSON encoding can invoke untrusted iterator overrides.
+- Reject container and scalar subclasses plus non-plain-string object keys at
+  the incremental snapshot restore boundary before sorted JSON encoding can
+  invoke attacker-controlled iteration or comparison methods.
 - Serialize every read and write on one `IncrementalThreadIndex` with a
   process-local reentrant lock so same-version concurrent writers yield one
   commit and one explicit conflict, while readers observe only committed state.

@@ -220,8 +220,10 @@ full-rebuild parity is the correctness oracle. Structural merges and splits are
 reported explicitly. `roots` returns a defensive structural copy, so callers may
 traverse or edit that graph without corrupting reusable index state; payload objects
 remain caller-owned references. Internal sent-date tie-break positions never become
-public IMAP sequence numbers. Versioned snapshots omit arbitrary payloads and reject
-unknown, malformed, or oversized input. See
+public IMAP sequence numbers. Versioned snapshots omit arbitrary payloads, reject
+unknown, malformed, cyclic, aliased, or oversized input, and stop UTF-8 size
+validation at the configured byte limit without building a second full serialized
+copy. See
 [`docs/incremental-threading.md`](docs/incremental-threading.md) for the atomicity,
 identity, snapshot, complexity, and RFC boundaries.
 
