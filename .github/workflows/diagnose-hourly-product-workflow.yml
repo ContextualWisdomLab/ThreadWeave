@@ -51,7 +51,7 @@ jobs:
 
           shellcheck_old = "            if timeout --kill-after=30s \"${OPENCODE_RUN_TIMEOUT_SECONDS}s\" \\\n"
           shellcheck_new = (
-              "            # shellcheck disable=SC2016 -- inner bash expands positional parameters.\n"
+              "            # shellcheck disable=SC2016\n"
               "            if timeout --kill-after=30s \"${OPENCODE_RUN_TIMEOUT_SECONDS}s\" \\\n"
           )
           if text.count(shellcheck_old) != 1:
