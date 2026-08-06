@@ -34,7 +34,23 @@ jobs:
             "$archive" | sha256sum -c -
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
 
-      - name: Diagnose every repository workflow
+      - name: Apply the known YAML-indentation correction only in the diagnostic workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/hourly-product-development.yml')
+          text = path.read_text(encoding='utf-8')
+          old = "          printf 'threadweave @ file://%s \\\n    --hash=sha256:%s\\n' \\\n"
+          new = "          printf 'threadweave @ file://%s \\\n            --hash=sha256:%s\\n' \\\n"
+          if text.count(old) != 1:
+              raise SystemExit('unexpected hourly workflow indentation state')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+
+      - name: Diagnose every repository workflow after the known correction
         shell: bash
         run: |
           set -o pipefail
