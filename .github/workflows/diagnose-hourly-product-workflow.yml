@@ -49,10 +49,10 @@ jobs:
               raise SystemExit('unexpected hourly workflow indentation state')
           text = text.replace(indentation_old, indentation_new)
 
-          shellcheck_old = "            sudo -u '#65532' -g '#65532' env -i \\\n"
+          shellcheck_old = "            if timeout --kill-after=30s \"${OPENCODE_RUN_TIMEOUT_SECONDS}s\" \\\n"
           shellcheck_new = (
               "            # shellcheck disable=SC2016 -- inner bash expands positional parameters.\n"
-              "            sudo -u '#65532' -g '#65532' env -i \\\n"
+              "            if timeout --kill-after=30s \"${OPENCODE_RUN_TIMEOUT_SECONDS}s\" \\\n"
           )
           if text.count(shellcheck_old) != 1:
               raise SystemExit('unexpected nested-shell state')
