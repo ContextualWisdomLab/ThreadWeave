@@ -1,0 +1,266 @@
+--- a/src/threadweave/incremental.py
++++ b/src/threadweave/incremental.py
+@@ -799,14 +799,17 @@
+ 
+ 
+ def _require_plain_json_containers(value: object) -> None:
+-    """Reject executable container subclasses before JSON serialization.
+-
+-    JSON-decoded state consists of built-in dictionaries, lists, and scalar
+-    values.  Requiring exact container types prevents untrusted ``items`` or
+-    iterator overrides from executing inside the restore boundary.
++    """Reject executable, cyclic, or aliased containers before serialization.
++
++    JSON decoding produces a tree of built-in dictionaries, lists, string
++    keys, and scalar values. Requiring exact runtime types prevents attacker-
++    controlled iteration, comparison, or scalar subclasses from executing,
++    while rejecting repeated container identities prevents a compact Python
++    object graph from expanding exponentially during JSON encoding.
+     """
+     pending = [(value, False)]
+     active_containers: set[int] = set()
++    seen_containers: set[int] = set()
+     while pending:
+         current, exiting = pending.pop()
+         if type(current) in {dict, list}:
+@@ -818,11 +821,22 @@
+                 raise IncrementalThreadError(
+                     "snapshot must not contain cyclic JSON containers"
+                 )
++            if identity in seen_containers:
++                raise IncrementalThreadError(
++                    "snapshot must not contain reused JSON container objects"
++                )
++            if type(current) is dict and any(
++                type(key) is not str for key in dict.keys(current)
++            ):
++                raise IncrementalThreadError(
++                    "snapshot object keys must be plain strings"
++                )
++            seen_containers.add(identity)
+             active_containers.add(identity)
+             pending.append((current, True))
+             children = dict.values(current) if type(current) is dict else current
+             pending.extend((child, False) for child in children)
+-        elif current is None or isinstance(current, (str, int, float, bool)):
++        elif current is None or type(current) in {str, int, float, bool}:
+             continue
+         else:
+             raise IncrementalThreadError(
+@@ -830,21 +844,27 @@
+             )
+ 
+ 
+-def _snapshot_json_bytes(value: object) -> bytes:
+-    """Serialize a snapshot canonically or raise a bounded domain error."""
++def _bounded_snapshot_json_size(value: object, maximum_bytes: int) -> int:
++    """Return canonical UTF-8 size while stopping at the configured byte limit."""
++    encoder = json.JSONEncoder(
++        ensure_ascii=False,
++        allow_nan=False,
++        sort_keys=True,
++        separators=(",", ":"),
++    )
++    encoded_bytes = 0
+     try:
+-        encoded = json.dumps(
+-            value,
+-            ensure_ascii=False,
+-            allow_nan=False,
+-            sort_keys=True,
+-            separators=(",", ":"),
+-        )
+-        return encoded.encode("utf-8")
++        for chunk in encoder.iterencode(value):
++            encoded_bytes += len(chunk.encode("utf-8"))
++            if encoded_bytes > maximum_bytes:
++                raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
++    except IncrementalThreadError:
++        raise
+     except (RecursionError, TypeError, UnicodeError, ValueError) as error:
+         raise IncrementalThreadError(
+             "snapshot must contain only JSON-safe values"
+         ) from error
++    return encoded_bytes
+ 
+ 
+ def _required_fields(value: Mapping[str, object], expected: set[str], name: str) -> None:
+@@ -1224,8 +1244,7 @@
+             },
+             "records": records,
+         }
+-        if len(_snapshot_json_bytes(snapshot)) > self._max_snapshot_bytes:
+-            raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
++        _bounded_snapshot_json_size(snapshot, self._max_snapshot_bytes)
+         return snapshot
+ 
+     @classmethod
+@@ -1248,8 +1267,7 @@
+         if not isinstance(snapshot, Mapping):
+             raise IncrementalThreadError("snapshot must be a mapping")
+         _require_plain_json_containers(snapshot)
+-        if len(_snapshot_json_bytes(snapshot)) > max_bytes:
+-            raise IncrementalThreadError("snapshot exceeds max_snapshot_bytes")
++        _bounded_snapshot_json_size(snapshot, max_bytes)
+         _required_fields(
+             snapshot,
+             {"schema_version", "version", "options", "records"},
+--- a/tests/test_incremental_snapshot.py
++++ b/tests/test_incremental_snapshot.py
+@@ -301,6 +301,14 @@
+         raise RuntimeError("hostile list iteration")
+ 
+ 
++class _HostileString(str):
++    """String subclass whose comparison must not run during sorted encoding."""
++
++    def __lt__(self, _other: object) -> bool:
++        """Raise if JSON key sorting reaches attacker-controlled comparison."""
++        raise RuntimeError("hostile string comparison")
++
++
+ def test_restore_rejects_container_subclasses_before_they_execute():
+     """Only plain JSON containers may enter the untrusted snapshot decoder."""
+     root = _HostileDictionary(
+@@ -330,8 +338,22 @@
+         IncrementalThreadIndex.restore(nested)
+ 
+ 
+-def test_plain_container_guard_rejects_cycles_and_allows_shared_values():
+-    """The iterative guard distinguishes cycles from shared acyclic values."""
++def test_plain_json_guard_rejects_executable_key_and_scalar_subclasses():
++    """Sorted JSON encoding cannot invoke attacker-controlled scalar methods."""
++    hostile_key = _HostileString("unexpected")
++    with pytest.raises(IncrementalThreadError, match="plain strings"):
++        incremental_module._require_plain_json_containers(
++            {hostile_key: "value", "schema_version": 1}
++        )
++
++    with pytest.raises(IncrementalThreadError, match="scalar values"):
++        incremental_module._require_plain_json_containers(
++            {"value": _HostileString("hostile")}
++        )
++
++
++def test_plain_container_guard_rejects_cycles_and_reused_containers():
++    """JSON snapshots are trees: cycles and shared container identities fail closed."""
+     mapping_cycle: dict[str, object] = {}
+     mapping_cycle["self"] = mapping_cycle
+     with pytest.raises(IncrementalThreadError, match="cyclic"):
+@@ -352,6 +374,45 @@
+         IncrementalThreadIndex.restore(nested_cycle)
+ 
+     shared: list[object] = [{"value": 1}]
+-    incremental_module._require_plain_json_containers(
+-        {"first": shared, "second": shared}
+-    )
++    with pytest.raises(IncrementalThreadError, match="reused"):
++        incremental_module._require_plain_json_containers(
++            {"first": shared, "second": shared}
++        )
++
++    compact_graph: object = []
++    for _ in range(28):
++        compact_graph = [compact_graph, compact_graph]
++    hostile_snapshot = {
++        "schema_version": 1,
++        "version": 0,
++        "options": {
++            "group_by_subject": False,
++            "sort_by_sent_date": False,
++        },
++        "records": compact_graph,
++    }
++    with pytest.raises(IncrementalThreadError, match="reused"):
++        IncrementalThreadIndex.restore(hostile_snapshot)
++
++
++def test_snapshot_size_validation_stops_at_the_utf8_limit(monkeypatch):
++    """Byte-limit enforcement stops the incremental encoder before later chunks."""
++    later_chunks_requested: list[bool] = []
++
++    class _ChunkedEncoder:
++        """Yield one oversized UTF-8 chunk, then fail if iteration continues."""
++
++        def __init__(self, **_options: object) -> None:
++            """Accept the production encoder options used by the helper."""
++
++        def iterencode(self, _value: object):
++            """Yield one four-byte chunk and record any forbidden second request."""
++            yield '"é"'
++            later_chunks_requested.append(True)
++            raise AssertionError("encoder continued after the configured byte limit")
++
++    monkeypatch.setattr(incremental_module.json, "JSONEncoder", _ChunkedEncoder)
++
++    with pytest.raises(IncrementalThreadError, match="max_snapshot_bytes"):
++        incremental_module._bounded_snapshot_json_size({}, 3)
++    assert later_chunks_requested == []
+--- a/docs/incremental-threading.md
++++ b/docs/incremental-threading.md
+@@ -200,11 +200,16 @@
+ integers. Restore rejects unknown versions, extra or missing fields, duplicate
+ keys, malformed types, invalid external IDs, hostile nesting, unencodable Unicode,
+ and configured record or byte limits through `IncrementalThreadError` before
+-publishing state. Only built-in JSON dictionaries and lists are accepted; container
+-subclasses are rejected before serialization so hostile ``items`` or iterator
+-overrides cannot execute inside the restore boundary. Cyclic built-in containers
+-are detected with an iterative active-path guard and fail without recursion or
+-unbounded traversal; repeated acyclic references remain valid JSON input.
++publishing state. Only built-in JSON dictionaries, lists, scalar values, and plain
++string object keys are accepted. Container, key, and scalar subclasses are rejected
++before serialization so hostile iteration, comparison, or conversion methods cannot
++execute inside the restore boundary. RFC 8259 represents JSON as nested arrays,
++objects, and scalar values rather than an identity-bearing object graph. ThreadWeave
++therefore rejects cyclic or reused built-in container identities with an iterative
++active-path and seen-object guard. This prevents a compact Python DAG from expanding
++exponentially during encoding. The configured UTF-8 byte limit is counted from
++incremental encoder chunks and aborts without materializing a second complete JSON
++string or byte array.
+ 
+ ## Correctness and operational boundaries
+ 
+@@ -224,6 +229,9 @@
+ 
+ ## References
+ 
++Bray, T. (Ed.). (2017). *The JavaScript Object Notation (JSON) data interchange
++format* (RFC 8259). RFC Editor. https://doi.org/10.17487/RFC8259
++
+ Gondwana, B. (2018). *IMAP extension for object identifiers* (RFC 8474). RFC
+ Editor. https://doi.org/10.17487/RFC8474
+ 
+--- a/README.md
++++ b/README.md
+@@ -220,8 +220,10 @@
+ reported explicitly. `roots` returns a defensive structural copy, so callers may
+ traverse or edit that graph without corrupting reusable index state; payload objects
+ remain caller-owned references. Internal sent-date tie-break positions never become
+-public IMAP sequence numbers. Versioned snapshots omit arbitrary payloads and reject
+-unknown, malformed, or oversized input. See
++public IMAP sequence numbers. Versioned snapshots omit arbitrary payloads, reject
++unknown, malformed, cyclic, aliased, or oversized input, and stop UTF-8 size
++validation at the configured byte limit without building a second full serialized
++copy. See
+ [`docs/incremental-threading.md`](docs/incremental-threading.md) for the atomicity,
+ identity, snapshot, complexity, and RFC boundaries.
+ 
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,10 +6,14 @@
+ 
+ ## Unreleased
+ 
++- Bound incremental snapshot size checks to streaming UTF-8 encoding and reject
++  reused container identities so compact Python object graphs cannot trigger
++  exponential JSON expansion or a second full serialized copy in memory.
+ - Reject cyclic built-in dictionaries and lists at the incremental snapshot
+   restore boundary without recursion or unbounded traversal.
+-- Reject dictionary and list subclasses at the incremental snapshot restore
+-  boundary before JSON encoding can invoke untrusted iterator overrides.
++- Reject container and scalar subclasses plus non-plain-string object keys at
++  the incremental snapshot restore boundary before sorted JSON encoding can
++  invoke attacker-controlled iteration or comparison methods.
+ - Serialize every read and write on one `IncrementalThreadIndex` with a
+   process-local reentrant lock so same-version concurrent writers yield one
+   commit and one explicit conflict, while readers observe only committed state.
