@@ -141,8 +141,8 @@ jobs:
           wheel_path="$(realpath "$(find dist -maxdepth 1 -name '*.whl' -print -quit)")"
           wheel_sha="$(sha256sum "$wheel_path" | awk '{print $1}')"
           requirements_file="$RUNNER_TEMP/threadweave-wheel.txt"
-          printf 'threadweave @ file://%s \\
-    --hash=sha256:%s\n' \
+          printf 'threadweave @ file://%s \
+            --hash=sha256:%s\n' \
             "$wheel_path" "$wheel_sha" >"$requirements_file"
           python -m pip install \
             --require-hashes \
