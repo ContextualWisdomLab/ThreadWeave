@@ -7,7 +7,7 @@ runtime dependencies.**
 trees. It combines the JWZ container model with RFC 5322 identification fields,
 RFC 2047 encoded-word decoding, RFC 5256 base-subject extraction and optional
 sent-date ordering, RFC 5051 `i;unicode-casemap` comparison, and RFC 5256 IMAP
-`THREAD` response serialization.
+`THREAD` response serialization, and atomic incremental mailbox updates.
 
 It accepts normalized identifiers, raw header strings, or Python standard-library
 `email.message.Message` objects. Malformed historical mail, missing roots,
@@ -167,6 +167,70 @@ source containers are never mutated. Cycles, shared nodes, duplicate numbers,
 missing UIDs, values outside the non-zero unsigned 32-bit range, and unsafe line
 endings fail closed. Both deep chains and nested splits are rendered iteratively.
 
+## Incremental mailbox updates
+
+`IncrementalThreadIndex` applies atomic additions, replacements, and removals
+without re-threading unrelated reference components. Caller-owned message keys
+remain stable across expunge or mailbox sequence-number changes; optional RFC
+8474 `EMAILID` and `THREADID` values are validated and never silently rewritten.
+
+```python
+from threadweave import (
+    IncrementalThreadIndex,
+    IndexedMessage,
+    MailboxChangeSet,
+    Message,
+)
+
+index = IncrementalThreadIndex()
+delta = index.apply(
+    MailboxChangeSet(
+        expected_version=0,
+        additions=(
+            IndexedMessage(
+                "mailbox:101",
+                Message(message_id="root", sequence_number=1, uid=101),
+                email_id="Email_101",
+                thread_id="Thread_7",
+            ),
+            IndexedMessage(
+                "mailbox:102",
+                Message(
+                    message_id="reply",
+                    references=["root"],
+                    sequence_number=2,
+                    uid=102,
+                ),
+                email_id="Email_102",
+                thread_id="Thread_7",
+            ),
+        ),
+    )
+)
+
+assert delta.version == 1
+assert index.projections[0].message_keys == ("mailbox:101", "mailbox:102")
+assert IncrementalThreadIndex.restore(index.snapshot()).projections == (
+    index.projections
+)
+```
+
+Every affected component is recomputed through the canonical batch threader, and
+full-rebuild parity is the correctness oracle. Default-mode transactions stage
+records, positions, connectivity, component ownership, and RFC 8474 identity
+changes through bounded overlays; they do not copy or iterate unrelated mailbox
+state before one validated commit. Structural merges and splits are reported
+explicitly. `roots` returns a defensive structural copy, so callers may
+traverse or edit that graph without corrupting reusable index state; payload objects
+remain caller-owned references. Internal sent-date tie-break positions never become
+public IMAP sequence numbers. Versioned snapshots omit arbitrary payloads, reject
+unknown, malformed, cyclic, aliased, or oversized input, and count UTF-8
+code-point width to stop at the configured byte limit without encoding a second
+full bytes copy. Restore checks the fixed root schema and record-count bound before
+nested traversal, then caps the structural scan with the same byte limit. See
+[`docs/incremental-threading.md`](docs/incremental-threading.md) for the atomicity,
+identity, snapshot, complexity, and RFC boundaries.
+
 ## Public API
 
 | Symbol | Purpose |
@@ -176,6 +240,11 @@ endings fail closed. Both deep chains and nested splits are rendered iteratively
 | `thread_messages(...)` | Build JWZ/RFC 5256 thread roots from any iterable. |
 | `message_from_email(...)` | Convert one stdlib email object. |
 | `thread_email_messages(...)` | Convert and thread stdlib email objects. |
+| `IncrementalThreadIndex` | Apply atomic mailbox deltas and expose batch-equivalent roots. |
+| `IndexedMessage` | Bind one stable caller key and optional RFC 8474 identities to a message. |
+| `MailboxChangeSet` | Describe one optimistic additions/replacements/removals transaction. |
+| `ThreadDelta` | Report affected keys, projection changes, merges, and splits. |
+| `ThreadProjection` | Describe one root with traversal-ordered caller keys and THREADIDs. |
 | `serialize_thread_data(...)` | Render RFC 5256 `thread-data` without response framing. |
 | `serialize_thread_response(...)` | Render one untagged `* THREAD` response. |
 | `ThreadSerializationError` | Report invalid graph or mailbox identifier state. |
@@ -202,8 +271,13 @@ endings fail closed. Both deep chains and nested splits are rendered iteratively
   on Python 3.10, 3.11, 3.12, and 3.13.
 - CI builds wheel and source distributions, verifies `py.typed`, installs the
   wheel outside the source tree, and executes a smoke test.
-- Graph operations and IMAP rendering are iterative and identity-guarded; deep
-  or cyclic malformed input cannot recurse indefinitely.
+- Graph operations, IMAP rendering, and incremental component traversal are
+  iterative and identity-guarded; deep or cyclic malformed input cannot recurse
+  indefinitely.
+- `benchmarks/incremental_mailbox.py` compares isolated incremental and full
+  rebuild processes at 100,000 messages, verifies an identical projection digest,
+  and records affected-message count, wall time, delta retained/transient traced
+  bytes, and peak RSS as JSON evidence.
 
 ## Reproducible CI supply chain
 
@@ -273,12 +347,14 @@ unavailable safe proposal stops the cycle without mutation.
 ## Architecture and standards boundary
 
 The package remains useful both as a standalone dependency and as a module in
-`naruon` or another service. The threading, subject, collation, and date layers
-are transport-neutral. IMAP `THREAD` response serialization is a separate
-presentation layer rather than protocol state embedded in the core model.
+`naruon` or another service. The batch-threading, incremental-index, subject,
+collation, and date layers are transport-neutral. IMAP `THREAD` response
+serialization is a separate presentation layer rather than protocol state
+embedded in the core model.
 
 See [`docs/research`](docs/research/README.md) for JWZ, RFC 5322, RFC 2047,
-RFC 5051, RFC 5256, RFC 6532, RFC 9051, Unicode-version boundaries, and PEP 561.
+RFC 5051, RFC 5256, RFC 6532, RFC 7162, RFC 8474, RFC 8621, RFC 9051,
+Unicode-version boundaries, and PEP 561.
 
 ## License
 
