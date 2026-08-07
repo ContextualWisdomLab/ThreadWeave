@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Restore the hourly NVIDIA NIM/OpenCode product-development workflow's YAML and
+  nested-shell contracts, and lint every GitHub Actions workflow with a pinned,
+  checksum-verified `actionlint` release before ordinary CI may proceed.
+
 ## [0.2.0] - 2026-08-04
 
 - Add iterative RFC 5256 `THREAD` and `UID THREAD` response serialization with
