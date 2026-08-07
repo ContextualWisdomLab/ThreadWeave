@@ -196,3 +196,40 @@ def test_product_task_is_test_first_documented_and_never_self_releases():
     assert "highest-value buyer-visible" in workflow
     assert "Do not stage, commit, push, open a pull request, tag, or publish" in workflow
     assert "PR_MESSAGE.md" in workflow
+
+
+def test_product_workflow_keeps_hash_requirement_inside_the_yaml_block():
+    """The multiline requirement must remain valid YAML and pip input."""
+    workflow = _workflow("hourly-product-development.yml")
+    expected = (
+        "          printf 'threadweave @ file://%s \\\n"
+        "            --hash=sha256:%s\\n' \\\n"
+    )
+
+    assert expected in workflow
+    assert "\n    --hash=sha256:%s\\n' \\\n" not in workflow
+
+
+def test_product_workflow_documents_intentional_nested_shell_expansion():
+    """ShellCheck must not flag positional parameters expanded by the inner shell."""
+    workflow = _workflow("hourly-product-development.yml")
+    expected = (
+        "            # shellcheck disable=SC2016\n"
+        '            if timeout --kill-after=30s "${OPENCODE_RUN_TIMEOUT_SECONDS}s"'
+    )
+
+    assert expected in workflow
+
+
+def test_ci_lints_every_workflow_with_a_pinned_actionlint_release():
+    """A malformed scheduled workflow must fail ordinary pull-request CI."""
+    workflow = _workflow("ci.yml")
+
+    assert 'ACTIONLINT_VERSION: "1.7.12"' in workflow
+    assert (
+        "ACTIONLINT_SHA256: "
+        "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        in workflow
+    )
+    assert "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" in workflow
+    assert '"${RUNNER_TEMP}/actionlint" -color=false .github/workflows/*.yml' in workflow
