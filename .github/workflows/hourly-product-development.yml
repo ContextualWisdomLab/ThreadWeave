@@ -321,6 +321,7 @@ jobs:
 
             sudo chown -R 65532:65532 "$agent_workspace" "$agent_home"
             echo "::group::opencode $model"
+            # shellcheck disable=SC2016
             if timeout --kill-after=30s "${OPENCODE_RUN_TIMEOUT_SECONDS}s" \
               sudo -u '#65532' -g '#65532' env -i \
                 PATH="${agent_venv}/bin:/usr/local/bin:/usr/bin:/bin" \
@@ -518,7 +519,7 @@ jobs:
           wheel_sha="$(sha256sum "$wheel_path" | awk '{print $1}')"
           wheel_requirements="$RUNNER_TEMP/threadweave-wheel.txt"
           printf 'threadweave @ file://%s \
-    --hash=sha256:%s\n' \
+            --hash=sha256:%s\n' \
             "$wheel_path" "$wheel_sha" >"$wheel_requirements"
           python -m pip install \
             --require-hashes \
