@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 WORKFLOW_DIRECTORY = Path(__file__).parents[1] / ".github" / "workflows"
+CENTRAL_MERGE_REVISION = "3f65dbee6672b78802e7d71d49c390f3817bb03b"
 
 
 def _workflow(name: str) -> str:
@@ -12,22 +13,25 @@ def _workflow(name: str) -> str:
 
 
 def test_hourly_pr_maintenance_uses_central_cwl_workflows():
-    """PR review, autofix, branch update, and merge stay centrally governed."""
+    """PR review, branch update, and merge stay centrally governed."""
     workflow = _workflow("hourly-pr-maintenance.yml")
 
     assert 'cron: "11 * * * *"' in workflow
+    assert "pr-review-fix-scheduler.yml" not in workflow
     assert (
         "ContextualWisdomLab/.github/.github/workflows/"
-        "pr-review-fix-scheduler.yml@main"
+        f"pr-review-merge-scheduler.yml@{CENTRAL_MERGE_REVISION}"
     ) in workflow
-    assert (
-        "ContextualWisdomLab/.github/.github/workflows/"
-        "pr-review-merge-scheduler.yml@main"
-    ) in workflow
-    assert 'target_repository: "ContextualWisdomLab/ThreadWeave"' in workflow
-    assert 'retry_hours: "1"' in workflow
+    assert "@main" not in workflow
+    assert 'base_branch: "main"' in workflow
+    assert 'review_dispatch_limit: "1"' in workflow
+    assert 'branch_update_limit: "1"' in workflow
     assert 'merge_mode: "direct_or_auto"' in workflow
-    assert "secrets: inherit" in workflow
+    assert "trigger_reviews: true" in workflow
+    assert "update_branches: true" in workflow
+    assert "enable_auto_merge: true" in workflow
+    assert "secrets: inherit" not in workflow
+    assert "issues: write" not in workflow
 
 
 def test_product_development_brokers_nim_outside_the_model_process():

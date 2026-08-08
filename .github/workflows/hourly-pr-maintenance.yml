@@ -15,34 +15,23 @@ concurrency:
   group: hourly-pr-maintenance-${{ github.repository }}
   cancel-in-progress: false
 
-# Reusable workflows cannot elevate the caller token. Grant the union of the
-# central review-fix and merge-scheduler permissions here; each called workflow
-# narrows them again at its job boundary.
+# The pinned organization-central merge scheduler already performs bounded
+# current-head review dispatch, exact-head check evaluation, branch updates,
+# and policy-compliant merge evaluation. The caller therefore forwards no
+# repository secrets and keeps its default token read-only.
 permissions:
-  actions: write
-  checks: read
-  contents: write
-  id-token: write
-  issues: write
-  pull-requests: write
-  statuses: read
+  contents: read
 
 jobs:
-  review-fix:
-    uses: ContextualWisdomLab/.github/.github/workflows/pr-review-fix-scheduler.yml@main
-    with:
-      base_branch: "main"
-      dry_run: ${{ inputs.dry_run || false }}
-      max_dispatches: "1"
-      max_prs: "20"
-      retry_hours: "1"
-      target_repository: "ContextualWisdomLab/ThreadWeave"
-    secrets: inherit
-
   review-merge:
-    needs: review-fix
-    if: ${{ always() }}
-    uses: ContextualWisdomLab/.github/.github/workflows/pr-review-merge-scheduler.yml@main
+    permissions:
+      actions: write
+      checks: read
+      contents: write
+      id-token: write
+      pull-requests: write
+      statuses: read
+    uses: ContextualWisdomLab/.github/.github/workflows/pr-review-merge-scheduler.yml@3f65dbee6672b78802e7d71d49c390f3817bb03b
     with:
       base_branch: "main"
       branch_update_limit: "1"
@@ -55,4 +44,3 @@ jobs:
       stale_opencode_minutes: "60"
       trigger_reviews: true
       update_branches: true
-    secrets: inherit
