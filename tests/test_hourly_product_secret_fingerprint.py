@@ -34,15 +34,17 @@ def test_post_model_capture_step_receives_fingerprints_not_the_raw_nim_secret():
     capture = workflow.split("      - name: Capture the bounded credential-free patch", 1)[1].split(
         "      - name: Upload the bounded proposal for credential-free reverification", 1
     )[0]
-    credential = workflow.split(
-        "      - name: Require the NVIDIA credential for model-backed development", 1
-    )[1].split("      - name: Check out the protected default branch", 1)[0]
+    broker = workflow.split("      - name: Start the loopback-only NIM credential broker", 1)[
+        1
+    ].split("      - name: Run the NVIDIA NIM development agent", 1)[0]
 
     assert "THREADWEAVE_FORBIDDEN_SECRET" not in capture
     assert "secrets.NVIDIA_NIM_API_KEY" not in capture
     assert "secret_fingerprint_guard.py scan" in capture
-    assert "forbidden_fingerprint_file=" in credential
-    assert "secret_fingerprint_guard.py fingerprint" in credential
+    assert "forbidden_fingerprint_file=" in broker
+    assert "secret_fingerprint_guard.py fingerprint" in broker
+    assert "secrets.NVIDIA_NIM_API_KEY" in broker
+    assert "Require the NVIDIA credential for model-backed development" not in workflow
 
 
 def test_fingerprint_only_scan_rejects_raw_and_encoded_secret_forms(tmp_path: Path):
@@ -100,7 +102,7 @@ def test_fingerprint_loader_rejects_missing_nonregular_oversized_and_bad_json(
     with pytest.raises(guard.FingerprintError, match="regular"):
         guard.load_fingerprint(link)
 
-    monkeypatch.setattr(guard, "MAX_FINGERPRINT_BYTES", 2)
+    monkeypatch.setattr(guard, "MAX_FINGERPRINT_BYTES", 1)
     with pytest.raises(guard.FingerprintError, match="too large"):
         guard.load_fingerprint(target)
     monkeypatch.undo()
