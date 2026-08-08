@@ -58,8 +58,10 @@ def _job_block(workflow: str, job_name: str, next_job_name: str | None = None) -
 
 
 def _hardened_endpoint_lines(job: str) -> set[str]:
-    """Return only exact allowed-endpoint entries from one hardened workflow job."""
-    endpoints = job.split("          allowed-endpoints: |\n", 1)[1].split("\n\n", 1)[0]
+    """Return exact endpoint entries from the runtime-safe folded YAML scalar."""
+    marker = "          allowed-endpoints: >-\n"
+    assert marker in job, "Harden Runner endpoints must be folded to space delimiters"
+    endpoints = job.split(marker, 1)[1].split("\n\n", 1)[0]
     return {line.strip() for line in endpoints.splitlines() if line.strip()}
 
 
@@ -124,6 +126,18 @@ def test_each_named_hardened_product_phase_has_exact_github_api_egress_contract(
         _assert_named_job_network_contract(workflow, job_name, next_job_name)
 
     assert "egress-policy: audit" not in workflow
+
+
+def test_endpoint_contract_rejects_literal_block_runtime_delimiters():
+    """Literal newlines must not regress the agent's space-delimited endpoint input."""
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    mutated = workflow.replace("          allowed-endpoints: >-\n", "          allowed-endpoints: |\n", 1)
+    assert mutated != workflow
+
+    with pytest.raises(AssertionError):
+        _assert_named_job_network_contract(
+            mutated, "develop-product-gap", "reverify-product-gap"
+        )
 
 
 def test_endpoint_contract_rejects_hostname_suffix_injection():
