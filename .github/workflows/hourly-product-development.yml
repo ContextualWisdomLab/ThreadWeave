@@ -35,7 +35,7 @@ jobs:
   develop-product-gap:
     name: Discover and package one bounded product gap
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 180
     permissions:
       contents: read
       pull-requests: read
