@@ -84,11 +84,13 @@ def _assert_named_job_network_contract(
 
 
 def _develop_gate(workflow: str) -> str:
-    """Return the deterministic/model credential gate from the develop job."""
+    """Return only the credential-free deterministic gate from the develop job."""
     develop = _job_block(workflow, "develop-product-gap", "reverify-product-gap")
     return develop.split(
-        "      - name: Enforce the credential and pull-request-first gate", 1
-    )[1].split("      - name: Check out the protected default branch", 1)[0]
+        "      - name: Enforce the pull-request-first deterministic gate", 1
+    )[1].split(
+        "      - name: Require the NVIDIA credential for model-backed development", 1
+    )[0]
 
 
 def _stop_gate_block(gate: str, reason: str) -> tuple[str, int, int]:
@@ -101,18 +103,17 @@ def _stop_gate_block(gate: str, reason: str) -> tuple[str, int, int]:
 
 
 def _assert_deterministic_gate_contract(workflow: str) -> None:
-    """Assert each model-independent stop branch terminates before model credentials."""
+    """Assert model-independent stop branches terminate before the ready decision."""
     gate = _develop_gate(workflow)
-    credential_gate = 'if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then'
-    credential_position = gate.index(credential_gate)
+    ready_position = gate.index('echo "reason=ready"')
+    assert "secrets.NVIDIA_NIM_API_KEY" not in gate
+    assert "NIM_UPSTREAM_API_KEY" not in gate
 
     for reason in ("open_pull_request", "release_blocker", "dry_run"):
         block, block_start, block_end = _stop_gate_block(gate, reason)
         assert f'reason={reason}' in block
         assert "exit 0" in block
-        assert block_start < block_end <= credential_position
-
-    assert credential_position < gate.index("reason=ready")
+        assert block_start < block_end <= ready_position
 
 
 def test_each_named_hardened_product_phase_has_exact_github_api_egress_contract():
@@ -191,9 +192,7 @@ def test_model_secret_is_materialized_only_after_deterministic_gate_selects_mode
     """The deterministic gate must not receive the model secret before a model path is chosen."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
     develop = _job_block(workflow, "develop-product-gap", "reverify-product-gap")
-    gate = develop.split(
-        "      - name: Enforce the credential and pull-request-first gate", 1
-    )[1].split("      - name: Check out the protected default branch", 1)[0]
+    gate = _develop_gate(workflow)
 
     assert "secrets.NVIDIA_NIM_API_KEY" not in gate
     assert "NIM_UPSTREAM_API_KEY" not in gate
