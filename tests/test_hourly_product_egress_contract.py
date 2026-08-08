@@ -15,10 +15,11 @@ def test_each_hardened_product_phase_allows_the_observed_github_api_alias():
 
     assert len(phases) == 3
     for phase in phases:
-        endpoint_block = phase.split("\n\n", 1)[0]
-        assert "egress-policy: block" in endpoint_block
-        assert "api.github.com:443" in endpoint_block
-        assert "cafe.github.com:443" in endpoint_block
+        endpoint_lines = {
+            line.strip() for line in phase.split("\n\n", 1)[0].splitlines()
+        }
+        assert "egress-policy: block" in endpoint_lines
+        assert {"api.github.com:443", "cafe.github.com:443"} <= endpoint_lines
 
     assert "egress-policy: audit" not in workflow
 
