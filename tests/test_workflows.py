@@ -58,10 +58,10 @@ def test_product_development_brokers_nim_outside_the_model_process():
 def test_product_development_pauses_while_a_release_blocker_is_open():
     """A release freeze prevents autonomous product drift before publication."""
     workflow = _workflow("hourly-product-development.yml")
-    gate = workflow.split("      - name: Enforce the credential and pull-request-first gate", 1)[
+    gate = workflow.split("      - name: Enforce the pull-request-first deterministic gate", 1)[
         1
     ].split(
-        "      - name: Check out the protected default branch", 1
+        "      - name: Require the NVIDIA credential for model-backed development", 1
     )[0]
 
     assert "issues?state=open&labels=release-blocker&per_page=1" in gate
