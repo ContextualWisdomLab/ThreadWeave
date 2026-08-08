@@ -89,7 +89,7 @@ def _develop_gate(workflow: str) -> str:
     return develop.split(
         "      - name: Enforce the pull-request-first deterministic gate", 1
     )[1].split(
-        "      - name: Require the NVIDIA credential for model-backed development", 1
+        "      - name: Check out the protected default branch without persisted credentials", 1
     )[0]
 
 
@@ -189,18 +189,50 @@ def test_reverification_and_publication_keep_github_api_checks_in_named_jobs():
 
 
 def test_model_secret_is_materialized_only_after_deterministic_gate_selects_model_path():
-    """The deterministic gate must not receive the model secret before a model path is chosen."""
+    """Only the broker may receive the raw model secret after a model path is chosen."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
     develop = _job_block(workflow, "develop-product-gap", "reverify-product-gap")
     gate = _develop_gate(workflow)
 
     assert "secrets.NVIDIA_NIM_API_KEY" not in gate
     assert "NIM_UPSTREAM_API_KEY" not in gate
+    assert develop.count("NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}") == 1
 
-    credential = develop.split(
-        "      - name: Require the NVIDIA credential for model-backed development", 1
-    )[1].split("      - name: Check out the protected default branch", 1)[0]
-    assert "if: steps.gate.outputs.develop == 'true'" in credential
-    assert "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}" in credential
-    assert 'if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then' in credential
-    assert "exit 1" in credential
+    broker = develop.split(
+        "      - name: Start the loopback-only NIM credential broker", 1
+    )[1].split("      - name: Run the NVIDIA NIM development agent", 1)[0]
+    assert "if: steps.gate.outputs.develop == 'true'" in broker
+    assert "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}" in broker
+    assert 'if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then' in broker
+    assert "secret_fingerprint_guard.py fingerprint" in broker
+    assert "exit 1" in broker
+
+
+def test_model_fallback_budget_fits_outer_job_timeout():
+    """Every sequential model fallback plus orchestration reserve must be schedulable."""
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    develop = _job_block(workflow, "develop-product-gap", "reverify-product-gap")
+    job_timeout_minutes = int(
+        develop.split("    timeout-minutes: ", 1)[1].splitlines()[0].strip()
+    )
+    model_timeout_seconds = int(
+        workflow.split('  OPENCODE_RUN_TIMEOUT_SECONDS: "', 1)[1].split('"', 1)[0]
+    )
+    candidates = [
+        line.strip()
+        for line in workflow.split("  OPENCODE_MODEL_CANDIDATES: >-\n", 1)[1]
+        .split("  OPENCODE_RUN_TIMEOUT_SECONDS:", 1)[0]
+        .splitlines()
+        if line.strip()
+    ]
+    orchestration_reserve_seconds = 30 * 60
+    required_seconds = (
+        len(candidates) * model_timeout_seconds + orchestration_reserve_seconds
+    )
+
+    assert len(candidates) > 1
+    assert job_timeout_minutes * 60 >= required_seconds, (
+        f"job timeout {job_timeout_minutes * 60}s cannot cover {len(candidates)} "
+        f"sequential model attempts at {model_timeout_seconds}s plus "
+        f"{orchestration_reserve_seconds}s orchestration reserve"
+    )
