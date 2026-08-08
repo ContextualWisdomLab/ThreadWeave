@@ -22,10 +22,12 @@ def test_hourly_pr_maintenance_uses_one_immutable_secretless_scheduler() -> None
     """The caller must not duplicate repair dispatch or forward repository secrets."""
 
     workflow = _workflow()
+    review_merge = workflow.split("  review-merge:\n", 1)[1]
 
     assert 'cron: "11 * * * *"' in workflow
     assert "pr-review-fix-scheduler.yml" not in workflow
     assert "secrets: inherit" not in workflow
+    assert "\n    secrets:" not in review_merge
     assert "@main" not in workflow
     assert (
         "ContextualWisdomLab/.github/.github/workflows/"
