@@ -18,7 +18,14 @@ def test_ci_covers_secret_guard_in_focused_boundary_suite() -> None:
     """CI must execute and report the hourly secret guard at exact 100% coverage."""
 
     workflow = _workflow("ci.yml")
-    assert "coverage run --branch --source=scripts/ci -m pytest -q" in workflow
-    assert SECRET_GUARD_TEST in workflow
-    assert SECRET_GUARD_SOURCE in workflow
-    assert "--fail-under=100" in workflow
+    focused_step = workflow.split(
+        "      - name: Require complete autonomous and release boundary coverage\n", 1
+    )[1].split("      - run: coverage run -m pytest -q\n", 1)[0]
+    focused_run, focused_report = focused_step.split("          coverage report \\\n", 1)
+
+    assert "coverage run --branch --source=scripts/ci -m pytest -q" in focused_run
+    assert SECRET_GUARD_TEST in focused_run
+    assert f"--include={SECRET_GUARD_SOURCE}" in focused_report or (
+        f",{SECRET_GUARD_SOURCE}" in focused_report
+    )
+    assert "--fail-under=100" in focused_report
