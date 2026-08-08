@@ -115,18 +115,6 @@ jobs:
             echo "reason=ready"
           } >>"$GITHUB_OUTPUT"
 
-      - name: Require the NVIDIA credential for model-backed development
-        if: steps.gate.outputs.develop == 'true'
-        shell: bash
-        env:
-          NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then
-            echo "::error::NVIDIA_NIM_API_KEY is required for the selected model-backed development path."
-            exit 1
-          fi
-
       - name: Check out the protected default branch without persisted credentials
         if: steps.gate.outputs.develop == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -229,6 +217,14 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then
+            echo "::error::NVIDIA_NIM_API_KEY is required only for the selected model-backed path."
+            exit 1
+          fi
+          forbidden_fingerprint_file="${RUNNER_TEMP}/threadweave-secret-fingerprint.json"
+          python scripts/ci/secret_fingerprint_guard.py fingerprint \
+            --output-file "$forbidden_fingerprint_file"
+
           proxy_log="${RUNNER_TEMP}/threadweave-nim-proxy.log"
           proxy_pid="${RUNNER_TEMP}/threadweave-nim-proxy.pid"
           python scripts/ci/nim_proxy.py \
@@ -375,11 +371,10 @@ jobs:
         if: steps.gate.outputs.develop == 'true'
         id: package
         shell: bash
-        env:
-          THREADWEAVE_FORBIDDEN_SECRET: ${{ secrets.NVIDIA_NIM_API_KEY }}
         run: |
           set -euo pipefail
           artifact_dir="${RUNNER_TEMP}/hourly-product-change"
+          forbidden_fingerprint_file="${RUNNER_TEMP}/threadweave-secret-fingerprint.json"
           mkdir -p "$artifact_dir"
           python scripts/ci/hourly_product_guard.py capture \
             --workspace "${{ steps.agent.outputs.workspace }}" \
@@ -388,6 +383,14 @@ jobs:
             --patch-file "$artifact_dir/threadweave.patch" \
             --stat-file "$artifact_dir/threadweave.stat" \
             --proposal-file "$artifact_dir/proposal.json"
+          if [ -f "$artifact_dir/threadweave.patch" ]; then
+            python scripts/ci/secret_fingerprint_guard.py scan \
+              --fingerprint-file "$forbidden_fingerprint_file" \
+              --file "$artifact_dir/threadweave.patch" \
+              --file "$artifact_dir/threadweave.stat" \
+              --file "$artifact_dir/proposal.json"
+          fi
+          rm -f "$forbidden_fingerprint_file"
 
       - name: Upload the bounded proposal for credential-free reverification
         if: steps.package.outputs.changed == 'true'
