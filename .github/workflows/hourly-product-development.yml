@@ -64,12 +64,11 @@ jobs:
             *.actions.githubusercontent.com:443
             *.blob.core.windows.net:443
 
-      - name: Enforce the credential and pull-request-first gate
+      - name: Enforce the pull-request-first deterministic gate
         id: gate
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
           DRY_RUN: ${{ inputs.dry_run || false }}
         run: |
           set -euo pipefail
@@ -111,20 +110,22 @@ jobs:
             exit 0
           fi
 
-          if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then
-            {
-              echo "develop=false"
-              echo "reason=nim_api_key_unavailable"
-            } >>"$GITHUB_OUTPUT"
-            echo "NVIDIA_NIM_API_KEY is required only for the model-backed development path and is not configured." \
-              >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
           {
             echo "develop=true"
             echo "reason=ready"
           } >>"$GITHUB_OUTPUT"
+
+      - name: Require the NVIDIA credential for model-backed development
+        if: steps.gate.outputs.develop == 'true'
+        shell: bash
+        env:
+          NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then
+            echo "::error::NVIDIA_NIM_API_KEY is required for the selected model-backed development path."
+            exit 1
+          fi
 
       - name: Check out the protected default branch without persisted credentials
         if: steps.gate.outputs.develop == 'true'
@@ -647,7 +648,6 @@ jobs:
             echo "::error::A PAT or GitHub App token is required to trigger PR workflows."
             exit 1
           fi
-
           open_prs="$(
             GH_TOKEN="$AUTOMATION_TOKEN" gh api \
               "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=1" --jq 'length'
