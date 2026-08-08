@@ -71,6 +71,22 @@ def test_release_uses_full_sha_actions_and_reviewed_artifact_handoff() -> None:
     assert "retention-days: 7" in workflow
 
 
+def test_release_harden_runner_endpoint_input_is_space_delimited() -> None:
+    """Every release job presents its exact endpoint list as one runtime-safe value."""
+
+    workflow = _workflow()
+    harden_runner = (
+        "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920"
+    )
+    literal_marker = "          allowed-endpoints: |\n"
+    folded_marker = "          allowed-endpoints: >-\n"
+
+    assert workflow.count(harden_runner) == 5
+    assert workflow.count("          egress-policy: block\n") == 5
+    assert workflow.count(folded_marker) == 5
+    assert literal_marker not in workflow
+
+
 def test_build_repeats_quality_gates_and_prepares_release_evidence() -> None:
     """The released files are rebuilt from reviewed, hash-locked source."""
 
