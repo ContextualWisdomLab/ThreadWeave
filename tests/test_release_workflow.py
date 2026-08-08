@@ -6,12 +6,81 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+HARDEN_RUNNER = "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920"
+EXPECTED_RELEASE_ENDPOINTS = {
+    "build-release": {
+        "api.github.com:443",
+        "files.pythonhosted.org:443",
+        "github.com:443",
+        "objects.githubusercontent.com:443",
+        "pypi.org:443",
+        "release-assets.githubusercontent.com:443",
+        "results-receiver.actions.githubusercontent.com:443",
+        "*.actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
+    },
+    "attest-release": {
+        "api.github.com:443",
+        "fulcio.sigstore.dev:443",
+        "github.com:443",
+        "oauth2.sigstore.dev:443",
+        "rekor.sigstore.dev:443",
+        "results-receiver.actions.githubusercontent.com:443",
+        "token.actions.githubusercontent.com:443",
+        "tuf-repo-cdn.sigstore.dev:443",
+        "*.actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
+    },
+    "tag-release": {
+        "api.github.com:443",
+        "github.com:443",
+        "results-receiver.actions.githubusercontent.com:443",
+        "*.actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
+    },
+    "github-release": {
+        "api.github.com:443",
+        "github.com:443",
+        "objects.githubusercontent.com:443",
+        "release-assets.githubusercontent.com:443",
+        "results-receiver.actions.githubusercontent.com:443",
+        "uploads.github.com:443",
+        "*.actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
+    },
+    "publish-pypi": {
+        "pypi.org:443",
+        "results-receiver.actions.githubusercontent.com:443",
+        "token.actions.githubusercontent.com:443",
+        "upload.pypi.org:443",
+        "*.actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
+    },
+}
 
 
 def _workflow() -> str:
     """Return the release workflow without adding a YAML parser dependency."""
 
     return WORKFLOW.read_text(encoding="utf-8")
+
+
+def _job_block(workflow: str, job_name: str, next_job_name: str | None) -> str:
+    """Return exactly one release job for fail-closed contract assertions."""
+
+    block = workflow.split(f"  {job_name}:\n", 1)[1]
+    if next_job_name is not None:
+        block = block.split(f"  {next_job_name}:\n", 1)[0]
+    return block
+
+
+def _hardened_endpoints(job: str) -> set[str]:
+    """Return the exact entries supplied through the runtime-safe folded scalar."""
+
+    marker = "          allowed-endpoints: >-\n"
+    assert marker in job
+    endpoint_block = job.split(marker, 1)[1].split("\n      - name:", 1)[0]
+    return {line.strip() for line in endpoint_block.splitlines() if line.strip()}
 
 
 def test_release_is_manual_main_only_and_single_flight() -> None:
@@ -59,7 +128,7 @@ def test_release_uses_full_sha_actions_and_reviewed_artifact_handoff() -> None:
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         "actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26",
         "pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b",
-        "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920",
+        HARDEN_RUNNER,
     }
     assert required_actions <= {
         line.strip().removeprefix("uses: ").split(" #", 1)[0]
@@ -75,16 +144,23 @@ def test_release_harden_runner_endpoint_input_is_space_delimited() -> None:
     """Every release job presents its exact endpoint list as one runtime-safe value."""
 
     workflow = _workflow()
-    harden_runner = (
-        "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920"
-    )
     literal_marker = "          allowed-endpoints: |\n"
     folded_marker = "          allowed-endpoints: >-\n"
+    jobs = (
+        ("build-release", "attest-release"),
+        ("attest-release", "tag-release"),
+        ("tag-release", "github-release"),
+        ("github-release", "publish-pypi"),
+        ("publish-pypi", None),
+    )
 
-    assert workflow.count(harden_runner) == 5
-    assert workflow.count("          egress-policy: block\n") == 5
-    assert workflow.count(folded_marker) == 5
     assert literal_marker not in workflow
+    for job_name, next_job_name in jobs:
+        job = _job_block(workflow, job_name, next_job_name)
+        assert job.count(HARDEN_RUNNER) == 1, job_name
+        assert job.count("          egress-policy: block\n") == 1, job_name
+        assert job.count(folded_marker) == 1, job_name
+        assert _hardened_endpoints(job) == EXPECTED_RELEASE_ENDPOINTS[job_name], job_name
 
 
 def test_build_repeats_quality_gates_and_prepares_release_evidence() -> None:
