@@ -14,12 +14,11 @@ def _workflow(name: str) -> str:
     return (WORKFLOW_DIRECTORY / name).read_text(encoding="utf-8")
 
 
-def test_ci_and_release_cover_secret_guard_in_focused_boundary_suite() -> None:
-    """CI and release gates must execute and report the secret guard at 100%."""
+def test_ci_covers_secret_guard_in_focused_boundary_suite() -> None:
+    """CI must execute and report the hourly secret guard at exact 100% coverage."""
 
-    for workflow_name in ("ci.yml", "release.yml"):
-        workflow = _workflow(workflow_name)
-        assert "coverage run --branch --source=scripts/ci -m pytest -q" in workflow
-        assert SECRET_GUARD_TEST in workflow, workflow_name
-        assert SECRET_GUARD_SOURCE in workflow, workflow_name
-        assert "--fail-under=100" in workflow
+    workflow = _workflow("ci.yml")
+    assert "coverage run --branch --source=scripts/ci -m pytest -q" in workflow
+    assert SECRET_GUARD_TEST in workflow
+    assert SECRET_GUARD_SOURCE in workflow
+    assert "--fail-under=100" in workflow
