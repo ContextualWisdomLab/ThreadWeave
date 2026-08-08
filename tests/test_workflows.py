@@ -40,8 +40,11 @@ def test_product_development_brokers_nim_outside_the_model_process():
 
     assert 'cron: "41 * * * *"' in workflow
     assert "cancel-in-progress: false" in workflow
-    assert "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}" in workflow
+    assert workflow.count("NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}") == 1
     assert "python scripts/ci/nim_proxy.py" in workflow
+    assert "secret_fingerprint_guard.py fingerprint" in workflow
+    assert "secret_fingerprint_guard.py scan" in workflow
+    assert "THREADWEAVE_FORBIDDEN_SECRET" not in workflow
     assert '"baseURL": "http://127.0.0.1:8765/v1"' in workflow
     assert "NVIDIA_API_KEY=threadweave-local-broker" in workflow
     assert "NVIDIA_API_KEY=\"$NIM_UPSTREAM_API_KEY\"" not in workflow
@@ -61,7 +64,7 @@ def test_product_development_pauses_while_a_release_blocker_is_open():
     gate = workflow.split("      - name: Enforce the pull-request-first deterministic gate", 1)[
         1
     ].split(
-        "      - name: Require the NVIDIA credential for model-backed development", 1
+        "      - name: Check out the protected default branch without persisted credentials", 1
     )[0]
 
     assert "issues?state=open&labels=release-blocker&per_page=1" in gate
@@ -70,6 +73,7 @@ def test_product_development_pauses_while_a_release_blocker_is_open():
     assert "A release-blocker issue is open" in gate
     assert gate.index("reason=open_pull_request") < gate.index("reason=release_blocker")
     assert gate.index("reason=release_blocker") < gate.index("reason=dry_run")
+    assert "NVIDIA_NIM_API_KEY" not in gate
 
 
 def test_model_job_blocks_undeclared_network_egress():
@@ -94,7 +98,9 @@ def test_product_development_packages_and_reverifies_a_bounded_patch():
 
     assert "scripts/ci/hourly_product_guard.py capture" in workflow
     assert workflow.count("scripts/ci/hourly_product_guard.py apply") == 2
-    assert "THREADWEAVE_FORBIDDEN_SECRET" in workflow
+    assert "THREADWEAVE_FORBIDDEN_SECRET" not in workflow
+    assert "secret_fingerprint_guard.py fingerprint" in workflow
+    assert "secret_fingerprint_guard.py scan" in workflow
     assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in workflow
     assert "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" in workflow
     assert "reverify-product-gap:" in workflow
