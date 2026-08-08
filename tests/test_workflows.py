@@ -15,6 +15,7 @@ def _workflow(name: str) -> str:
 def test_hourly_pr_maintenance_uses_central_cwl_workflows():
     """PR review, branch update, and merge stay centrally governed."""
     workflow = _workflow("hourly-pr-maintenance.yml")
+    review_merge = workflow.split("  review-merge:\n", 1)[1]
 
     assert 'cron: "11 * * * *"' in workflow
     assert "pr-review-fix-scheduler.yml" not in workflow
@@ -31,19 +32,52 @@ def test_hourly_pr_maintenance_uses_central_cwl_workflows():
     assert "update_branches: true" in workflow
     assert "enable_auto_merge: true" in workflow
     assert "secrets: inherit" not in workflow
+    assert "\n    secrets:" not in review_merge
     assert "issues: write" not in workflow
 
 
 def test_product_development_brokers_nim_outside_the_model_process():
     """The model gets a placeholder key while a loopback broker owns the secret."""
     workflow = _workflow("hourly-product-development.yml")
+    develop = workflow.split("  develop-product-gap:\n", 1)[1].split(
+        "  reverify-product-gap:\n", 1
+    )[0]
+    job_header = develop.split("    steps:\n", 1)[0]
+    gate = develop.split(
+        "      - name: Enforce the pull-request-first deterministic gate", 1
+    )[1].split(
+        "      - name: Check out the protected default branch without persisted credentials", 1
+    )[0]
+    broker = develop.split(
+        "      - name: Start the loopback-only NIM credential broker", 1
+    )[1].split("      - name: Run the NVIDIA NIM development agent", 1)[0]
+    capture = develop.split("      - name: Capture the bounded credential-free patch", 1)[
+        1
+    ].split("      - name: Upload the bounded proposal", 1)[0]
+    secret_binding = "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}"
 
     assert 'cron: "41 * * * *"' in workflow
     assert "cancel-in-progress: false" in workflow
-    assert workflow.count("NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}") == 1
-    assert "python scripts/ci/nim_proxy.py" in workflow
-    assert "secret_fingerprint_guard.py fingerprint" in workflow
-    assert "secret_fingerprint_guard.py scan" in workflow
+    assert workflow.count(secret_binding) == 1
+    assert secret_binding not in job_header
+    assert "NIM_UPSTREAM_API_KEY" not in job_header
+    assert "secrets.NVIDIA_NIM_API_KEY" not in gate
+    assert "NIM_UPSTREAM_API_KEY" not in gate
+    assert "if: steps.gate.outputs.develop == 'true'" in broker
+    assert secret_binding in broker
+    assert "python scripts/ci/nim_proxy.py" in broker
+    assert "secret_fingerprint_guard.py fingerprint" in broker
+    assert 'forbidden_fingerprint_file="${RUNNER_TEMP}/threadweave-secret-fingerprint.json"' in broker
+    assert "set -euo pipefail" in capture
+    assert "secret_fingerprint_guard.py scan" in capture
+    assert '--fingerprint-file "$forbidden_fingerprint_file"' in capture
+    assert "continue-on-error: true" not in capture
+    assert develop.index("secret_fingerprint_guard.py scan") < develop.index(
+        "actions/upload-artifact@"
+    )
+    assert workflow.index("secret_fingerprint_guard.py scan") < workflow.index(
+        "scripts/ci/hourly_product_guard.py apply"
+    )
     assert "THREADWEAVE_FORBIDDEN_SECRET" not in workflow
     assert '"baseURL": "http://127.0.0.1:8765/v1"' in workflow
     assert "NVIDIA_API_KEY=threadweave-local-broker" in workflow
