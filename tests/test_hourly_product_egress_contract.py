@@ -185,3 +185,23 @@ def test_reverification_and_publication_keep_github_api_checks_in_named_jobs():
         job = _job_block(workflow, job_name, next_job_name)
         assert job.index("Check out a fresh protected branch") < job.index("gh api "), job_name
         assert "NIM_UPSTREAM_API_KEY" not in job, job_name
+
+
+def test_model_secret_is_materialized_only_after_deterministic_gate_selects_model_path():
+    """The deterministic gate must not receive the model secret before a model path is chosen."""
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    develop = _job_block(workflow, "develop-product-gap", "reverify-product-gap")
+    gate = develop.split(
+        "      - name: Enforce the credential and pull-request-first gate", 1
+    )[1].split("      - name: Check out the protected default branch", 1)[0]
+
+    assert "secrets.NVIDIA_NIM_API_KEY" not in gate
+    assert "NIM_UPSTREAM_API_KEY" not in gate
+
+    credential = develop.split(
+        "      - name: Require the NVIDIA credential for model-backed development", 1
+    )[1].split("      - name: Check out the protected default branch", 1)[0]
+    assert "if: steps.gate.outputs.develop == 'true'" in credential
+    assert "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}" in credential
+    assert 'if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then' in credential
+    assert "exit 1" in credential
