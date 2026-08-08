@@ -51,6 +51,7 @@ jobs:
           disable-telemetry: true
           allowed-endpoints: |
             api.github.com:443
+            cafe.github.com:443
             codeload.github.com:443
             files.pythonhosted.org:443
             github.com:443
@@ -72,16 +73,6 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run || false }}
         run: |
           set -euo pipefail
-
-          if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then
-            {
-              echo "develop=false"
-              echo "reason=nim_api_key_unavailable"
-            } >>"$GITHUB_OUTPUT"
-            echo "NVIDIA_NIM_API_KEY is not configured; autonomous development stopped safely." \
-              >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
 
           open_prs="$(
             gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=1" --jq 'length'
@@ -117,6 +108,16 @@ jobs:
               echo "reason=dry_run"
             } >>"$GITHUB_OUTPUT"
             echo "Dry run: the product-development gate is ready." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then
+            {
+              echo "develop=false"
+              echo "reason=nim_api_key_unavailable"
+            } >>"$GITHUB_OUTPUT"
+            echo "NVIDIA_NIM_API_KEY is required only for the model-backed development path and is not configured." \
+              >>"$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -420,6 +421,7 @@ jobs:
           disable-telemetry: true
           allowed-endpoints: |
             api.github.com:443
+            cafe.github.com:443
             files.pythonhosted.org:443
             github.com:443
             objects.githubusercontent.com:443
@@ -581,6 +583,7 @@ jobs:
           disable-telemetry: true
           allowed-endpoints: |
             api.github.com:443
+            cafe.github.com:443
             github.com:443
             objects.githubusercontent.com:443
             results-receiver.actions.githubusercontent.com:443
