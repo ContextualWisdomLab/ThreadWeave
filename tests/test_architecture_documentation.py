@@ -73,4 +73,4 @@ def test_domain_erd_does_not_invent_threadweave_persistence() -> None:
     assert "Host persistence is external" in erd
     assert "ThreadWeave does not define the host schema" in erd
     assert "no database driver" in architecture
-    assert "Host service" in architecture
+    assert "Host-service boundary" in architecture
