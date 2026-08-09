@@ -102,7 +102,7 @@ The host owns durable storage, tenant boundaries, authentication, distributed wr
 
 ## Ordering architecture
 
-Sent-date ordering is optional to preserve backward compatibility. When enabled, date normalization is performed before RFC-defined sorting stages. Mailbox sequence numbers are used only as explicit tie-breaking metadata. The package must never infer public IMAP sequence numbers from incidental Python input order.
+Sent-date ordering is optional to preserve backward compatibility. When enabled, date normalization is performed before RFC-defined sorting stages. An explicit `sequence_number`, when supplied, must be a positive mailbox sequence number. When it is omitted, the one-based `input_position` is used only as an internal ordering fallback. Effective ordering sequence values must be unique across all messages participating in sent-date sorting, because the implementation validates them before comparing dates. The input-position fallback is never exposed as, inferred to be, or persisted as a public IMAP sequence number.
 
 ## Presentation architecture
 
