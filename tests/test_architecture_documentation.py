@@ -41,11 +41,11 @@ def test_canonical_product_architecture_documents_exist() -> None:
 
 
 def test_documentation_index_links_major_contracts() -> None:
-    """Keep product, architecture, safety, and operating docs discoverable."""
+    """Keep every canonical product, architecture, and operating doc linked."""
 
     documentation = _read("DOCUMENTATION.md")
-    for relative_path in REQUIRED_DOCUMENTS[1:12]:
-        assert relative_path in documentation, (
+    for relative_path in REQUIRED_DOCUMENTS[1:]:
+        assert f"]({relative_path})" in documentation, (
             f"documentation index does not link {relative_path}"
         )
 
@@ -63,6 +63,8 @@ def test_active_incremental_work_is_not_claimed_as_protected_main() -> None:
     assert "not protected-main" in architecture.lower()
     assert "PR #20" in erd
     assert "persists no database entities" in erd
+    assert "ACTIVE-PR" in erd
+    assert "not protected-main" in erd.lower()
 
 
 def test_adr_index_keeps_incremental_decision_proposed() -> None:
@@ -71,7 +73,11 @@ def test_adr_index_keeps_incremental_decision_proposed() -> None:
     index = _read("docs/adr/README.md")
     decision = _read("docs/adr/0004-incremental-state-boundary.md")
     assert "0004-incremental-state-boundary.md" in index
-    assert "Proposed" in index
+    assert any(
+        row.rstrip().endswith("| Proposed |")
+        for row in index.splitlines()
+        if "[ADR-0004](0004-incremental-state-boundary.md)" in row
+    )
     assert "**Status:** Proposed" in decision
     assert "PR #20" in decision
 
