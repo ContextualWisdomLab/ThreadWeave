@@ -78,9 +78,10 @@ When enabled:
 2. treat absent/invalid zones according to the documented RFC-compatible policy;
 3. treat invalid time fields according to the documented midnight repair policy;
 4. fall back to `INTERNALDATE` when `Date` is unusable;
-5. require unique positive mailbox sequence numbers for exact ties;
-6. order dummy-root children before deriving the dummy ordering key;
-7. apply root/sibling ordering in the RFC-defined stages, including bottom-up ordering after subject merge.
+5. derive a positive effective ordering sequence value from explicit `sequence_number` when supplied, otherwise from the one-based `input_position`; explicit values must be positive and the effective values must be unique across all sorted messages, not only exact date ties;
+6. treat `input_position` only as an internal deterministic ordering fallback and never as a public IMAP sequence number;
+7. order dummy-root children before deriving the dummy ordering key;
+8. apply root/sibling ordering in the RFC-defined stages, including bottom-up ordering after subject merge.
 
 The historical default remains input/first-appearance behavior when ordering is not requested.
 
