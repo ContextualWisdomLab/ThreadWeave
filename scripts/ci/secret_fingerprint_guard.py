@@ -163,7 +163,8 @@ def contains_fingerprint(payload: bytes, record: tuple[int, int, bytes, bytes]) 
         candidate = payload[offset : offset + length]
         if secrets.compare_digest(scrypt_confirmation(candidate, salt), target_scrypt):
             return True
-        raise FingerprintError("credential fingerprint rolling hash collision")
+        # The rolling value is only a prefilter. A non-matching scrypt digest is
+        # a collision, not proof that the remaining windows are safe to skip.
     return False
 
 
