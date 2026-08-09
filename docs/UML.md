@@ -136,6 +136,9 @@ classDiagram
     class IdentifierResolver {
       <<protocol port>>
     }
+    class IMAPSerializer {
+      <<protocol projection>>
+    }
     class ThreadResponse {
       <<serialized value>>
     }
@@ -143,11 +146,12 @@ classDiagram
     Message "0..1" <-- "1" Container : carries
     Container "0..*" --> "0..1" Container : parent
     ThreadForest o-- Container : roots
-    ThreadForest --> IdentifierResolver : projected by
-    IdentifierResolver --> ThreadResponse : renders
+    ThreadForest --> IMAPSerializer : source forest
+    IdentifierResolver --> IMAPSerializer : supplies identifiers
+    IMAPSerializer --> ThreadResponse : renders
 ```
 
-`ThreadForest` and `ThreadResponse` are conceptual documentation names, not additional persisted/runtime classes.
+`ThreadForest`, `IMAPSerializer`, and `ThreadResponse` are conceptual documentation names, not additional persisted/runtime classes. `IdentifierResolver` is a protocol port used by the serializer to obtain identifiers; it does not render or frame a response itself.
 
 ## Authority view
 
