@@ -90,6 +90,8 @@ ThreadWeave does not define the host schema, tenant key, user key, mailbox table
 
 ## Active incremental target — PR #20 only
 
+**Maturity:** ACTIVE-PR / Proposed; PR #20 is **not protected-main as-built behavior**.
+
 ```mermaid
 erDiagram
     INCREMENTAL_INDEX ||--o{ INDEXED_MESSAGE : contains
@@ -169,7 +171,7 @@ ThreadWeave is not a psychometric or temporal database, but ordering metadata st
 
 - `sent_date` represents message header date evidence;
 - `internal_date` is the mailbox fallback ordering value;
-- `sequence_number` is a mailbox-position tie breaker when required;
+- `sequence_number` is a mailbox-position ordering/tie-break input when explicitly supplied; omitted values may use input position only as an internal sort fallback;
 - none of these are transaction timestamps or host audit timestamps.
 
 A host that persists snapshots or deltas should record its own transaction/system time and must not overload message dates for that purpose.
