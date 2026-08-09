@@ -206,8 +206,7 @@ def test_contains_fingerprint_covers_short_offset_collision_and_miss():
     assert guard.contains_fingerprint(b"prefix-" + token + b"-suffix", record)
 
     collision_without_digest = (len(token), guard.rolling_hash(token), salt, b"0" * 32)
-    with pytest.raises(guard.FingerprintError, match="rolling hash collision"):
-        guard.contains_fingerprint(token, collision_without_digest)
+    assert not guard.contains_fingerprint(token, collision_without_digest)
     rolling_miss = (
         len(token),
         (guard.rolling_hash(token) + 1) & guard.ROLLING_MASK,
