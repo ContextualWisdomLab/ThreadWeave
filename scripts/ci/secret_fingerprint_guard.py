@@ -2,8 +2,8 @@
 
 The trusted credential step may derive one-way fingerprints while it holds the
 NVIDIA credential. Post-model packaging receives only those fingerprints and
-uses a rolling-hash prefilter plus SHA-256 confirmation to reject the raw key
-and its common encoded forms without rematerializing the credential.
+uses a rolling-hash prefilter plus salted scrypt confirmation to reject the raw
+key and its common encoded forms without rematerializing the credential.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import stat
 import sys
 from collections.abc import Sequence
@@ -23,7 +24,13 @@ ROLLING_BASE = 257
 ROLLING_MASK = (1 << 64) - 1
 MAX_FINGERPRINT_BYTES = 16_384
 MAX_TOKEN_LENGTH = 16_384
-SHA256 = re.compile(r"[0-9a-f]{64}")
+SCRYPT_N = 1 << 14
+SCRYPT_R = 8
+SCRYPT_P = 1
+SCRYPT_DKLEN = 32
+SCRYPT_SALT_BYTES = 16
+SCRYPT_SALT = re.compile(r"[0-9a-f]{32}")
+SCRYPT_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 class FingerprintError(RuntimeError):
@@ -38,6 +45,18 @@ def rolling_hash(payload: bytes) -> int:
     return value
 
 
+def scrypt_confirmation(payload: bytes, salt: bytes) -> bytes:
+    """Return a password-grade, per-record-salted equality confirmation."""
+    return hashlib.scrypt(
+        payload,
+        salt=salt,
+        n=SCRYPT_N,
+        r=SCRYPT_R,
+        p=SCRYPT_P,
+        dklen=SCRYPT_DKLEN,
+    )
+
+
 def build_fingerprint(secret: bytes) -> dict[str, object]:
     """Build fingerprint-only records for raw and common encoded secret forms."""
     if not secret:
@@ -48,19 +67,19 @@ def build_fingerprint(secret: bytes) -> dict[str, object]:
         base64.urlsafe_b64encode(secret),
         secret.hex().encode("ascii"),
     }
-    records = [
-        {
-            "length": len(token),
-            "rolling_hash": rolling_hash(token),
-            # SHA-256 is an exact-equality confirmation for a high-entropy credential;
-            # it is not password hashing. CodeQL recommends SHA-2 for non-password data.
-            # codeql[py/weak-sensitive-data-hashing]
-            "sha256": hashlib.sha256(token).hexdigest(),
-        }
-        for token in variants
-    ]
-    records.sort(key=lambda record: (record["length"], record["sha256"]))
-    return {"version": 1, "records": records}
+    records = []
+    for token in variants:
+        salt = secrets.token_bytes(SCRYPT_SALT_BYTES)
+        records.append(
+            {
+                "length": len(token),
+                "rolling_hash": rolling_hash(token),
+                "salt": salt.hex(),
+                "scrypt": scrypt_confirmation(token, salt).hex(),
+            }
+        )
+    records.sort(key=lambda record: (record["length"], record["salt"]))
+    return {"version": 2, "records": records}
 
 
 def write_fingerprint(path: Path, secret: bytes) -> None:
@@ -72,23 +91,31 @@ def write_fingerprint(path: Path, secret: bytes) -> None:
     path.chmod(0o400)
 
 
-def _validate_record(value: object) -> tuple[int, int, str]:
+def _validate_record(value: object) -> tuple[int, int, bytes, bytes]:
     """Validate one fingerprint record and return its immutable tuple form."""
-    if not isinstance(value, dict) or set(value) != {"length", "rolling_hash", "sha256"}:
+    if not isinstance(value, dict) or set(value) != {
+        "length",
+        "rolling_hash",
+        "salt",
+        "scrypt",
+    }:
         raise FingerprintError("credential fingerprint record schema mismatch")
     length = value["length"]
     rolling = value["rolling_hash"]
-    digest = value["sha256"]
+    salt = value["salt"]
+    digest = value["scrypt"]
     if type(length) is not int or not 1 <= length <= MAX_TOKEN_LENGTH:
         raise FingerprintError("credential fingerprint length is invalid")
     if type(rolling) is not int or not 0 <= rolling <= ROLLING_MASK:
         raise FingerprintError("credential rolling hash is invalid")
-    if not isinstance(digest, str) or SHA256.fullmatch(digest) is None:
-        raise FingerprintError("credential SHA-256 fingerprint is invalid")
-    return length, rolling, digest
+    if not isinstance(salt, str) or SCRYPT_SALT.fullmatch(salt) is None:
+        raise FingerprintError("credential scrypt salt is invalid")
+    if not isinstance(digest, str) or SCRYPT_DIGEST.fullmatch(digest) is None:
+        raise FingerprintError("credential scrypt fingerprint is invalid")
+    return length, rolling, bytes.fromhex(salt), bytes.fromhex(digest)
 
 
-def load_fingerprint(path: Path) -> tuple[tuple[int, int, str], ...]:
+def load_fingerprint(path: Path) -> tuple[tuple[int, int, bytes, bytes], ...]:
     """Load one regular, bounded, strict-schema fingerprint evidence file."""
     try:
         file_stat = path.lstat()
@@ -104,7 +131,7 @@ def load_fingerprint(path: Path) -> tuple[tuple[int, int, str], ...]:
         raise FingerprintError("credential fingerprint must be strict UTF-8 JSON") from exc
     if not isinstance(payload, dict) or set(payload) != {"version", "records"}:
         raise FingerprintError("credential fingerprint schema mismatch")
-    if payload["version"] != 1 or not isinstance(payload["records"], list) or not payload["records"]:
+    if payload["version"] != 2 or not isinstance(payload["records"], list) or not payload["records"]:
         raise FingerprintError("credential fingerprint version or records are invalid")
     records = tuple(_validate_record(record) for record in payload["records"])
     if len(records) != len(set(records)):
@@ -112,9 +139,9 @@ def load_fingerprint(path: Path) -> tuple[tuple[int, int, str], ...]:
     return records
 
 
-def contains_fingerprint(payload: bytes, record: tuple[int, int, str]) -> bool:
+def contains_fingerprint(payload: bytes, record: tuple[int, int, bytes, bytes]) -> bool:
     """Return whether ``payload`` contains the exact token represented by ``record``."""
-    length, target_rolling, target_sha256 = record
+    length, target_rolling, salt, target_scrypt = record
     if len(payload) < length:
         return False
     highest_power = pow(ROLLING_BASE, length - 1, 1 << 64)
@@ -128,13 +155,13 @@ def contains_fingerprint(payload: bytes, record: tuple[int, int, str]) -> bool:
         if current != target_rolling:
             continue
         candidate = payload[offset : offset + length]
-        if hashlib.sha256(candidate).hexdigest() == target_sha256:
+        if secrets.compare_digest(scrypt_confirmation(candidate, salt), target_scrypt):
             return True
     return False
 
 
 def reject_protected_material(
-    paths: Sequence[Path], records: Sequence[tuple[int, int, str]]
+    paths: Sequence[Path], records: Sequence[tuple[int, int, bytes, bytes]]
 ) -> None:
     """Reject any bounded artifact containing a protected credential representation."""
     for path in paths:

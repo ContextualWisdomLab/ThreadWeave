@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import importlib.util
 import json
 import runpy
@@ -84,7 +83,7 @@ def test_fingerprint_builder_and_writer_fail_closed(tmp_path: Path):
     assert stat.S_IMODE(path.stat().st_mode) == 0o400
     loaded = guard.load_fingerprint(path)
     assert loaded
-    assert all(length > 0 for length, _, _ in loaded)
+    assert all(length > 0 for length, _, _, _ in loaded)
 
 
 def test_fingerprint_loader_rejects_missing_nonregular_oversized_and_bad_json(
@@ -120,20 +119,44 @@ def test_fingerprint_loader_rejects_missing_nonregular_oversized_and_bad_json(
     ("payload", "match"),
     [
         ({"records": []}, "schema mismatch"),
-        ({"version": 2, "records": [{}]}, "version or records"),
-        ({"version": 1, "records": []}, "version or records"),
-        ({"version": 1, "records": ["bad"]}, "record schema"),
+        ({"version": 1, "records": [{}]}, "version or records"),
+        ({"version": 2, "records": []}, "version or records"),
+        ({"version": 2, "records": ["bad"]}, "record schema"),
         (
-            {"version": 1, "records": [{"length": 0, "rolling_hash": 0, "sha256": "0" * 64}]},
+            {
+                "version": 2,
+                "records": [
+                    {"length": 0, "rolling_hash": 0, "salt": "0" * 32, "scrypt": "0" * 64}
+                ],
+            },
             "length",
         ),
         (
-            {"version": 1, "records": [{"length": 1, "rolling_hash": -1, "sha256": "0" * 64}]},
+            {
+                "version": 2,
+                "records": [
+                    {"length": 1, "rolling_hash": -1, "salt": "0" * 32, "scrypt": "0" * 64}
+                ],
+            },
             "rolling hash",
         ),
         (
-            {"version": 1, "records": [{"length": 1, "rolling_hash": 0, "sha256": "x"}]},
-            "SHA-256",
+            {
+                "version": 2,
+                "records": [
+                    {"length": 1, "rolling_hash": 0, "salt": "x", "scrypt": "0" * 64}
+                ],
+            },
+            "salt",
+        ),
+        (
+            {
+                "version": 2,
+                "records": [
+                    {"length": 1, "rolling_hash": 0, "salt": "0" * 32, "scrypt": "x"}
+                ],
+            },
+            "scrypt fingerprint",
         ),
     ],
 )
@@ -159,20 +182,27 @@ def test_fingerprint_loader_rejects_duplicate_records(tmp_path: Path):
 
 
 def test_contains_fingerprint_covers_short_offset_collision_and_miss():
-    """Rolling matches require exact SHA confirmation at any payload offset."""
+    """Rolling matches require exact scrypt confirmation at any payload offset."""
     token = b"credential"
+    salt = b"s" * guard.SCRYPT_SALT_BYTES
     record = (
         len(token),
         guard.rolling_hash(token),
-        hashlib.sha256(token).hexdigest(),
+        salt,
+        guard.scrypt_confirmation(token, salt),
     )
     assert not guard.contains_fingerprint(b"short", record)
     assert guard.contains_fingerprint(token, record)
     assert guard.contains_fingerprint(b"prefix-" + token + b"-suffix", record)
 
-    collision_without_digest = (len(token), guard.rolling_hash(token), "0" * 64)
+    collision_without_digest = (len(token), guard.rolling_hash(token), salt, b"0" * 32)
     assert not guard.contains_fingerprint(token, collision_without_digest)
-    rolling_miss = (len(token), (guard.rolling_hash(token) + 1) & guard.ROLLING_MASK, record[2])
+    rolling_miss = (
+        len(token),
+        (guard.rolling_hash(token) + 1) & guard.ROLLING_MASK,
+        salt,
+        record[3],
+    )
     assert not guard.contains_fingerprint(token, rolling_miss)
 
 
@@ -181,7 +211,7 @@ def test_artifact_scanner_rejects_nonregular_artifact(tmp_path: Path):
     directory = tmp_path / "artifact-dir"
     directory.mkdir()
     with pytest.raises(guard.FingerprintError, match="regular file"):
-        guard.reject_protected_material([directory], ((1, 1, "0" * 64),))
+        guard.reject_protected_material([directory], ((1, 1, b"0" * 16, b"0" * 32),))
 
 
 def test_command_handlers_and_main_cover_success_and_failure(
