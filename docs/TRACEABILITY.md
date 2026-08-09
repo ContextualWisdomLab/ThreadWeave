@@ -1,7 +1,7 @@
 # ThreadWeave Requirements and Evidence Traceability
 
 **Status:** Accepted documentation baseline  
-**Last reviewed:** 2026-08-09
+**Last reviewed:** 2026-08-10
 
 This matrix links durable product/technical requirements to standards, source boundaries, and representative test/evidence families. Exact test names may evolve; the governing invariant must remain traceable.
 
@@ -20,9 +20,16 @@ This matrix links durable product/technical requirements to standards, source bo
 | ADR-0003 optional policies | compatibility + RFC behavior | `threading`, `subject`, `dates` | option-on/off tests | accepted/implemented |
 | ADR-0004 incremental state | RFC 8474 + product scale target | PR #20 `incremental` | randomized batch parity, concurrency, snapshot, RFC 8474, benchmark tests | proposed/active-PR |
 | ADR-0005 automation authority | supply-chain/security policy | `.github/workflows`, `scripts/ci` | secret isolation, patch guard, publisher/release boundary tests | accepted/implemented-main |
+| ADR-0006 work-conserving maintenance | repository governance | hourly maintenance/development + agent guidance | exact-state refetch, no-early-stop, double-sweep contract | accepted; documentation/automation reconciliation ongoing |
+| ADR-0007 exact evidence identity | repository governance | PR/check/release evidence handling | contributor-head/base-snapshot/live-base/tested-ref assertions | accepted; central/repository enforcement ongoing |
+| data governance/privacy boundary | product governance | core no-I/O runtime + host boundary | no network/database/model I/O; payload/output boundary tests | accepted architecture guidance |
+| incident/RCA ownership | repository operations | runtime modules + CI/release boundary | first-failing-layer RCA + regression + exact-head revalidation | accepted operating guidance |
+| release/provenance/licensing gate | release architecture | release workflow/package metadata/license | exact-head package hashes, trusted publishing, post-publish smoke | partial until first 0.2.0 public release |
+| Python 3.14 compatibility | standing quality requirement | package metadata + CI matrix | full tests/coverage/package smoke on Python 3.14 | planned / known gap |
 | PEP 561 package typing | PEP 561 | package metadata / `py.typed` | wheel/sdist inclusion + external install smoke | implemented-main |
 | zero runtime dependency | standalone architecture | package metadata | `pip check`, lock/build smoke | implemented-main |
 | 100% production coverage/docstrings | CWL quality contract | all production modules | coverage + `tests/test_documentation.py` | implemented-main |
+| documentation reconstruction fitness | acquisition/readiness governance | canonical documentation graph | `tests/test_architecture_documentation.py` + `docs/DOCUMENTATION_AUDIT.md` | active PR #25 until integrated |
 
 ## Standards source of truth
 
@@ -30,11 +37,16 @@ This matrix links durable product/technical requirements to standards, source bo
 
 ## Documentation maturity rules
 
-- `implemented-main`: source exists on protected main and representative tests/evidence exist.
+- `implemented-main` maps to **IMPLEMENTED-ON-PROTECTED-MAIN**: source exists on protected main and representative tests/evidence exist.
 - `accepted/implemented`: an accepted ADR describes existing main behavior.
-- `proposed/active-PR`: design exists in an open PR; it must not be represented as released/main functionality.
-- A queued, cancelled, stale, skipped, or predecessor-head CI/review result does not advance maturity.
+- `proposed/active-PR` maps to **IMPLEMENTED-ON-ACTIVE-PR** or proposed architecture: it must not be represented as released/main functionality.
+- `planned / known gap`: accepted requirement without exact-head implementation evidence.
+- A queued, cancelled, stale, skipped, status-only, synthetic-only, or predecessor-head CI/review result does not advance maturity.
+
+## Evidence identity rule
+
+When merge/release correctness depends on repository state, record contributor head SHA, PR base snapshot SHA, independently resolved live protected-base tip, and tested checkout/synthetic merge identity separately. Evidence proves only the identity actually evaluated.
 
 ## Change rule
 
-Every material PR should update the row(s) it changes or add a row when it introduces a new externally meaningful invariant. A feature must not move from `proposed/active-PR` to `implemented-main` until the implementing commit is integrated on protected main and exact protected-head verification exists.
+Every material PR should update the row(s) it changes or add a row when it introduces a new externally meaningful invariant. A feature must not move from `proposed/active-PR` to `implemented-main` until the implementing commit is integrated on protected main and exact protected-head verification exists. Conversation-only product/governance decisions are not durable until captured in the canonical documentation graph.
