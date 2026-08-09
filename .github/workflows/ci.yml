@@ -87,13 +87,14 @@ jobs:
             tests/test_hourly_product_guard.py \
             tests/test_hourly_product_guard_coverage.py \
             tests/test_hourly_product_guard_return.py \
+            tests/test_hourly_product_secret_fingerprint.py \
             tests/test_nim_proxy.py \
             tests/test_nim_tls_context.py \
             tests/test_release_contract.py \
             tests/test_release_contract_coverage.py \
             tests/test_release_workflow.py
           coverage report \
-            --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py,scripts/ci/release_contract.py \
+            --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py,scripts/ci/release_contract.py,scripts/ci/secret_fingerprint_guard.py \
             --fail-under=100 \
             --show-missing
       - run: coverage run -m pytest -q

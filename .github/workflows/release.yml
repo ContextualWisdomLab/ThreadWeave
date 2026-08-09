@@ -39,7 +39,7 @@ jobs:
         with:
           egress-policy: block
           disable-telemetry: true
-          allowed-endpoints: |
+          allowed-endpoints: >-
             api.github.com:443
             files.pythonhosted.org:443
             github.com:443
@@ -194,7 +194,7 @@ jobs:
         with:
           egress-policy: block
           disable-telemetry: true
-          allowed-endpoints: |
+          allowed-endpoints: >-
             api.github.com:443
             fulcio.sigstore.dev:443
             github.com:443
@@ -241,7 +241,7 @@ jobs:
         with:
           egress-policy: block
           disable-telemetry: true
-          allowed-endpoints: |
+          allowed-endpoints: >-
             api.github.com:443
             github.com:443
             results-receiver.actions.githubusercontent.com:443
@@ -304,7 +304,7 @@ jobs:
         with:
           egress-policy: block
           disable-telemetry: true
-          allowed-endpoints: |
+          allowed-endpoints: >-
             api.github.com:443
             github.com:443
             objects.githubusercontent.com:443
@@ -393,7 +393,7 @@ jobs:
         with:
           egress-policy: block
           disable-telemetry: true
-          allowed-endpoints: |
+          allowed-endpoints: >-
             pypi.org:443
             results-receiver.actions.githubusercontent.com:443
             token.actions.githubusercontent.com:443
