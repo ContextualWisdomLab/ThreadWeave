@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Extend the canonical architecture graph with a reconstruction-oriented
+  documentation fitness audit, data-governance/privacy boundary, incident/RCA
+  runbook, release/provenance/licensing gate, work-conserving autonomous
+  maintenance ADR, and exact evidence-identity ADR.
+- Restore `CLAUDE.md` as canonical agent context, explicitly preserving the
+  OpenCode + `NVIDIA_NIM_API_KEY` development boundary, prohibiting Copilot-token
+  use for development-model execution, and recording Python 3.14 as a current
+  compatibility gap until proven by the full CI/package matrix.
 - Add a canonical product/technical architecture documentation graph with PRD,
   TRD, root architecture, UML, conceptual ERD, API/version contract, indexed
   ADRs, security/threat model, test strategy, operability, traceability, and
@@ -110,7 +118,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optional base-subject grouping.
 - `Message` input dataclass (`message_id`, `in_reply_to`, `references`,
   `subject`, `payload`) and loop-safe `Container` thread-tree node.
-- RFC 5322 §3.6.4 primitives extracted behaviour-preserving from the naruon
+- RFC 5322 §3.6.4 primitives extracted behaviour-preserving from naruon
   control plane: `normalize_message_id`, `extract_reference_ids`,
   `generate_email_fingerprint`.
 - `normalize_subject` / `is_reply_subject` base-subject helpers.
