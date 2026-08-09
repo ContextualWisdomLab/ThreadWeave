@@ -65,7 +65,7 @@ Subject comparison SHALL use an RFC 5051-compatible Unicode casemap key rather t
 
 ### PRD-FR-005 Sent-date ordering
 
-When `sort_by_sent_date=True`, the library SHALL normalize valid dates to aware UTC, apply documented RFC-compatible repair/fallback rules, use `INTERNALDATE` when necessary, and require unique positive mailbox sequence numbers for exact ties. Historical first-appearance order SHALL remain the default for backward compatibility.
+When `sort_by_sent_date=True`, the library SHALL normalize valid dates to aware UTC, apply documented RFC-compatible repair/fallback rules, and use `INTERNALDATE` when necessary. Each message SHALL have a unique positive **effective ordering sequence value**: an explicit positive mailbox `sequence_number` when supplied, otherwise the one-based input position as an internal fallback. Effective values are validated for uniqueness across all messages participating in sent-date ordering, not only date ties. The input-position fallback MUST NOT be exposed as or treated as a public IMAP sequence number. Historical first-appearance order SHALL remain the default for backward compatibility.
 
 ### PRD-FR-006 IMAP projection
 
