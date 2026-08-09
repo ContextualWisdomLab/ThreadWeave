@@ -9,6 +9,8 @@ The status inside each ADR is authoritative. `Accepted` means the decision gover
 | [ADR-0003](0003-optional-subject-date-policies.md) | Keep subject grouping and sent-date ordering explicit policies. | Accepted |
 | [ADR-0004](0004-incremental-state-boundary.md) | Add bounded incremental state only as a batch-oracle-preserving extension. | Proposed |
 | [ADR-0005](0005-automation-authority-separation.md) | Separate model development, verification, publication, review, merge, and release authority. | Accepted |
+| [ADR-0006](0006-work-conserving-autonomous-maintenance.md) | Keep hourly maintenance work-conserving; external waiting blocks only the affected item. | Accepted |
+| [ADR-0007](0007-exact-evidence-identity.md) | Distinguish contributor head, PR base snapshot, live protected-base tip, synthetic merge, and tested checkout evidence. | Accepted |
 
 ## Status vocabulary
 
@@ -20,6 +22,6 @@ The status inside each ADR is authoritative. `Accepted` means the decision gover
 
 ## ADR required when
 
-A change alters the canonical threading oracle, protocol/session boundary, persistence ownership, public identity semantics, durable snapshot schema, Unicode/collation contract, ordering policy defaults, runtime dependency/capability surface, or autonomous/release authority boundary.
+A change alters the canonical threading oracle, protocol/session boundary, persistence ownership, public identity semantics, durable snapshot schema, Unicode/collation contract, ordering policy defaults, runtime dependency/capability surface, autonomous/release authority boundary, work-conserving loop semantics, or review/merge/release evidence identity.
 
-Implementation PRs should cite the applicable ADRs and update PRD/TRD/UML/ERD/security/test/operability/traceability documentation when those contracts move.
+Implementation PRs should cite the applicable ADRs and update PRD/TRD/UML/ERD/security/test/operability/traceability/documentation-audit records when those contracts move.
