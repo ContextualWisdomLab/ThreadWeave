@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_DOCUMENTS = (
+    "DOCUMENTATION.md",
     "docs/PRD.md",
     "docs/TRD.md",
     "ARCHITECTURE.md",
@@ -37,6 +38,16 @@ def test_canonical_product_architecture_documents_exist() -> None:
 
     missing = [path for path in REQUIRED_DOCUMENTS if not (ROOT / path).is_file()]
     assert not missing, f"missing canonical documentation: {missing}"
+
+
+def test_documentation_index_links_major_contracts() -> None:
+    """Keep product, architecture, safety, and operating docs discoverable."""
+
+    documentation = _read("DOCUMENTATION.md")
+    for relative_path in REQUIRED_DOCUMENTS[1:12]:
+        assert relative_path in documentation, (
+            f"documentation index does not link {relative_path}"
+        )
 
 
 def test_active_incremental_work_is_not_claimed_as_protected_main() -> None:
