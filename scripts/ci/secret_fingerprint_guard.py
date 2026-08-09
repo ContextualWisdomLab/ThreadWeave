@@ -52,6 +52,9 @@ def build_fingerprint(secret: bytes) -> dict[str, object]:
         {
             "length": len(token),
             "rolling_hash": rolling_hash(token),
+            # SHA-256 is an exact-equality confirmation for a high-entropy credential;
+            # it is not password hashing. CodeQL recommends SHA-2 for non-password data.
+            # codeql[py/weak-sensitive-data-hashing]
             "sha256": hashlib.sha256(token).hexdigest(),
         }
         for token in variants
