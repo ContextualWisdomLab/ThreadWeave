@@ -16,9 +16,13 @@ REQUIRED_DOCUMENTS = (
     "docs/API_CONTRACT.md",
     "docs/SECURITY.md",
     "docs/THREAT_MODEL.md",
+    "docs/DATA_GOVERNANCE.md",
     "docs/TEST_STRATEGY.md",
     "docs/OPERABILITY.md",
+    "docs/INCIDENT_RUNBOOK.md",
+    "docs/RELEASE_PROVENANCE.md",
     "docs/TRACEABILITY.md",
+    "docs/DOCUMENTATION_AUDIT.md",
     "docs/adr/README.md",
     "AGENTS.md",
     "CLAUDE.md",
@@ -56,6 +60,7 @@ def test_active_incremental_work_is_not_claimed_as_protected_main() -> None:
     prd = _read("docs/PRD.md")
     architecture = _read("ARCHITECTURE.md")
     erd = _read("docs/ERD.md")
+    audit = _read("docs/DOCUMENTATION_AUDIT.md")
     assert "ACTIVE-PR" in prd
     assert "PR #20" in prd
     assert "not protected-main" in prd.lower()
@@ -65,6 +70,8 @@ def test_active_incremental_work_is_not_claimed_as_protected_main() -> None:
     assert "persists no database entities" in erd
     assert "ACTIVE-PR" in erd
     assert "not protected-main" in erd.lower()
+    assert "IMPLEMENTED-ON-ACTIVE-PR" in audit
+    assert "Draft PR #20" in audit
 
 
 def test_adr_index_keeps_incremental_decision_proposed() -> None:
@@ -91,3 +98,62 @@ def test_domain_erd_does_not_invent_threadweave_persistence() -> None:
     assert "ThreadWeave does not define the host schema" in erd
     assert "no database driver" in architecture
     assert "Host-service boundary" in architecture
+
+
+def test_documentation_audit_distinguishes_design_from_main_sufficiency() -> None:
+    """A complete-looking design pack must not masquerade as protected-main truth."""
+
+    audit = _read("docs/DOCUMENTATION_AUDIT.md")
+    assert "DESIGN-SUFFICIENT" in audit
+    assert "PROTECTED-MAIN-INSUFFICIENT" in audit
+    assert "Python 3.14 CI support" in audit
+    assert "PLANNED / KNOWN GAP" in audit
+
+
+def test_governance_preserves_useful_metadata_without_blanket_masking() -> None:
+    """Keep PII governance purpose-bound without destroying threading inputs."""
+
+    governance = _read("docs/DATA_GOVERNANCE.md")
+    assert "No blanket masking as a functional substitute" in governance
+    assert "purpose-bound access" in governance
+    assert "host" in governance.lower()
+    assert "ThreadWeave has no durable copy to erase" in governance
+
+
+def test_incident_runbook_requires_root_cause_and_exact_evidence_identity() -> None:
+    """Incident handling must fix the owning layer and preserve evidence identity."""
+
+    runbook = _read("docs/INCIDENT_RUNBOOK.md")
+    assert "Fix the owning layer" in runbook
+    assert "contributor head" in runbook
+    assert "PR base snapshot" in runbook
+    assert "current protected/live base tip" in runbook
+    assert "A queued or externally unavailable reviewer/check is an item-local state" in runbook
+
+
+def test_release_gate_requires_trusted_publication_and_post_publish_smoke() -> None:
+    """A merge alone must never be represented as a completed public release."""
+
+    release = _read("docs/RELEASE_PROVENANCE.md")
+    assert "A merge is not a release" in release
+    assert "Trusted Publishing" in release
+    assert "long-lived PyPI token" in release
+    assert "post-publication clean-install smoke" in release
+    assert "Apache-2.0" in release
+
+
+def test_autonomy_and_evidence_identity_adrs_are_accepted_and_indexed() -> None:
+    """Persist work-conserving continuation and exact evidence identities as ADRs."""
+
+    index = _read("docs/adr/README.md")
+    autonomy = _read("docs/adr/0006-work-conserving-autonomous-maintenance.md")
+    evidence = _read("docs/adr/0007-exact-evidence-identity.md")
+    assert "0006-work-conserving-autonomous-maintenance.md" in index
+    assert "0007-exact-evidence-identity.md" in index
+    assert "**Status:** Accepted" in autonomy
+    assert "NVIDIA_NIM_API_KEY" in autonomy
+    assert "COPILOT_GITHUB_TOKEN" in autonomy
+    assert "double exit sweep" in autonomy
+    assert "**Status:** Accepted" in evidence
+    assert "contributor head SHA" in evidence
+    assert "live protected-base tip SHA" in evidence
