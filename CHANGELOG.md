@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Add a canonical product/technical architecture documentation graph with PRD,
+  TRD, root architecture, UML, conceptual ERD, API/version contract, indexed
+  ADRs, security/threat model, test strategy, operability, traceability, and
+  machine-checkable documentation maturity guards that distinguish protected-main
+  behavior from active PR #20 incremental-state work.
 - Restore the hourly NVIDIA NIM/OpenCode product-development workflow's YAML and
   nested-shell contracts, and lint every GitHub Actions workflow with a pinned,
   checksum-verified `actionlint` release before ordinary CI may proceed.
