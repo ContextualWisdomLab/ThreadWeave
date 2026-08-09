@@ -181,6 +181,16 @@ def test_fingerprint_loader_rejects_duplicate_records(tmp_path: Path):
         guard.load_fingerprint(path)
 
 
+def test_fingerprint_loader_rejects_more_records_than_the_builder_can_create(tmp_path: Path):
+    """Malformed evidence cannot multiply expensive confirmation work."""
+    payload = _fingerprints(b"synthetic-high-entropy-secret")
+    payload["records"] = [payload["records"][0]] * 5
+    path = tmp_path / "too-many.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(guard.FingerprintError, match="version or records"):
+        guard.load_fingerprint(path)
+
+
 def test_contains_fingerprint_covers_short_offset_collision_and_miss():
     """Rolling matches require exact scrypt confirmation at any payload offset."""
     token = b"credential"
@@ -196,7 +206,8 @@ def test_contains_fingerprint_covers_short_offset_collision_and_miss():
     assert guard.contains_fingerprint(b"prefix-" + token + b"-suffix", record)
 
     collision_without_digest = (len(token), guard.rolling_hash(token), salt, b"0" * 32)
-    assert not guard.contains_fingerprint(token, collision_without_digest)
+    with pytest.raises(guard.FingerprintError, match="rolling hash collision"):
+        guard.contains_fingerprint(token, collision_without_digest)
     rolling_miss = (
         len(token),
         (guard.rolling_hash(token) + 1) & guard.ROLLING_MASK,

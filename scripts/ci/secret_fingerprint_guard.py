@@ -24,6 +24,7 @@ ROLLING_BASE = 257
 ROLLING_MASK = (1 << 64) - 1
 MAX_FINGERPRINT_BYTES = 16_384
 MAX_TOKEN_LENGTH = 16_384
+MAX_RECORDS = 4
 SCRYPT_N = 1 << 14
 SCRYPT_R = 8
 SCRYPT_P = 1
@@ -46,7 +47,7 @@ def rolling_hash(payload: bytes) -> int:
 
 
 def scrypt_confirmation(payload: bytes, salt: bytes) -> bytes:
-    """Return a password-grade, per-record-salted equality confirmation."""
+    """Return a memory-hard, per-record-salted equality confirmation."""
     return hashlib.scrypt(
         payload,
         salt=salt,
@@ -131,7 +132,12 @@ def load_fingerprint(path: Path) -> tuple[tuple[int, int, bytes, bytes], ...]:
         raise FingerprintError("credential fingerprint must be strict UTF-8 JSON") from exc
     if not isinstance(payload, dict) or set(payload) != {"version", "records"}:
         raise FingerprintError("credential fingerprint schema mismatch")
-    if payload["version"] != 2 or not isinstance(payload["records"], list) or not payload["records"]:
+    if (
+        payload["version"] != 2
+        or not isinstance(payload["records"], list)
+        or not payload["records"]
+        or len(payload["records"]) > MAX_RECORDS
+    ):
         raise FingerprintError("credential fingerprint version or records are invalid")
     records = tuple(_validate_record(record) for record in payload["records"])
     if len(records) != len(set(records)):
@@ -157,6 +163,7 @@ def contains_fingerprint(payload: bytes, record: tuple[int, int, bytes, bytes]) 
         candidate = payload[offset : offset + length]
         if secrets.compare_digest(scrypt_confirmation(candidate, salt), target_scrypt):
             return True
+        raise FingerprintError("credential fingerprint rolling hash collision")
     return False
 
 

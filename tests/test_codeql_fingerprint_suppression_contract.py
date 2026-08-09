@@ -34,5 +34,6 @@ def test_fingerprint_confirmation_uses_salted_scrypt(
     assert isinstance(records, list)
     assert len(calls) == len(records)
     assert len({call[1] for call in calls}) == len(calls)
-    assert all(call[2:] == (guard.SCRYPT_N, guard.SCRYPT_R, guard.SCRYPT_P, 32) for call in calls)
+    assert all(call[2:] == (1 << 14, 8, 1, 32) for call in calls)
+    assert all(len(call[1]) == 16 for call in calls)
     assert all(set(record) == {"length", "rolling_hash", "salt", "scrypt"} for record in records)
