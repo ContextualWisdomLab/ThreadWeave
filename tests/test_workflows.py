@@ -242,6 +242,18 @@ def test_product_task_is_test_first_documented_and_never_self_releases():
     assert "PR_MESSAGE.md" in workflow
 
 
+def test_product_prompt_is_work_conserving_inside_the_bounded_slice():
+    """The model must continue safe sub-steps instead of stopping after one success."""
+    workflow = _workflow("hourly-product-development.yml")
+
+    assert "Do not stop after completing one useful sub-step" in workflow
+    assert "two fresh internal exit sweeps" in workflow
+    assert "If either sweep finds another safe action" in workflow
+    assert "within the same coherent product gap and allowed file scope" in workflow
+    assert "one bounded proposal" in workflow
+    assert "Do not open or publish a second pull request" in workflow
+
+
 def test_product_workflow_keeps_hash_requirement_inside_the_yaml_block():
     """The multiline requirement must remain valid YAML and pip input."""
     workflow = _workflow("hourly-product-development.yml")
