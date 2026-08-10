@@ -70,3 +70,17 @@ Rejected as the default path because the GitHub environment state and public ver
 Repository tests must prove the release workflow contains the readiness job before `build-release`, that `build-release` depends on it, that the job requires the reviewed environment protections, that its Harden Runner endpoint set is exact, and that public version existence is checked before any tag/release job can run.
 
 Public release completion still requires issue #17 acceptance: exact protected-head CI/security/coverage/package evidence, successful environment approval and Trusted Publishing, SLSA/SPDX evidence, tag/GitHub Release identity, public PyPI wheel and sdist, and clean post-publication install/THREAD smoke.
+
+## References — APA 7th
+
+GitHub. (n.d.). *Deployments and environments*. GitHub Docs. Retrieved August 10, 2026, from https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
+
+GitHub. (n.d.). *Managing environments for deployment*. GitHub Docs. Retrieved August 10, 2026, from https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments
+
+GitHub. (n.d.). *REST API endpoints for deployment environments*. GitHub Docs. Retrieved August 10, 2026, from https://docs.github.com/en/rest/deployments/environments
+
+Python Packaging Authority. (n.d.). *Adding a Trusted Publisher to an existing PyPI project*. PyPI Docs. Retrieved August 10, 2026, from https://docs.pypi.org/trusted-publishers/adding-a-publisher/
+
+Python Packaging Authority. (n.d.). *Security model and considerations*. PyPI Docs. Retrieved August 10, 2026, from https://docs.pypi.org/trusted-publishers/security-model/
+
+Python Packaging Authority. (n.d.). *Publishing with a Trusted Publisher*. PyPI Docs. Retrieved August 10, 2026, from https://docs.pypi.org/trusted-publishers/using-a-publisher/
