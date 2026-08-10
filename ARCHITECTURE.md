@@ -1,7 +1,7 @@
 # ThreadWeave Architecture
 
-**Status:** Accepted as-built architecture for protected `main` at `fb7dab5698ffd24b1a6db0943f1e387f0eda4d31`  
-**Last reviewed:** 2026-08-09
+**Status:** Accepted as-built architecture for protected `main` at `4fa4caf86651193497002a3730ec19d8917f8818`  
+**Last reviewed:** 2026-08-10
 
 ## Architectural goal
 
@@ -108,6 +108,10 @@ Sent-date ordering is optional to preserve backward compatibility. When enabled,
 
 The IMAP serializer is a presentation boundary over a prebuilt forest. Search-result filtering produces a projection without mutating the source nodes. Invalid identifier state fails closed rather than being silently rewritten. This keeps threading correctness independent from IMAP session state.
 
+## Runtime and package compatibility
+
+Protected `main` supports Python 3.10 through 3.14 for the current release line. This is an evidence-backed compatibility boundary, not a syntax-only declaration: PR #27 merged after the complete Python matrix and the Python 3.14 package build, hash-install, and outside-source smoke succeeded. Changes to the Python support range, dependency lock, or build toolchain require fresh exact-head compatibility evidence and synchronized PRD/TRD/test/release documentation.
+
 ## Active incremental target — not protected-main as-built
 
 PR #20 proposes the following extension:
@@ -169,5 +173,6 @@ Changes to any of these require an ADR and synchronized PRD/TRD/UML/ERD/security
 - durable snapshot schema;
 - external identity semantics;
 - Unicode comparison contract;
+- supported Python/runtime boundary;
 - protocol authority beyond pure presentation;
 - automation credential or merge-authority boundary.
