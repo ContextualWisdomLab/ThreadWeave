@@ -20,7 +20,7 @@ pip install threadweave
 ```
 
 The wheel includes a PEP 561 `py.typed` marker. The runtime is pure Python
-standard library and supports Python 3.10 through 3.13.
+standard library and supports Python 3.10 through 3.14.
 
 ## Reference threading
 
@@ -199,7 +199,7 @@ endings fail closed. Both deep chains and nested splits are rendered iteratively
 - The autonomous patch guard and NIM credential broker also require **100%**
   statement and branch coverage.
 - CI runs Ruff, compileall, doctests, pytest with coverage, and dependency checks
-  on Python 3.10, 3.11, 3.12, and 3.13.
+  on Python 3.10, 3.11, 3.12, 3.13, and 3.14.
 - CI builds wheel and source distributions, verifies `py.typed`, installs the
   wheel outside the source tree, and executes a smoke test.
 - Graph operations and IMAP rendering are iterative and identity-guarded; deep
@@ -210,7 +210,7 @@ endings fail closed. Both deep chains and nested splits are rendered iteratively
 ThreadWeave keeps its runtime dependency-free, but treats test and build tools as
 executable supply-chain inputs. `requirements/ci.in` records exact direct intent;
 a pinned uv compiler generates the universal `requirements/ci.lock` with
-transitive SHA-256 hashes for Python 3.10-3.13. CI regenerates the lock and
+transitive SHA-256 hashes for Python 3.10-3.14. CI regenerates the lock and
 requires a byte-for-byte match before installing it with pip hash-checking mode.
 Builds run without isolation because the reviewed Hatchling backend is already
 installed from that lock. See [`docs/supply-chain.md`](docs/supply-chain.md) for
