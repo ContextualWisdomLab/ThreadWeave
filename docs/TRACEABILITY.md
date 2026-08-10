@@ -13,8 +13,7 @@ This matrix links durable product/technical requirements to standards, source bo
 | PRD-FR-004 Unicode comparison | RFC 5051 | `collation`, `subject` | UnicodeData/example/confusable regression tests | implemented-main |
 | PRD-FR-005 sent-date ordering | RFC 5256 | `dates`, `threading` | timezone/date fallback/tie/dummy/bottom-up ordering tests | implemented-main |
 | PRD-FR-006 IMAP projection | RFC 5256; RFC 9051 | `imap` | THREAD/UID/filter/dummy/deep/non-mutation/error tests | implemented-main |
-| PRD-FR-007 stdlib adapter | RFC 2047/5322/6532 | `adapters`, `encoded_words`, `headers` | stdlib policy/charset/raw-reference tests | implemented-main |
-| adapter sequence-authority separation | RFC 5256 mailbox identifier authority | PR #26 `adapters` + adapter/protocol regression | iterable order stays internal; explicit host sequence/UID serialize; missing public ID fails closed | implemented on active PR #26 |
+| PRD-FR-007 stdlib adapter + mailbox authority | RFC 2047/5322/6532; RFC 5256 identifier semantics | `adapters`, `encoded_words`, `headers`, `imap`; protected-main PR #26 | stdlib parsing plus adapter-authority regression: iterable order stays internal, explicit host sequence/UID serialize, missing public ID fails closed | implemented-main |
 | PRD-FR-008 determinism | product quality contract | all pure runtime modules | repeated-output, deep/cycle, packaging/CI suite | implemented-main |
 | ADR-0001 canonical batch oracle | architecture decision | `threading`, `container` | batch structural suite | accepted/implemented |
 | ADR-0002 transport-neutral core | architecture decision | runtime package + host boundary | no-runtime-dependency/package/API tests | accepted/implemented |
