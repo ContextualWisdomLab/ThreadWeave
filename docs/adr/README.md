@@ -11,6 +11,7 @@ The status inside each ADR is authoritative. `Accepted` means the decision gover
 | [ADR-0005](0005-automation-authority-separation.md) | Separate model development, verification, publication, review, merge, and release authority. | Accepted |
 | [ADR-0006](0006-work-conserving-autonomous-maintenance.md) | Keep hourly maintenance work-conserving; external waiting blocks only the affected item. | Accepted |
 | [ADR-0007](0007-exact-evidence-identity.md) | Distinguish contributor head, PR base snapshot, live protected-base tip, synthetic merge, and tested checkout evidence. | Accepted |
+| [ADR-0008](0008-trusted-release-identity-boundary.md) | Fail closed on pre-created protected GitHub/PyPI release identity before irreversible release side effects. | Accepted |
 
 ## Status vocabulary
 
@@ -22,6 +23,6 @@ The status inside each ADR is authoritative. `Accepted` means the decision gover
 
 ## ADR required when
 
-A change alters the canonical threading oracle, protocol/session boundary, persistence ownership, public identity semantics, durable snapshot schema, Unicode/collation contract, ordering policy defaults, runtime dependency/capability surface, autonomous/release authority boundary, work-conserving loop semantics, or review/merge/release evidence identity.
+A change alters the canonical threading oracle, protocol/session boundary, persistence ownership, public identity semantics, durable snapshot schema, Unicode/collation contract, ordering policy defaults, runtime dependency/capability surface, autonomous/release authority boundary, work-conserving loop semantics, review/merge/release evidence identity, or trusted-publication identity/protection policy.
 
 Implementation PRs should cite the applicable ADRs and update PRD/TRD/UML/ERD/security/test/operability/traceability/documentation-audit records when those contracts move.
