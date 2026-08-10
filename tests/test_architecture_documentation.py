@@ -100,25 +100,27 @@ def test_domain_erd_does_not_invent_threadweave_persistence() -> None:
     assert "Host-service boundary" in architecture
 
 
-def test_documentation_audit_distinguishes_design_from_main_sufficiency() -> None:
-    """A complete-looking design pack must not masquerade as protected-main truth."""
+def test_documentation_audit_records_protected_main_sufficiency() -> None:
+    """Keep integrated documentation maturity separate from release readiness."""
 
     audit = _read("docs/DOCUMENTATION_AUDIT.md")
     assert "DESIGN-SUFFICIENT" in audit
-    assert "PROTECTED-MAIN-INSUFFICIENT" in audit
-    assert "100% production statement/branch coverage | PARTIAL" in audit
+    assert "PROTECTED-MAIN-DOCUMENTATION-SUFFICIENT" in audit
+    assert "RELEASE-INSUFFICIENT" in audit
+    assert "100% production statement/branch coverage | IMPLEMENTED-ON-PROTECTED-MAIN" in audit
+    assert "protected-main push CI run `31354471651`" in audit
     assert "Python 3.10–3.14 CI/package compatibility" in audit
     assert (
         "| Python 3.10–3.14 CI/package compatibility | "
         "IMPLEMENTED-ON-PROTECTED-MAIN |"
         in audit
     )
-    assert "protected-main PR #27 merge" in audit
+    assert "PR #27 merge `4fa4caf`" in audit
     assert (
-        "| adapter input-order/public-sequence authority separation | "
+        "| canonical documentation reconstruction graph | "
         "IMPLEMENTED-ON-PROTECTED-MAIN |"
     ) in audit
-    assert "protected-main PR #26 merge" in audit
+    assert "PR #25 merge `fe9b46f`" in audit
 
 
 def test_python_314_claim_is_protected_main_and_cross_document_consistent() -> None:
