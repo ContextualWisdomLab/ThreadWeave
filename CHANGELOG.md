@@ -6,9 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Extend the canonical architecture graph with a reconstruction-oriented
+  documentation fitness audit, data-governance/privacy boundary, incident/RCA
+  runbook, release/provenance/licensing gate, work-conserving autonomous
+  maintenance ADR, and exact evidence-identity ADR.
+- Restore `CLAUDE.md` as canonical agent context, explicitly preserving the
+  OpenCode + `NVIDIA_NIM_API_KEY` development boundary, prohibiting Copilot-token
+  use for development-model execution, and recording the protected-main Python
+  3.10–3.14 compatibility contract.
 - Add Python 3.14 to package classifiers and the full CI matrix, and build,
   hash-install, and smoke-test the distribution under Python 3.14 while
   preserving Python 3.10 as the minimum supported runtime.
+- Add a canonical product/technical architecture documentation graph with PRD,
+  TRD, root architecture, UML, conceptual ERD, API/version contract, indexed
+  ADRs, security/threat model, data governance, test strategy, operability,
+  incident/recovery, release provenance, traceability, and machine-checkable
+  documentation maturity guards that distinguish protected-main behavior from
+  active PR #20 incremental-state work.
 - Restore the hourly NVIDIA NIM/OpenCode product-development workflow's YAML and
   nested-shell contracts, and lint every GitHub Actions workflow with a pinned,
   checksum-verified `actionlint` release before ordinary CI may proceed.
@@ -109,7 +123,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optional base-subject grouping.
 - `Message` input dataclass (`message_id`, `in_reply_to`, `references`,
   `subject`, `payload`) and loop-safe `Container` thread-tree node.
-- RFC 5322 §3.6.4 primitives extracted behaviour-preserving from the naruon
+- RFC 5322 §3.6.4 primitives extracted behaviour-preserving from naruon
   control plane: `normalize_message_id`, `extract_reference_ids`,
   `generate_email_fingerprint`.
 - `normalize_subject` / `is_reply_subject` base-subject helpers.
