@@ -96,8 +96,10 @@ Naruon, an IMAP service, or another wrapper may expose ThreadWeave over HTTP/RPC
 
 Public API changes require:
 
-- exact focused and full test coverage;
+- exact focused and full verification, including **100% owned production statement coverage** and **100% owned production branch coverage**;
 - README/API document synchronization;
 - package build and outside-source smoke;
 - CHANGELOG entry;
 - relevant ADR update when identity, ordering, serialization, persistence, or authority semantics move.
+
+Coverage requirements are exact repository gates, not advisory targets. A predecessor-head, skipped, or partial coverage result cannot establish compatibility for the current public API change.
