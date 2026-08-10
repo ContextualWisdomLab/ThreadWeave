@@ -9,6 +9,7 @@ from threadweave import (
     message_from_email,
     serialize_thread_response,
     thread_email_messages,
+    thread_messages,
 )
 
 
@@ -29,6 +30,10 @@ def test_message_from_email_carries_date_and_mailbox_metadata():
     assert converted.internal_date == "06-Jun-2017 02:00:00 +0000"
     assert converted.sequence_number == 7
     assert converted.uid == 70
+
+    roots = thread_messages([converted])
+    assert serialize_thread_response(roots) == "* THREAD (7)\r\n"
+    assert serialize_thread_response(roots, identifier="uid") == "* THREAD (70)\r\n"
 
 
 def test_thread_email_messages_keeps_iterable_order_internal_to_sorting():
