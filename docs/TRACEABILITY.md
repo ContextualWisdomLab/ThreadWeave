@@ -25,7 +25,7 @@ This matrix links durable product/technical requirements to standards, source bo
 | data governance/privacy boundary | product governance | core no-I/O runtime + host boundary | no network/database/model I/O; payload/output boundary tests | accepted architecture guidance |
 | incident/RCA ownership | repository operations | runtime modules + CI/release boundary | first-failing-layer RCA + regression + exact-head revalidation | accepted operating guidance |
 | release/provenance/licensing gate | release architecture | release workflow/package metadata/license | exact-head package hashes, trusted publishing, post-publish smoke | partial until first 0.2.0 public release |
-| Python 3.14 compatibility | standing quality requirement; Python Software Foundation release line | PR #27 package metadata + CI matrix | exact-head Python 3.10–3.14 tests/coverage plus Python 3.14 package build/hash-install/outside-source smoke | implemented on active PR #27 |
+| Python 3.14 compatibility | Python Software Foundation release line + CWL quality contract | protected-main PR #27 merge `4fa4caf`; package metadata + CI matrix | exact-head Python 3.10–3.14 tests/coverage plus Python 3.14 package build/hash-install/outside-source smoke, SAST, Security Scan | implemented-main |
 | PEP 561 package typing | PEP 561 | package metadata / `py.typed` | wheel/sdist inclusion + external install smoke | implemented-main |
 | zero runtime dependency | standalone architecture | package metadata | `pip check`, lock/build smoke | implemented-main |
 | 100% production coverage/docstrings | CWL quality contract | all production modules | coverage + `tests/test_documentation.py` | implemented-main contract; exact head must re-prove for each merge/release |
@@ -33,7 +33,7 @@ This matrix links durable product/technical requirements to standards, source bo
 
 ## Standards source of truth
 
-`docs/research/README.md` is the canonical research/standards grounding and contains APA 7th references and implemented-boundary explanations for JWZ, RFC 2047, RFC 5051, RFC 5256, RFC 5322, RFC 6532, RFC 9051, and PEP 561. Active incremental work additionally cites RFC 7162, RFC 8474, RFC 8621, and JSON where its snapshot/identity design requires them.
+`docs/research/README.md` is the canonical research/standards grounding and contains APA 7th references and implemented-boundary explanations for JWZ, RFC 2047, RFC 5051, RFC 5256, RFC 5322, RFC 6532, RFC 9051, PEP 561, and the supported Python release line. Active incremental work additionally cites RFC 7162, RFC 8474, RFC 8621, and JSON where its snapshot/identity design requires them.
 
 ## Documentation maturity rules
 
@@ -49,4 +49,4 @@ When merge/release correctness depends on repository state, record contributor h
 
 ## Change rule
 
-Every material PR should update the row(s) it changes or add a row when it introduces a new externally meaningful invariant. A feature must not move from `proposed/active-PR` to `implemented-main` until the implementing commit is integrated on protected main and exact protected-head verification exists. Conversation-only product/governance decisions are not durable until captured in the canonical documentation graph.
+Every material PR should update the row(s) it changes or add a row when it introduces a new externally meaningful invariant. A feature must not move from `proposed/active-PR` to `implemented-main` until the implementing commit is integrated on protected main and exact protected-head verification exists. Conversation-only product/governance decisions are not durable until captured in the canonical documentation graph. After an integration changes protected-main maturity, open documentation lines must be reconciled before they can claim design sufficiency.
