@@ -2,7 +2,7 @@
 
 **Status:** Accepted for protected `main`  
 **Version line:** `0.2.x`  
-**Last reviewed:** 2026-08-09
+**Last reviewed:** 2026-08-10
 
 ## Contract philosophy
 
@@ -43,15 +43,17 @@ These functions are deterministic for the documented runtime/Unicode version and
 - `IdentifierResolver`
 - `MessageFilter`
 
-The serializer accepts an already-built forest and must not mutate it. Default identifiers are mailbox sequence numbers; `identifier="uid"` selects UID output; a callable resolver may supply host-owned metadata. The output is RFC framing text, not a socket write.
+The serializer accepts an already-built forest and must not mutate it. Default identifiers are explicitly supplied mailbox sequence numbers; `identifier="uid"` selects explicitly supplied UID output; a callable resolver may supply host-owned metadata. Missing identifiers fail closed. The output is RFC framing text, not a socket write.
 
-## Input compatibility
+## Input compatibility and identifier authority
 
-Reference identifiers may be provided through normalized values or supported raw header text. Standard-library email adapters accept Python email objects and preserve the original object in the caller payload path. Message ordering/serialization metadata remains optional unless an explicitly requested operation needs it.
+Reference identifiers may be provided through normalized values or supported raw header text. Standard-library email adapters accept Python email objects and preserve the original object in the caller payload path.
+
+`message_from_email(...)` accepts explicit `internal_date`, `sequence_number`, and `uid` values from a caller that owns mailbox metadata. `thread_email_messages(...)` deliberately does **not** derive public sequence-number or UID metadata from iterable position. When sent-date sorting is requested and explicit sequence metadata is absent, the canonical threader may use one-based input position only as an internal deterministic ordering fallback; that fallback is not exposed as a public IMAP identifier. A host that needs `THREAD`/`UID THREAD` identifiers must provide real mailbox metadata explicitly or through an identifier resolver.
 
 ## Error contract
 
-Public APIs use deterministic exceptions appropriate to their boundary. Callers must not infer success from partial output. Protocol serialization rejects invalid graph/identifier state rather than coercing values. No public exception message should be treated as a stable machine-readable identifier unless its type/API explicitly documents that guarantee.
+Public APIs use deterministic exceptions appropriate to their boundary. Callers must not infer success from partial output. Protocol serialization rejects invalid graph/identifier state rather than coercing or inventing values. No public exception message should be treated as a stable machine-readable identifier unless its type/API explicitly documents that guarantee.
 
 ## Ordering compatibility
 
@@ -63,6 +65,7 @@ Public APIs use deterministic exceptions appropriate to their boundary. Callers 
 - Identifiers are non-zero unsigned 32-bit integers and unique in one projected response.
 - Booleans do not satisfy integer identifier requirements.
 - Search-result filtering retains structural dummy grouping required to represent included descendants.
+- Missing sequence/UID metadata is not synthesized from input order.
 - Source containers are not modified.
 
 ## Active incremental API target
