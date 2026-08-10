@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Add Python 3.14 to package classifiers and the full CI matrix, and build,
+  hash-install, and smoke-test the distribution under Python 3.14 while
+  preserving Python 3.10 as the minimum supported runtime.
 - Restore the hourly NVIDIA NIM/OpenCode product-development workflow's YAML and
   nested-shell contracts, and lint every GitHub Actions workflow with a pinned,
   checksum-verified `actionlint` release before ordinary CI may proceed.
