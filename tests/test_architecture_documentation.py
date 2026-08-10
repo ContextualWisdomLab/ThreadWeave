@@ -127,7 +127,7 @@ def test_api_contract_keeps_internal_order_separate_from_public_identifiers() ->
     prd = _read("docs/PRD.md")
     assert "does **not** derive public sequence-number or UID metadata" in contract
     assert "one-based input position only as an internal deterministic ordering fallback" in contract
-    assert "thread_email_messages(...) SHALL NOT turn iterable position" in prd
+    assert "`thread_email_messages(...)` SHALL NOT turn iterable position" in prd
     assert "public mailbox sequence or UID metadata" in prd
 
 
