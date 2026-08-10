@@ -21,7 +21,96 @@ env:
   RELEASE_BUNDLE_NAME: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
+  release-readiness:
+    if: >-
+      github.repository == 'ContextualWisdomLab/ThreadWeave' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Harden the release-readiness gate
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >-
+            api.github.com:443
+            pypi.org:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+      - name: Require a pre-created protected PyPI environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release version must be canonical MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+
+          environment_json="$RUNNER_TEMP/pypi-environment.json"
+          if ! gh api "repos/$GITHUB_REPOSITORY/environments/pypi" >"$environment_json"; then
+            echo "::error::Create and protect the GitHub pypi environment before release."
+            exit 1
+          fi
+
+          reviewer_count="$(
+            jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length' \
+              "$environment_json"
+          )"
+          prevent_self_review="$(
+            jq -r '[.protection_rules[]? | select(.type == "required_reviewers") | .prevent_self_review] | first // false' \
+              "$environment_json"
+          )"
+          protected_branches="$(
+            jq -r '.deployment_branch_policy.protected_branches // false' \
+              "$environment_json"
+          )"
+
+          if [ "$reviewer_count" -lt 1 ]; then
+            echo "::error::The pypi environment requires at least one independent reviewer."
+            exit 1
+          fi
+          if [ "$prevent_self_review" != "true" ]; then
+            echo "::error::The pypi environment must prevent self-review."
+            exit 1
+          fi
+          if [ "$protected_branches" != "true" ]; then
+            echo "::error::The pypi environment must restrict deployments to protected branches."
+            exit 1
+          fi
+      - name: Refuse a version that already exists on PyPI
+        run: |
+          set -euo pipefail
+          response="$RUNNER_TEMP/pypi-version.json"
+          status="$(
+            curl \
+              --silent \
+              --show-error \
+              --location \
+              --output "$response" \
+              --write-out '%{http_code}' \
+              "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json"
+          )"
+          case "$status" in
+            404)
+              ;;
+            200)
+              echo "::error::threadweave $RELEASE_VERSION already exists on PyPI."
+              exit 1
+              ;;
+            *)
+              echo "::error::Unexpected PyPI readiness response: HTTP $status."
+              exit 1
+              ;;
+          esac
+
   build-release:
+    needs: release-readiness
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
       github.ref == 'refs/heads/main'
