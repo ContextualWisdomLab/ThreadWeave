@@ -12,13 +12,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   maintenance ADR, and exact evidence-identity ADR.
 - Restore `CLAUDE.md` as canonical agent context, explicitly preserving the
   OpenCode + `NVIDIA_NIM_API_KEY` development boundary, prohibiting Copilot-token
-  use for development-model execution, and recording Python 3.14 as a current
-  compatibility gap until proven by the full CI/package matrix.
+  use for development-model execution, and recording the protected-main Python
+  3.10–3.14 compatibility contract.
+- Add Python 3.14 to package classifiers and the full CI matrix, and build,
+  hash-install, and smoke-test the distribution under Python 3.14 while
+  preserving Python 3.10 as the minimum supported runtime.
 - Add a canonical product/technical architecture documentation graph with PRD,
   TRD, root architecture, UML, conceptual ERD, API/version contract, indexed
-  ADRs, security/threat model, test strategy, operability, traceability, and
-  machine-checkable documentation maturity guards that distinguish protected-main
-  behavior from active PR #20 incremental-state work.
+  ADRs, security/threat model, data governance, test strategy, operability,
+  incident/recovery, release provenance, traceability, and machine-checkable
+  documentation maturity guards that distinguish protected-main behavior from
+  active PR #20 incremental-state work.
 - Restore the hourly NVIDIA NIM/OpenCode product-development workflow's YAML and
   nested-shell contracts, and lint every GitHub Actions workflow with a pinned,
   checksum-verified `actionlint` release before ordinary CI may proceed.
