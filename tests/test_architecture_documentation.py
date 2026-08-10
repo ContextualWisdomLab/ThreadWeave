@@ -113,9 +113,22 @@ def test_documentation_audit_distinguishes_design_from_main_sufficiency() -> Non
         in audit
     )
     assert "PR #27" in audit
-    assert "thread_email_messages" in audit
-    assert "Message.sequence_number" in audit
-    assert "public THREAD identifier" in audit
+    assert (
+        "| adapter input-order/public-sequence authority separation | "
+        "IMPLEMENTED-ON-PROTECTED-MAIN |"
+    ) in audit
+    assert "protected-main PR #26 merge" in audit
+
+
+def test_api_contract_keeps_internal_order_separate_from_public_identifiers() -> None:
+    """Iterable position must never become implicit public mailbox identity."""
+
+    contract = _read("docs/API_CONTRACT.md")
+    prd = _read("docs/PRD.md")
+    assert "does **not** derive public sequence-number or UID metadata" in contract
+    assert "one-based input position only as an internal deterministic ordering fallback" in contract
+    assert "thread_email_messages(...) SHALL NOT turn iterable position" in prd
+    assert "public mailbox sequence or UID metadata" in prd
 
 
 def test_governance_preserves_useful_metadata_without_blanket_masking() -> None:
@@ -140,7 +153,8 @@ def test_incident_runbook_requires_root_cause_and_exact_evidence_identity() -> N
     assert "host-provided protocol metadata" in runbook
     assert "thread_email_messages" in runbook
     assert "one-based input position only as an internal ordering fallback" in runbook
-    assert "known product-contract mismatch" in runbook
+    assert "protected-main PR #26" in runbook
+    assert "leaves public `sequence_number`/UID metadata unset" in runbook
 
 
 def test_release_gate_requires_trusted_publication_and_post_publish_smoke() -> None:
