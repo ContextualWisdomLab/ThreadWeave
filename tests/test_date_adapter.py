@@ -2,7 +2,14 @@
 
 from email.message import EmailMessage
 
-from threadweave import message_from_email, thread_email_messages
+import pytest
+
+from threadweave import (
+    ThreadSerializationError,
+    message_from_email,
+    serialize_thread_response,
+    thread_email_messages,
+)
 
 
 def test_message_from_email_carries_date_and_mailbox_metadata():
@@ -24,8 +31,8 @@ def test_message_from_email_carries_date_and_mailbox_metadata():
     assert converted.uid == 70
 
 
-def test_thread_email_messages_uses_iterable_order_as_sequence_number():
-    """Direct mailbox ingestion gets deterministic RFC tie-breaking for free."""
+def test_thread_email_messages_keeps_iterable_order_internal_to_sorting():
+    """Iterable order may break date ties but must not become public IMAP metadata."""
     later = EmailMessage()
     later["Message-ID"] = "<later@example.com>"
     later["Date"] = "2 Jan 2026 00:00:00 +0000"
@@ -42,4 +49,6 @@ def test_thread_email_messages_uses_iterable_order_as_sequence_number():
         "earlier@example.com",
         "later@example.com",
     ]
-    assert [root.message.sequence_number for root in roots] == [2, 1]
+    assert [root.message.sequence_number for root in roots] == [None, None]
+    with pytest.raises(ThreadSerializationError, match="sequence number"):
+        serialize_thread_response(roots)
