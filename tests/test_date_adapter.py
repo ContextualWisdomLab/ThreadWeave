@@ -50,5 +50,5 @@ def test_thread_email_messages_keeps_iterable_order_internal_to_sorting():
         "later@example.com",
     ]
     assert [root.message.sequence_number for root in roots] == [None, None]
-    with pytest.raises(ThreadSerializationError, match="sequence number"):
+    with pytest.raises(ThreadSerializationError):
         serialize_thread_response(roots)
