@@ -128,9 +128,24 @@ def _read_package_version(path: Path) -> str:
 
 
 def _read_changelog(path: Path, version: str) -> tuple[str, str]:
-    """Return the ISO date and material notes for one unique release section."""
+    """Return final release notes only when the Unreleased section is empty."""
 
     text = _read_text(path, "changelog")
+    unreleased = re.search(r"^## Unreleased\s*$", text, re.MULTILINE)
+    if unreleased is not None:
+        following_unreleased = re.search(
+            r"^## ", text[unreleased.end() :], re.MULTILINE
+        )
+        unreleased_end = (
+            unreleased.end() + following_unreleased.start()
+            if following_unreleased is not None
+            else len(text)
+        )
+        if text[unreleased.end() : unreleased_end].strip():
+            raise ReleaseContractError(
+                "changelog has material Unreleased notes for a final release"
+            )
+
     header = re.compile(
         rf"^## \[{re.escape(version)}\] - (?P<date>[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}})\s*$",
         re.MULTILINE,
