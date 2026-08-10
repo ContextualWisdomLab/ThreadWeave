@@ -106,8 +106,12 @@ def test_documentation_audit_distinguishes_design_from_main_sufficiency() -> Non
     audit = _read("docs/DOCUMENTATION_AUDIT.md")
     assert "DESIGN-SUFFICIENT" in audit
     assert "PROTECTED-MAIN-INSUFFICIENT" in audit
+    assert "100% production statement/branch coverage | PARTIAL" in audit
     assert "Python 3.14 CI support" in audit
     assert "PLANNED / KNOWN GAP" in audit
+    assert "thread_email_messages" in audit
+    assert "Message.sequence_number" in audit
+    assert "public THREAD identifier" in audit
 
 
 def test_governance_preserves_useful_metadata_without_blanket_masking() -> None:
@@ -129,17 +133,33 @@ def test_incident_runbook_requires_root_cause_and_exact_evidence_identity() -> N
     assert "PR base snapshot" in runbook
     assert "current protected/live base tip" in runbook
     assert "A queued or externally unavailable reviewer/check is an item-local state" in runbook
+    assert "host-provided protocol metadata" in runbook
+    assert "thread_email_messages" in runbook
+    assert "one-based input position only as an internal ordering fallback" in runbook
+    assert "known product-contract mismatch" in runbook
 
 
 def test_release_gate_requires_trusted_publication_and_post_publish_smoke() -> None:
     """A merge alone must never be represented as a completed public release."""
 
     release = _read("docs/RELEASE_PROVENANCE.md")
+    agent_context = _read("CLAUDE.md")
     assert "A merge is not a release" in release
     assert "Trusted Publishing" in release
-    assert "long-lived PyPI token" in release
+    assert (
+        "Do not introduce a long-lived PyPI token or manual artifact upload to bypass "
+        "failed OIDC/Trusted Publishing"
+    ) in release
     assert "post-publication clean-install smoke" in release
     assert "Apache-2.0" in release
+    assert (
+        "`COPILOT_GITHUB_TOKEN` is not a development-model credential and must not "
+        "be introduced into the autonomous development path."
+    ) in agent_context
+    assert (
+        "Scheduled autonomous development uses an immutably pinned OpenCode Agent "
+        "and `NVIDIA_NIM_API_KEY` only for actual model-backed execution."
+    ) in agent_context
 
 
 def test_autonomy_and_evidence_identity_adrs_are_accepted_and_indexed() -> None:
