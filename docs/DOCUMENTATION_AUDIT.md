@@ -59,8 +59,10 @@ For legacy documents that already use `implemented-main` or `active-PR`, those l
 | THREAD / UID THREAD serialization | IMPLEMENTED-ON-PROTECTED-MAIN | `imap`, protocol tests |
 | incremental mailbox state / RFC 8474 handoff | IMPLEMENTED-ON-ACTIVE-PR | Draft PR #20; not a protected-main claim |
 | payload-free incremental snapshot schema | IMPLEMENTED-ON-ACTIVE-PR | Draft PR #20 |
+| adapter input-order/public-sequence authority correction | IMPLEMENTED-ON-ACTIVE-PR | PR #26: keeps input position internal while preserving explicit host sequence/UID metadata |
+| work-conserving hourly OpenCode task prompt | IMPLEMENTED-ON-ACTIVE-PR | PR #28: preserves one-proposal authority while requiring internal continuation and double exit sweep |
 | 100% production statement/branch coverage | PARTIAL | required CI contract exists on protected main, but this audit does not embed a same-SHA protected-main coverage run; exact coverage must be re-proven and linked for each merge/release head |
-| Python 3.14 CI support | PLANNED / KNOWN GAP | standing product requirement; current protected-main matrix ends at 3.13 |
+| Python 3.14 CI/package compatibility | IMPLEMENTED-ON-ACTIVE-PR | PR #27 exact head proves 3.10–3.14 test lanes and Python 3.14 package build/hash-install/outside-source smoke; not protected-main until merge |
 | first PyPI 0.2.0 trusted publication | PARTIAL / EXTERNAL-BOUNDARY GAP | repository release machinery exists; account/environment publication evidence is separately required |
 | physical database schema | OUT-OF-SCOPE | host-owned; conceptual ERD is intentional |
 
@@ -85,8 +87,9 @@ This audit is not completion. The current queue still includes:
 
 - repair and re-run PR #25 after any exact-head CI/review finding;
 - integrate the documentation graph only when all required gates pass;
-- correct the adapter/protocol identity mismatch before declaring the documentation graph green: protected main `thread_email_messages` currently assigns one-based iterable positions into `Message.sequence_number`, while the default sequence-number serializer treats `Message.sequence_number` as a public THREAD identifier. That behavior can expose inferred input order as if it were host-authoritative mailbox sequence metadata. Add a product-level regression and either stop the adapter from populating public sequence metadata or explicitly revise the product/API authority contract across PRD/TRD/Architecture/UML/Test/Traceability;
-- add and prove Python 3.14 CI/package support on a bounded follow-up product change;
+- land PR #26 only after exact-head gates and current review policy pass, then reconcile this audit/runbook/API wording from protected-main evidence;
+- land PR #27 only after exact-head 3.10–3.14/security/review gates pass, then move Python 3.14 maturity to IMPLEMENTED-ON-PROTECTED-MAIN;
+- land PR #28 only after exact-head workflow/security/review gates pass, then verify the protected scheduled prompt still honors the existing OpenCode/NVIDIA credential and one-proposal authority boundaries;
 - resolve the `0.2.0` trusted-publishing external identity/environment acceptance path;
 - only after that release boundary closes, refresh PR #20 onto current protected `main`, rerun mailbox-scale parity/performance evidence, obtain current-head review, and merge if policy permits;
 - after every integration, re-audit the graph and immediately continue to the next buyer-visible or release-readiness gap.
