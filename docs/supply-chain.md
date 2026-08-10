@@ -41,6 +41,11 @@ Python 3.14. The supported range therefore remains a synchronized contract acros
 `pyproject.toml`, `.github/workflows/ci.yml`, README, this document, and the
 support-contract regression test.
 
+The compatibility decision follows the maintained Python 3.14 release line. The
+Python Software Foundation published Python 3.14.6 on June 10, 2026; ThreadWeave
+still treats its own exact hosted test/package evidence as the compatibility
+authority for the reviewed package head.
+
 ## Refresh procedure
 
 1. Change one or more exact direct pins in `requirements/ci.in`.
@@ -90,3 +95,11 @@ not retain a newer lock with older direct pins or reintroduce an unhashed instal
 as a temporary workaround. If a locked artifact becomes unavailable or unsafe,
 open a focused dependency update, select a new exact pin and cutoff, regenerate,
 and re-run the complete exact-head security and package gates.
+
+## References — APA 7th
+
+Python Software Foundation. (2026, June 10). *Python 3.14.6*. Python.org.
+https://www.python.org/downloads/release/python-3146/
+
+Python Software Foundation. (2024). *PEP 745 – Python 3.14 release schedule*.
+Python Enhancement Proposals. https://peps.python.org/pep-0745/
