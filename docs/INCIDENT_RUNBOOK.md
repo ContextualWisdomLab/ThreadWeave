@@ -21,7 +21,7 @@ ThreadWeave is a library, so incidents generally present as incorrect thread str
 | wrong subject grouping | `subject` / `collation` | ThreadWeave |
 | wrong order | `dates` → ordering stages | ThreadWeave or host metadata |
 | malformed THREAD response | `imap` projection/identifier input | ThreadWeave or host metadata |
-| duplicate/missing UID/sequence | mailbox metadata source or adapter-derived sequence behavior | host / ThreadWeave adapter |
+| duplicate/missing UID/sequence | mailbox metadata source or adapter authority boundary | host / ThreadWeave adapter |
 | deep/cyclic crash | graph traversal/serializer guards | ThreadWeave |
 | high mailbox CPU/memory | workload dimensions + algorithm path | ThreadWeave/host split |
 | CI/coverage failure | exact failing workflow job and test | repository/central workflow owner |
@@ -72,7 +72,7 @@ Distinguish **host-provided protocol metadata** from **internal deterministic or
 
 - `message_from_email(..., sequence_number=..., uid=...)` carries explicit host-supplied mailbox identifiers. Stale, duplicate, missing, non-positive, or out-of-range host values must be rejected or refreshed at the host/adapter boundary; ThreadWeave must not silently substitute a different protocol identifier.
 - Canonical `thread_messages(..., sort_by_sent_date=True)` may use one-based input position only as an internal ordering fallback when an explicit sequence number is absent. That fallback is an ordering key, not host-authoritative IMAP metadata.
-- At the protected-main baseline assessed on 2026-08-10, `thread_email_messages(...)` still assigns one-based iterable positions into `Message.sequence_number`; the default `serialize_thread_data(..., identifier="sequence_number")` / response path can therefore expose those adapter-derived positions as THREAD identifiers. Treat this as a known product-contract mismatch, not as proof that iterable order is authoritative mailbox metadata. Preserve a regression that distinguishes explicit host identifiers from derived input order and correct the owning adapter/protocol contract before release acceptance.
+- Since protected-main PR #26 (`8af58f141dba00c7251c0ff4a5f7baf4563c8ebd`), `thread_email_messages(...)` leaves public `sequence_number`/UID metadata unset. Default sequence-number or UID serialization therefore fails closed until the host supplies real identifiers, while explicit `message_from_email(..., sequence_number=..., uid=...)` values remain serializable. Preserve this regression whenever adapters or protocol presentation change.
 
 ### Performance regression
 
