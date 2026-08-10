@@ -1,8 +1,8 @@
 # ThreadWeave Product Requirements Document
 
-**Status:** Accepted baseline for protected `main` at `fb7dab5698ffd24b1a6db0943f1e387f0eda4d31`  
+**Status:** Accepted baseline for protected `main` at `8af58f141dba00c7251c0ff4a5f7baf4563c8ebd`  
 **Product version represented:** `0.2.0`  
-**Last reviewed:** 2026-08-09
+**Last reviewed:** 2026-08-10
 
 ## 1. Product purpose
 
@@ -23,9 +23,12 @@ The following are implemented on protected `main` and are therefore product clai
 - optional RFC 5256 sent-date ordering with UTC normalization, `INTERNALDATE` fallback, mailbox-sequence tie-breaking, dummy-root handling, and bottom-up sibling ordering;
 - transport-neutral tree model plus exact RFC 5256 `thread-data` / `* THREAD` serialization;
 - sequence-number, UID, predicate-based search-result projection, and callable identifier resolution;
+- explicit separation between internal iterable-position ordering fallback and host-authoritative public IMAP sequence/UID metadata;
 - iterative graph traversal and fail-closed handling of cycles, shared nodes, duplicate/missing/out-of-range protocol identifiers, malformed historical headers, and deep chains;
-- PEP 561 `py.typed` packaging and Python 3.10–3.13 support;
-- 100% production statement and branch coverage and authored public docstrings.
+- PEP 561 `py.typed` packaging and Python 3.10–3.13 support on protected main;
+- 100% production statement and branch coverage and authored public docstrings as a merge/release contract.
+
+Python 3.14 compatibility exists on active PR #27 and is not a protected-main claim until that PR integrates.
 
 ## 3. Active but not protected-main capability
 
@@ -69,11 +72,11 @@ When `sort_by_sent_date=True`, the library SHALL normalize valid dates to aware 
 
 ### PRD-FR-006 IMAP projection
 
-The library SHALL serialize valid source trees to RFC 5256 `thread-data` and untagged `* THREAD` responses without mutating the source forest. Search-result filtering SHALL preserve necessary dummy structure. Sequence and UID output SHALL fail closed on invalid identifiers.
+The library SHALL serialize valid source trees to RFC 5256 `thread-data` and untagged `* THREAD` responses without mutating the source forest. Search-result filtering SHALL preserve necessary dummy structure. Sequence and UID output SHALL fail closed on invalid or missing identifiers rather than inventing host metadata.
 
-### PRD-FR-007 Standard-library adapter
+### PRD-FR-007 Standard-library adapter and mailbox authority
 
-The package SHALL accept Python standard-library email objects without forcing callers to manually normalize `References`, `In-Reply-To`, encoded words, or payload ownership.
+The package SHALL accept Python standard-library email objects without forcing callers to manually normalize `References`, `In-Reply-To`, encoded words, or payload ownership. `thread_email_messages(...)` SHALL NOT turn iterable position into public mailbox sequence or UID metadata. Iterable position may be used only by the canonical threader as an internal deterministic ordering fallback. A caller that requires public sequence-number or UID serialization SHALL supply those host-owned identifiers explicitly through `message_from_email(...)` or a serializer identifier resolver.
 
 ### PRD-FR-008 Determinism
 
@@ -88,7 +91,7 @@ The active incremental design SHALL preserve the batch threader as the structura
 - Runtime code SHALL have no network, database, shell, credential, or remote-code execution capability.
 - Arbitrary caller payloads SHALL remain caller-owned and MUST NOT be serialized into structural snapshots or protocol output unless a specific public API explicitly owns that transformation.
 - Traversal SHALL be iterative or identity-guarded such that hostile cyclic/deep graphs cannot recurse indefinitely.
-- Protocol serializers SHALL reject CR/LF-unsafe or out-of-range identifiers rather than normalizing them into different values.
+- Protocol serializers SHALL reject CR/LF-unsafe, missing, duplicate, or out-of-range identifiers rather than normalizing or inventing different values.
 - Automated development and release workflows SHALL keep model credentials separated from repository-controlled code and SHALL not allow the development model to approve, merge, tag, or publish its own change.
 
 See `docs/SECURITY.md` and `docs/THREAT_MODEL.md`.
@@ -99,7 +102,7 @@ See `docs/SECURITY.md` and `docs/THREAT_MODEL.md`.
 - production branch coverage: exactly 100%;
 - authored production module/callable docstrings: 100%;
 - Ruff, compileall, doctests, pytest, packaging, wheel-outside-source smoke, and dependency integrity gates;
-- real deep-chain, cycle/shared-node, malformed-header, date-ordering, IMAP serialization, and Unicode regression tests;
+- real deep-chain, cycle/shared-node, malformed-header, date-ordering, IMAP serialization, adapter-authority, and Unicode regression tests;
 - no skipped required gate may count as passing;
 - exact current-head GitHub evidence is required before merge/release.
 
@@ -116,7 +119,7 @@ ThreadWeave does not own:
 
 ## 9. Integration requirements
 
-Standalone use is mandatory. Optional CWL integrations MUST use public typed interfaces and degrade to ordinary library operation when unavailable. Host services own tenancy, authorization, durable versions, mailbox synchronization, distributed write serialization, and external stable-ID lifecycle.
+Standalone use is mandatory. Optional CWL integrations MUST use public typed interfaces and degrade to ordinary library operation when unavailable. Host services own tenancy, authorization, durable versions, mailbox synchronization, distributed write serialization, public sequence/UID lifecycle, and external stable-ID lifecycle.
 
 ## 10. Release acceptance
 
@@ -124,10 +127,11 @@ A release candidate is acceptable only from an integrated protected head with al
 
 ## 11. Buyer-visible roadmap
 
-1. land and validate the bounded incremental mailbox state boundary after the `0.2.0` release prerequisite is satisfied;
-2. expose stable adapter guidance for naruon/JMAP/IMAP hosts without importing host persistence into the core;
-3. keep mailbox-scale parity/performance evidence reproducible and versioned;
-4. add only standards-backed protocol projections that preserve the transport-neutral threading kernel.
+1. complete the `0.2.0` Trusted Publishing prerequisite and verify the public artifact;
+2. land and validate the bounded incremental mailbox state boundary after that release prerequisite is satisfied;
+3. expose stable adapter guidance for naruon/JMAP/IMAP hosts without importing host persistence into the core;
+4. keep mailbox-scale parity/performance evidence reproducible and versioned;
+5. add only standards-backed protocol projections that preserve the transport-neutral threading kernel.
 
 ## 12. Standards baseline
 
