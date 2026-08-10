@@ -44,14 +44,14 @@ ADR-0008 requires the manual release workflow to fail before build, attestation,
 The preflight must verify:
 
 - the requested version is canonical `MAJOR.MINOR.PATCH` before external lookup;
-- a GitHub environment named `pypi` is **pre-created** rather than implicitly created by the publishing job;
+- a GitHub environment named `pypi` is **pre-created**, consistent with GitHub's documented environment prerequisite, so a missing environment is detected before the late publishing job;
 - the environment has at least one required reviewer;
 - self-review is prevented;
 - deployment is restricted to protected branches;
 - the requested ThreadWeave version is not already present on PyPI;
 - missing/unreadable environment state or unexpected GitHub/PyPI responses fail closed.
 
-This preflight proves only the repository/GitHub half of the publication boundary. It cannot truthfully prove the PyPI account-side Trusted Publisher relationship before OIDC token exchange/publication, so that external evidence remains an explicit acceptance item.
+This preflight proves only the repository/GitHub half of the publication boundary. It cannot truthfully prove the PyPI account-side Trusted Publisher relationship before OIDC token exchange/publication, so that external evidence remains an explicit acceptance item. The environment-bound `publish-pypi` job still enforces the actual required-reviewer approval before publication authority becomes available.
 
 ## Trusted publication boundary
 
