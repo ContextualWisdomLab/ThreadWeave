@@ -115,12 +115,12 @@ def test_documentation_audit_records_protected_main_sufficiency() -> None:
         "IMPLEMENTED-ON-PROTECTED-MAIN |"
         in audit
     )
-    assert "protected-main PR #27 merge" in audit
+    assert "PR #27 merge `4fa4caf`" in audit
     assert (
         "| canonical documentation reconstruction graph | "
         "IMPLEMENTED-ON-PROTECTED-MAIN |"
     ) in audit
-    assert "protected-main PR #25 merge" in audit
+    assert "PR #25 merge `fe9b46f`" in audit
 
 
 def test_python_314_claim_is_protected_main_and_cross_document_consistent() -> None:
