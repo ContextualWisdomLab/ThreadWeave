@@ -11,7 +11,7 @@ them only through the reviewed hash lock at `requirements/ci.lock`.
 - The compiler requires **uv 0.11.29** and limits candidate artifacts to uploads
   before **2026-08-04T00:00:00Z**.
 - `--universal` and `--python-version 3.10` produce one marker-aware lock for the
-  supported Python 3.10-3.13 matrix.
+  supported Python 3.10 through 3.14 matrix.
 - `--generate-hashes` records reviewed SHA-256 values for every transitive
   distribution accepted by pip hash-checking mode.
 - GitHub Actions regenerates the lock and requires a byte-for-byte match before
@@ -33,6 +33,19 @@ The autonomous model cannot edit `.github/`, `scripts/`, `pyproject.toml`, or
 patch. A fresh credential-free verifier independently installs this lock and
 re-runs all package gates before publication.
 
+## Supported-interpreter evidence
+
+Python 3.14 support is not inferred from `requires-python >=3.10`. It requires an
+actual Python 3.14 GitHub Actions test lane plus package build/install smoke under
+Python 3.14. The supported range therefore remains a synchronized contract across
+`pyproject.toml`, `.github/workflows/ci.yml`, README, this document, and the
+support-contract regression test.
+
+The compatibility decision follows the maintained Python 3.14 release line. The
+Python Software Foundation published Python 3.14.6 on June 10, 2026; ThreadWeave
+still treats its own exact hosted test/package evidence as the compatibility
+authority for the reviewed package head.
+
 ## Refresh procedure
 
 1. Change one or more exact direct pins in `requirements/ci.in`.
@@ -50,7 +63,7 @@ re-runs all package gates before publication.
 
 5. Review the complete `requirements/ci.lock` diff. Confirm that every package is
    version-pinned, every block has SHA-256 hashes, markers still cover Python
-   3.10-3.13, and no URL, VCS, editable, or local source entered the lock.
+   3.10 through 3.14, and no URL, VCS, editable, or local source entered the lock.
 6. Validate the exact lock:
 
    ```bash
@@ -70,6 +83,7 @@ re-runs all package gates before publication.
 - Direct pins are intentional and synchronized with `pyproject.toml`.
 - No pip upgrade, unhashed remote install, or isolated build resolution remains.
 - The lock diff contains only expected packages, versions, markers, and hashes.
+- Python 3.10 through 3.14 all install the exact reviewed lock successfully.
 - Runtime dependencies remain empty.
 - The model-facing workflow still denies dependency-policy edits and index access.
 
@@ -81,3 +95,11 @@ not retain a newer lock with older direct pins or reintroduce an unhashed instal
 as a temporary workaround. If a locked artifact becomes unavailable or unsafe,
 open a focused dependency update, select a new exact pin and cutoff, regenerate,
 and re-run the complete exact-head security and package gates.
+
+## References — APA 7th
+
+Python Software Foundation. (2026, June 10). *Python 3.14.6*. Python.org.
+https://www.python.org/downloads/release/python-3146/
+
+Python Software Foundation. (2024). *PEP 745 – Python 3.14 release schedule*.
+Python Enhancement Proposals. https://peps.python.org/pep-0745/
