@@ -81,9 +81,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Add opt-in `sort_by_sent_date` processing for RFC 5256 steps 4 and 6, including
   top-level dummy-child ordering, first-child dummy keys, bottom-up sibling
   sorting, and sequence-number tie-breaking.
-- Carry `Date`, `INTERNALDATE`, and sequence metadata through the standard-
-  library email adapters; direct iterable order supplies deterministic one-based
-  sequence numbers.
+- Carry `Date` plus explicitly supplied `INTERNALDATE`, sequence-number, and UID
+  metadata through `message_from_email`; `thread_email_messages` leaves public
+  sequence/UID metadata unset and relies on the canonical threader's one-based
+  input position only as an internal deterministic sent-date ordering fallback.
 - Reject invalid or duplicate effective mailbox sequence numbers instead of
   silently producing contradictory ordering.
 - Preserve decoded Unicode header values, including internationalized subjects,
