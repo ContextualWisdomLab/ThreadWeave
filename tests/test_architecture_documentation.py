@@ -107,8 +107,12 @@ def test_documentation_audit_distinguishes_design_from_main_sufficiency() -> Non
     assert "DESIGN-SUFFICIENT" in audit
     assert "PROTECTED-MAIN-INSUFFICIENT" in audit
     assert "100% production statement/branch coverage | PARTIAL" in audit
-    assert "Python 3.14 CI support" in audit
-    assert "PLANNED / KNOWN GAP" in audit
+    assert "Python 3.14 CI/package compatibility" in audit
+    assert (
+        "| Python 3.14 CI/package compatibility | IMPLEMENTED-ON-ACTIVE-PR |"
+        in audit
+    )
+    assert "PR #27" in audit
     assert "thread_email_messages" in audit
     assert "Message.sequence_number" in audit
     assert "public THREAD identifier" in audit
