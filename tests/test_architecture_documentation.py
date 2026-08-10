@@ -152,6 +152,15 @@ def test_api_contract_keeps_internal_order_separate_from_public_identifiers() ->
     assert "public mailbox sequence or UID metadata" in prd
 
 
+def test_api_contract_requires_exact_owned_coverage_for_public_changes() -> None:
+    """Public API change control must preserve the repository's exact coverage gate."""
+
+    contract = _read("docs/API_CONTRACT.md")
+    assert "100% owned production statement coverage" in contract
+    assert "100% owned production branch coverage" in contract
+    assert "focused and full verification" in contract
+
+
 def test_governance_preserves_useful_metadata_without_blanket_masking() -> None:
     """Keep PII governance purpose-bound without destroying threading inputs."""
 
