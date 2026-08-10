@@ -1,6 +1,6 @@
 # ThreadWeave Product Requirements Document
 
-**Status:** Accepted baseline for protected `main` at `8af58f141dba00c7251c0ff4a5f7baf4563c8ebd`  
+**Status:** Accepted baseline for protected `main` at `4fa4caf86651193497002a3730ec19d8917f8818`  
 **Product version represented:** `0.2.0`  
 **Last reviewed:** 2026-08-10
 
@@ -25,10 +25,10 @@ The following are implemented on protected `main` and are therefore product clai
 - sequence-number, UID, predicate-based search-result projection, and callable identifier resolution;
 - explicit separation between internal iterable-position ordering fallback and host-authoritative public IMAP sequence/UID metadata;
 - iterative graph traversal and fail-closed handling of cycles, shared nodes, duplicate/missing/out-of-range protocol identifiers, malformed historical headers, and deep chains;
-- PEP 561 `py.typed` packaging and Python 3.10–3.13 support on protected main;
+- PEP 561 `py.typed` packaging and Python 3.10–3.14 support on protected main;
 - 100% production statement and branch coverage and authored public docstrings as a merge/release contract.
 
-Python 3.14 compatibility exists on active PR #27 and is not a protected-main claim until that PR integrates.
+Python 3.14 support is a protected-main claim only because PR #27 merged as `4fa4caf86651193497002a3730ec19d8917f8818` after its exact Python 3.10–3.14 matrix, Python 3.14 package build/hash-install/outside-source smoke, SAST, and Security Scan succeeded. Future point-release or dependency changes must re-prove that complete matrix.
 
 ## 3. Active but not protected-main capability
 
@@ -102,6 +102,7 @@ See `docs/SECURITY.md` and `docs/THREAT_MODEL.md`.
 - production branch coverage: exactly 100%;
 - authored production module/callable docstrings: 100%;
 - Ruff, compileall, doctests, pytest, packaging, wheel-outside-source smoke, and dependency integrity gates;
+- Python 3.10–3.14 compatibility matrix on the current release line;
 - real deep-chain, cycle/shared-node, malformed-header, date-ordering, IMAP serialization, adapter-authority, and Unicode regression tests;
 - no skipped required gate may count as passing;
 - exact current-head GitHub evidence is required before merge/release.
@@ -135,4 +136,4 @@ A release candidate is acceptable only from an integrated protected head with al
 
 ## 12. Standards baseline
 
-The normative/research bibliography is maintained under `docs/research/`. Product decisions materially rely on JWZ threading behavior and RFC 2047, RFC 5051, RFC 5256, RFC 5322, RFC 6532, RFC 7162, RFC 8474, RFC 8621, and RFC 9051 where applicable. References are recorded in APA 7 style in the research documentation.
+The normative/research bibliography is maintained under `docs/research/`. Product decisions materially rely on JWZ threading behavior and RFC 2047, RFC 5051, RFC 5256, RFC 5322, RFC 6532, RFC 7162, RFC 8474, RFC 8621, and RFC 9051 where applicable. References are recorded in APA 7 style in the research documentation. Python release-line compatibility is grounded in Python Software Foundation release/schedule documentation recorded there and in the Python 3.14 integration change.
