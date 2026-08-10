@@ -2,9 +2,10 @@
 
 The core API intentionally stays transport-agnostic. These helpers remove the
 boilerplate required to thread parsed RFC email messages while preserving each
-source object as the default payload. Optional mailbox metadata supplies the
-``INTERNALDATE``, sequence number, and UID values used by RFC 5256 ordering and
-THREAD response serialization.
+source object as the default payload. Optional mailbox metadata supplied to
+``message_from_email`` carries ``INTERNALDATE``, sequence-number, and UID values
+used by RFC 5256 ordering and THREAD response serialization; the bulk adapter
+does not invent public mailbox identifiers from iterable position.
 """
 
 from __future__ import annotations
@@ -77,17 +78,17 @@ def thread_email_messages(
     group_by_subject: bool = False,
     sort_by_sent_date: bool = False,
 ) -> list[Container]:
-    """Thread standard-library email messages without manual header mapping.
+    """Thread standard-library email messages without inventing mailbox IDs.
 
     The iterable is consumed once and each source message is retained as its
-    ``Message.payload``. Its one-based iteration order becomes the mailbox
-    sequence number, giving direct mailbox ingestion a deterministic RFC 5256
-    tie-breaker when ``sort_by_sent_date`` is enabled.
+    ``Message.payload``. When sent-date ordering is enabled, ``thread_messages``
+    may use one-based input position as an internal deterministic ordering
+    fallback, but this adapter does not store that position in
+    ``Message.sequence_number``. Callers that own real mailbox sequence numbers
+    or UIDs can supply them explicitly through ``message_from_email`` before
+    calling the canonical threader.
     """
-    converted = (
-        message_from_email(message, sequence_number=sequence_number)
-        for sequence_number, message in enumerate(messages, start=1)
-    )
+    converted = (message_from_email(message) for message in messages)
     return thread_messages(
         converted,
         group_by_subject=group_by_subject,
