@@ -1,11 +1,11 @@
 # ThreadWeave Test Strategy
 
 **Status:** Accepted quality baseline  
-**Last reviewed:** 2026-08-09
+**Last reviewed:** 2026-08-10
 
 ## Objective
 
-Prove protocol/threading correctness, deterministic failure behavior, packaging integrity, and automation trust boundaries with realistic examples and exact coverage. Tests must measure product properties, not just implementation trivia.
+Prove protocol/threading correctness, deterministic failure behavior, packaging integrity, runtime compatibility, and automation trust boundaries with realistic examples and exact coverage. Tests must measure product properties, not just implementation trivia.
 
 ## Mandatory gates
 
@@ -16,18 +16,21 @@ Prove protocol/threading correctness, deterministic failure behavior, packaging 
 - compileall;
 - production doctests;
 - full pytest suite;
+- Python 3.10, 3.11, 3.12, 3.13, and 3.14 current-head lanes;
 - dependency-lock integrity;
 - wheel and sdist build where release workflow requires both;
 - `py.typed` inclusion;
-- installed-wheel smoke from outside the repository source tree;
+- Python 3.14 package build/hash-install and installed-wheel smoke from outside the repository source tree;
 - GitHub Actions workflow syntax/security contracts;
 - current-head SAST/security/review gates before merge.
+
+A `requires-python` declaration or a predecessor-head run is not compatibility evidence. Changes to the dependency lock, build backend, supported-Python range, or package assembly must re-prove the full supported matrix and package smoke.
 
 ## Correctness layers
 
 ### Header and adapter tests
 
-Cover valid and malformed RFC 5322 Message-ID, multi-ID References/In-Reply-To, RFC 2047 encoded words, unknown charset labels, Python `EmailMessage` objects, generators, duplicate identifiers, and payload ownership.
+Cover valid and malformed RFC 5322 Message-ID, multi-ID References/In-Reply-To, RFC 2047 encoded words, unknown charset labels, Python `EmailMessage` objects, generators, duplicate identifiers, and payload ownership. Also prove that bulk iterable position remains internal ordering metadata and never becomes public sequence/UID authority.
 
 ### Canonical graph tests
 
@@ -59,11 +62,12 @@ Cover:
 - invalid time-to-midnight repair;
 - `INTERNALDATE` fallback;
 - unparseable/missing values;
-- exact tie-break sequence-number validation;
+- effective ordering-sequence uniqueness, including explicit/internal collisions;
 - dummy-root first-child key;
 - top-level and nested sibling ordering;
 - subject-merge then bottom-up reordering;
-- option-disabled backward compatibility.
+- option-disabled backward compatibility;
+- explicit proof that internal input-position fallback is never surfaced as an IMAP identifier.
 
 ### IMAP serialization tests
 
@@ -96,18 +100,20 @@ If ADR-0004 is accepted, add/retain:
 - bounded structural walk/record/byte limits;
 - mailbox-scale incremental/full-rebuild digest parity.
 
+Until that work lands on protected main, these are active-PR acceptance tests and not released-product evidence.
+
 ## Security and automation tests
 
-Verify immutable GitHub Action refs, secret isolation, no model-to-publisher credential inheritance, bounded patch paths/modes/sizes, exact patch digest handoff, credential-free independent verification, and separation of development from approve/merge/release authority.
+Verify immutable GitHub Action refs, secret isolation, no model-to-publisher credential inheritance, bounded patch paths/modes/sizes, exact patch digest handoff, credential-free independent verification, and separation of development from approve/merge/release authority. Workflow tests must also preserve work-conserving continuation without allowing one autonomous run to publish multiple competing product PRs.
 
 ## Documentation contract tests
 
-Tests should require canonical PRD, TRD, Architecture, UML, ERD/domain model, API contract, ADR index, Security, Threat Model, Test Strategy, Operability, Traceability, AGENTS, CLAUDE, README, and CHANGELOG. They should also assert that active PR #20 is labelled as non-main target rather than current capability until merged.
+Tests should require canonical PRD, TRD, Architecture, UML, ERD/domain model, API contract, ADR index, Security, Threat Model, Data Governance, Test Strategy, Operability, Incident Runbook, Release/Provenance, Traceability, Documentation Audit, AGENTS, CLAUDE, README, and CHANGELOG. They should assert actual Markdown discoverability links, ADR status on the correct row, conceptual-vs-persisted ownership, current Python-support claims, exact evidence-identity terminology, and that active PR #20 is labelled as non-main target rather than current capability until merged.
 
 ## Failure policy
 
-A skipped test required by a repository gate is not passing. A local result for a predecessor head is historical only. Flaky tests must be root-caused rather than retried until green. Tests may not rewrite production source at runtime to create a passing result.
+A skipped test required by a repository gate is not passing. A local result for a predecessor head is historical only. Flaky tests must be root-caused rather than retried until green. Tests may not rewrite production source at runtime to create a passing result. Synthetic merge evidence proves only the tested checkout identity and must not be mislabeled as contributor-head or protected-main evidence.
 
 ## Release verification
 
-The final release candidate requires fresh protected-head test/security/package evidence and artifact verification. A release must not reuse a PR-head wheel hash or a local-only run as authoritative release evidence.
+The final release candidate requires fresh protected-head Python 3.10–3.14 test/security/package evidence and artifact verification. A release must not reuse a PR-head wheel hash or a local-only run as authoritative release evidence. Public publication is complete only after the trusted-published artifact is independently fetched/installed and its version/provenance match the reviewed protected source.
