@@ -1,7 +1,7 @@
 # ThreadWeave Technical Requirements Document
 
-**Status:** Accepted baseline for protected `main` at `fb7dab5698ffd24b1a6db0943f1e387f0eda4d31`  
-**Last reviewed:** 2026-08-09
+**Status:** Accepted baseline for protected `main` at `4fa4caf86651193497002a3730ec19d8917f8818`  
+**Last reviewed:** 2026-08-10
 
 ## 1. Technical objective
 
@@ -93,13 +93,14 @@ The serializer is a pure function over an already-built source forest plus mailb
 - Search-result filtering may omit real messages while retaining dummy structure needed to encode descendants.
 - Identifier sources may be sequence number, UID, or a caller resolver.
 - Identifiers must be non-zero unsigned 32-bit integers and unique within the emitted result.
-- Missing UIDs, duplicates, invalid types, booleans-as-integers, and unsafe line endings fail closed.
+- Missing UIDs, missing sequence numbers, duplicates, invalid types, booleans-as-integers, and unsafe line endings fail closed.
+- The stdlib bulk adapter must not fabricate public mailbox identifiers from iterable order.
 - Deep chains and nested sibling structures must serialize iteratively.
 - Output framing is exact and deterministic.
 
 ## 8. Adapter requirements
 
-`message_from_email` and `thread_email_messages` must preserve source payload ownership while defensively parsing raw identification/reference/subject fields. Unknown character sets and malformed historical encoded-word data must not crash the entire mailbox ingest when a safe literal fallback is available.
+`message_from_email` and `thread_email_messages` must preserve source payload ownership while defensively parsing raw identification/reference/subject fields. Unknown character sets and malformed historical encoded-word data must not crash the entire mailbox ingest when a safe literal fallback is available. Bulk iterable position may support internal deterministic sent-date ordering only; a host that needs protocol sequence/UID output supplies that metadata explicitly.
 
 ## 9. Active incremental-state target
 
@@ -128,11 +129,13 @@ This target becomes as-built only after the implementing PR lands on protected `
 
 ## 11. Packaging and compatibility
 
-- Python support: 3.10–3.13 for the current release line unless the package metadata and full CI matrix change together.
+- Python support: 3.10–3.14 on the current protected-main release line.
+- The CI matrix must prove every supported Python minor version and the package job must build/hash-install/smoke the wheel under Python 3.14.
 - PEP 561 `py.typed` is included in wheels.
 - Wheel and source distribution must build from the reviewed dependency lock/toolchain.
 - Installed-wheel smoke tests run outside the repository source tree.
 - Runtime dependency count remains zero on the current architecture.
+- Dependency or Python point-release changes must re-prove the complete support matrix rather than inheriting predecessor-head compatibility evidence.
 
 ## 12. Security requirements
 
@@ -146,6 +149,7 @@ Runtime source must not initiate network requests, open databases, spawn shells,
 - batch/projection non-mutation tests;
 - packaging and external-install smoke;
 - immutable action/dependency supply-chain verification;
+- Python 3.10–3.14 current-head CI evidence;
 - exact-current-head GitHub CI, SAST/security, review, and unresolved-thread evidence before merge.
 
 ## 14. Integration contract
@@ -154,4 +158,4 @@ ThreadWeave exposes typed in-process APIs. A host such as naruon owns tenancy, a
 
 ## 15. Change-control rule
 
-A change that adds runtime I/O, persistence, a new protocol authority, a second structural oracle, a new Unicode comparison contract, or a new durable state format requires an ADR plus PRD/TRD/Architecture/Test/Security reconciliation in the same change.
+A change that adds runtime I/O, persistence, a new protocol authority, a second structural oracle, a new Unicode comparison contract, a new durable state format, or a supported Python-version boundary requires an ADR or explicit compatibility decision plus PRD/TRD/Architecture/Test/Security reconciliation in the same change.
