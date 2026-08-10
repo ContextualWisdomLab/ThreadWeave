@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.2.0] - 2026-08-10
+
 - Add a fail-closed release-readiness gate that requires a pre-created `pypi`
   environment with required reviewers, self-review prevention, protected-branch
   deployment policy, and an unpublished target version before build,
@@ -31,9 +33,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Restore the hourly NVIDIA NIM/OpenCode product-development workflow's YAML and
   nested-shell contracts, and lint every GitHub Actions workflow with a pinned,
   checksum-verified `actionlint` release before ordinary CI may proceed.
-
-## [0.2.0] - 2026-08-04
-
 - Add iterative RFC 5256 `THREAD` and `UID THREAD` response serialization with
   search-result projection, sequence-number, UID, or callable identifier
   selection, dummy-root preservation, protocol-safe framing, and fail-closed
