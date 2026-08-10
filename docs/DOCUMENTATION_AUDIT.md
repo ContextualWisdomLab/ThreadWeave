@@ -1,7 +1,7 @@
 # ThreadWeave Documentation Fitness Audit
 
 **Assessment date:** 2026-08-10  
-**Protected-main reference assessed:** `8af58f141dba00c7251c0ff4a5f7baf4563c8ebd`  
+**Protected-main reference assessed:** `ab4595f19bd94c83e15c934f96c4d05f90fbccf5`  
 **Canonical documentation line:** PR #25 / `docs/product-architecture-baseline-2026-08-09` (mutable contributor head; refetch the exact head from GitHub before any merge/release decision)
 
 The protected-main reference above is the fixed as-built baseline assessed by this audit. PR #25's contributor head is intentionally not frozen in this timeless document: it changes on every documentation correction. ADR-0007 requires the live contributor head, PR base snapshot, live protected-base tip, and tested checkout identity to be captured separately in current GitHub evidence.
@@ -58,9 +58,9 @@ For legacy documents that already use `implemented-main` or `active-PR`, those l
 | sent-date ordering | IMPLEMENTED-ON-PROTECTED-MAIN | `dates`, `threading`, ordering tests |
 | THREAD / UID THREAD serialization | IMPLEMENTED-ON-PROTECTED-MAIN | `imap`, protocol tests |
 | adapter input-order/public-sequence authority separation | IMPLEMENTED-ON-PROTECTED-MAIN | protected-main PR #26 merge `8af58f1`: bulk adapter leaves public sequence/UID metadata unset; explicit host identifiers still serialize |
+| work-conserving hourly OpenCode task prompt | IMPLEMENTED-ON-PROTECTED-MAIN | protected-main PR #28 merge `ab4595f`: one bounded proposal remains the authority boundary while the agent must continue safe sub-steps and complete two internal exit sweeps |
 | incremental mailbox state / RFC 8474 handoff | IMPLEMENTED-ON-ACTIVE-PR | Draft PR #20; not a protected-main claim |
 | payload-free incremental snapshot schema | IMPLEMENTED-ON-ACTIVE-PR | Draft PR #20 |
-| work-conserving hourly OpenCode task prompt | IMPLEMENTED-ON-ACTIVE-PR | PR #28: preserves one-proposal authority while requiring internal continuation and double exit sweep |
 | 100% production statement/branch coverage | PARTIAL | required CI contract exists on protected main, but this audit does not embed a same-SHA protected-main coverage run; exact coverage must be re-proven and linked for each merge/release head |
 | Python 3.14 CI/package compatibility | IMPLEMENTED-ON-ACTIVE-PR | PR #27 proves 3.10–3.14 test lanes and Python 3.14 package build/hash-install/outside-source smoke; not protected-main until merge |
 | first PyPI 0.2.0 trusted publication | PARTIAL / EXTERNAL-BOUNDARY GAP | repository release machinery exists; account/environment publication evidence is separately required |
@@ -88,7 +88,7 @@ This audit is not completion. The current queue still includes:
 - repair and re-run PR #25 after any exact-head CI/review finding;
 - integrate the documentation graph only when all required gates pass;
 - land PR #27 only after exact-head 3.10–3.14/security/review gates pass, then move Python 3.14 maturity to IMPLEMENTED-ON-PROTECTED-MAIN;
-- land PR #28 only after exact-head workflow/security/review gates pass, then verify the protected scheduled prompt still honors the existing OpenCode/NVIDIA credential and one-proposal authority boundaries;
+- verify protected-main scheduled/manual product-development execution after PR #28 using the unchanged one-proposal/NVIDIA credential/reverification/publisher boundaries; issue #22 retains that operational-acceptance tail;
 - resolve the `0.2.0` trusted-publishing external identity/environment acceptance path;
 - only after that release boundary closes, refresh PR #20 onto current protected `main`, rerun mailbox-scale parity/performance evidence, obtain current-head review, and merge if policy permits;
 - after every integration, re-audit the graph and immediately continue to the next buyer-visible or release-readiness gap.
