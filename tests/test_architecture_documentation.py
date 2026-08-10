@@ -107,17 +107,38 @@ def test_documentation_audit_distinguishes_design_from_main_sufficiency() -> Non
     assert "DESIGN-SUFFICIENT" in audit
     assert "PROTECTED-MAIN-INSUFFICIENT" in audit
     assert "100% production statement/branch coverage | PARTIAL" in audit
-    assert "Python 3.14 CI/package compatibility" in audit
+    assert "Python 3.10–3.14 CI/package compatibility" in audit
     assert (
-        "| Python 3.14 CI/package compatibility | IMPLEMENTED-ON-ACTIVE-PR |"
+        "| Python 3.10–3.14 CI/package compatibility | "
+        "IMPLEMENTED-ON-PROTECTED-MAIN |"
         in audit
     )
-    assert "PR #27" in audit
+    assert "protected-main PR #27 merge" in audit
     assert (
         "| adapter input-order/public-sequence authority separation | "
         "IMPLEMENTED-ON-PROTECTED-MAIN |"
     ) in audit
     assert "protected-main PR #26 merge" in audit
+
+
+def test_python_314_claim_is_protected_main_and_cross_document_consistent() -> None:
+    """Keep Python 3.14 compatibility aligned with package metadata and docs."""
+
+    pyproject = _read("pyproject.toml")
+    prd = _read("docs/PRD.md")
+    trd = _read("docs/TRD.md")
+    architecture = _read("ARCHITECTURE.md")
+    traceability = _read("docs/TRACEABILITY.md")
+    agent_context = _read("CLAUDE.md")
+
+    assert '"Programming Language :: Python :: 3.14"' in pyproject
+    assert "Python 3.10–3.14 support on protected main" in prd
+    assert "Python support: 3.10–3.14" in trd
+    assert "Protected `main` supports Python 3.10 through 3.14" in architecture
+    assert "Python 3.14 compatibility" in traceability
+    assert "implemented-main" in traceability
+    assert "Protected main currently proves Python 3.10–3.14" in agent_context
+    assert "current gap until implemented" not in agent_context
 
 
 def test_api_contract_keeps_internal_order_separate_from_public_identifiers() -> None:
