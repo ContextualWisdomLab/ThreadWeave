@@ -64,8 +64,6 @@ def _read_text(path: Path, label: str, root: Path) -> str:
     try:
         trusted_root = root.resolve(strict=True)
         candidate = path.absolute()
-        resolved = candidate.resolve(strict=True)
-        resolved.relative_to(trusted_root)
         relative = candidate.relative_to(trusted_root)
         current = trusted_root
         for part in relative.parts:
@@ -74,6 +72,8 @@ def _read_text(path: Path, label: str, root: Path) -> str:
                 raise ReleaseContractError(
                     f"{label} must be one regular file inside release root: {path}"
                 )
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(trusted_root)
         metadata = candidate.lstat()
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             raise ReleaseContractError(
