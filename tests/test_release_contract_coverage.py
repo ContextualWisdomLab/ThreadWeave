@@ -121,3 +121,15 @@ def test_validate_release_rejects_symlinked_source_metadata(tmp_path: Path) -> N
 
     with pytest.raises(release.ReleaseContractError, match="regular file inside release root"):
         release.validate_release(repository, "0.2.0")
+
+def test_validate_release_rejects_hard_linked_source_metadata(tmp_path: Path) -> None:
+    """Release metadata must not share an inode with an unreviewed external path."""
+
+    repository = tmp_path / "repository"
+    _project(repository)
+    changelog = repository / "CHANGELOG.md"
+    outside_changelog = tmp_path / "outside-changelog.md"
+    outside_changelog.hardlink_to(changelog)
+
+    with pytest.raises(release.ReleaseContractError, match="regular file inside release root"):
+        release.validate_release(repository, "0.2.0")
