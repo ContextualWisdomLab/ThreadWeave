@@ -100,3 +100,24 @@ def test_main_converts_unwritable_github_output_to_exit_two(
 
     assert result == 2
     assert "release contract:" in capsys.readouterr().err
+
+
+def test_validate_release_rejects_symlinked_source_metadata(tmp_path: Path) -> None:
+    """Release metadata must not escape the reviewed source tree through a link."""
+
+    repository = tmp_path / "repository"
+    _project(repository)
+    outside_changelog = tmp_path / "outside-changelog.md"
+    outside_changelog.write_text(
+        "# Changelog\n\n"
+        "## Unreleased\n\n"
+        "## [0.2.0] - 2026-08-04\n\n"
+        "- Unreviewed external release notes.\n",
+        encoding="utf-8",
+    )
+    changelog = repository / "CHANGELOG.md"
+    changelog.unlink()
+    changelog.symlink_to(outside_changelog)
+
+    with pytest.raises(release.ReleaseContractError, match="regular file inside release root"):
+        release.validate_release(repository, "0.2.0")
