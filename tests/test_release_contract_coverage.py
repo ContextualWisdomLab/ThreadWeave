@@ -32,7 +32,10 @@ def _project(root: Path) -> None:
         '__version__ = "0.2.0"\n', encoding="utf-8"
     )
     (root / "CHANGELOG.md").write_text(
-        "# Changelog\n\n## [0.2.0] - 2026-08-04\n\n- Material release.\n",
+        "# Changelog\n\n"
+        "## Unreleased\n\n"
+        "## [0.2.0] - 2026-08-04\n\n"
+        "- Material release.\n",
         encoding="utf-8",
     )
 
@@ -52,6 +55,23 @@ def test_release_contract_source_is_valid_python_310() -> None:
 
     source = MODULE_PATH.read_text(encoding="utf-8")
     ast.parse(source, filename=str(MODULE_PATH), feature_version=(3, 10))
+
+
+def test_validate_release_rejects_material_unreleased_notes(tmp_path: Path) -> None:
+    """A final release cannot silently omit reviewed Unreleased changes from its notes."""
+
+    _project(tmp_path)
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        changelog.read_text(encoding="utf-8").replace(
+            "## Unreleased\n\n",
+            "## Unreleased\n\n- Not represented in the final section.\n\n",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(release.ReleaseContractError, match="material Unreleased"):
+        release.validate_release(tmp_path, "0.2.0")
 
 
 def test_main_converts_unwritable_github_output_to_exit_two(
@@ -80,3 +100,36 @@ def test_main_converts_unwritable_github_output_to_exit_two(
 
     assert result == 2
     assert "release contract:" in capsys.readouterr().err
+
+
+def test_validate_release_rejects_symlinked_source_metadata(tmp_path: Path) -> None:
+    """Release metadata must not escape the reviewed source tree through a link."""
+
+    repository = tmp_path / "repository"
+    _project(repository)
+    outside_changelog = tmp_path / "outside-changelog.md"
+    outside_changelog.write_text(
+        "# Changelog\n\n"
+        "## Unreleased\n\n"
+        "## [0.2.0] - 2026-08-04\n\n"
+        "- Unreviewed external release notes.\n",
+        encoding="utf-8",
+    )
+    changelog = repository / "CHANGELOG.md"
+    changelog.unlink()
+    changelog.symlink_to(outside_changelog)
+
+    with pytest.raises(release.ReleaseContractError, match="regular file inside release root"):
+        release.validate_release(repository, "0.2.0")
+
+def test_validate_release_rejects_hard_linked_source_metadata(tmp_path: Path) -> None:
+    """Release metadata must not share an inode with an unreviewed external path."""
+
+    repository = tmp_path / "repository"
+    _project(repository)
+    changelog = repository / "CHANGELOG.md"
+    outside_changelog = tmp_path / "outside-changelog.md"
+    outside_changelog.hardlink_to(changelog)
+
+    with pytest.raises(release.ReleaseContractError, match="regular file inside release root"):
+        release.validate_release(repository, "0.2.0")

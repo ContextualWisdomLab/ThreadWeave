@@ -227,3 +227,22 @@ def test_autonomy_and_evidence_identity_adrs_are_accepted_and_indexed() -> None:
     assert "**Status:** Accepted" in evidence
     assert "contributor head SHA" in evidence
     assert "live protected-base tip SHA" in evidence
+
+
+def test_trusted_release_identity_adr_is_accepted_and_indexed() -> None:
+    """Persist the non-bypass Trusted Publishing boundary as an architecture decision."""
+
+    index = _read("docs/adr/README.md")
+    decision = _read("docs/adr/0008-trusted-release-identity-boundary.md")
+    release = _read("docs/RELEASE_PROVENANCE.md")
+    traceability = _read("docs/TRACEABILITY.md")
+
+    assert "0008-trusted-release-identity-boundary.md" in index
+    assert "**Status:** Accepted" in decision
+    assert "pre-created" in decision
+    assert "prevent self-review" in decision
+    assert "protected branches" in decision
+    assert "long-lived PyPI token" in decision
+    assert "manual upload" in decision
+    assert "release-readiness" in release
+    assert "ADR-0008" in traceability

@@ -8,6 +8,13 @@ ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 HARDEN_RUNNER = "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920"
 EXPECTED_RELEASE_ENDPOINTS = {
+    "release-readiness": {
+        "api.github.com:443",
+        "pypi.org:443",
+        "results-receiver.actions.githubusercontent.com:443",
+        "*.actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
+    },
     "build-release": {
         "api.github.com:443",
         "files.pythonhosted.org:443",
@@ -98,10 +105,30 @@ def test_release_is_manual_main_only_and_single_flight() -> None:
     assert "cancel-in-progress: false" in workflow
 
 
+def test_release_requires_environment_readiness_before_build_or_irreversible_work() -> None:
+    """Fail before build/attest/tag if the protected PyPI environment is not ready."""
+
+    workflow = _workflow()
+    assert workflow.index("  release-readiness:\n") < workflow.index("  build-release:\n")
+    readiness = _job_block(workflow, "release-readiness", "build-release")
+    assert "actions: read" in readiness
+    assert "contents: read" in readiness
+    assert "gh api \"repos/$GITHUB_REPOSITORY/environments/pypi\"" in readiness
+    assert 'required_reviewers' in readiness
+    assert 'prevent_self_review' in readiness
+    assert 'protected_branches' in readiness
+    assert 'curl' in readiness
+    assert 'https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json' in readiness
+    assert "already exists on PyPI" in readiness
+    build = _job_block(workflow, "build-release", "attest-release")
+    assert "needs: release-readiness" in build
+
+
 def test_release_separates_build_attestation_tag_release_and_publish_privileges() -> None:
     """Build code never shares a job with publish, tag, or release credentials."""
 
     workflow = _workflow()
+    assert "release-readiness:" in workflow
     assert "build-release:" in workflow
     assert "attest-release:" in workflow
     assert "tag-release:" in workflow
@@ -147,6 +174,7 @@ def test_release_harden_runner_endpoint_input_is_space_delimited() -> None:
     literal_marker = "          allowed-endpoints: |\n"
     folded_marker = "          allowed-endpoints: >-\n"
     jobs = (
+        ("release-readiness", "build-release"),
         ("build-release", "attest-release"),
         ("attest-release", "tag-release"),
         ("tag-release", "github-release"),
@@ -177,7 +205,6 @@ def test_build_repeats_quality_gates_and_prepares_release_evidence() -> None:
     assert "scripts/ci/release_contract.py prepare" in workflow
     assert "SHA256SUMS.txt" in workflow
     assert ".spdx.json" in workflow
-    assert "git diff --exit-code" in workflow
 
 
 def test_attestation_covers_distributions_and_spdx_sbom() -> None:

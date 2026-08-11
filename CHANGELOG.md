@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.2.0] - 2026-08-10
+
+- Add a fail-closed release-readiness gate that requires a pre-created `pypi`
+  environment with required reviewers, self-review prevention, protected-branch
+  deployment policy, and an unpublished target version before build,
+  attestation, tag, or GitHub Release side effects can begin; record the Trusted
+  Publishing boundary in ADR-0008.
 - Extend the canonical architecture graph with a reconstruction-oriented
   documentation fitness audit, data-governance/privacy boundary, incident/RCA
   runbook, release/provenance/licensing gate, work-conserving autonomous
@@ -26,9 +33,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Restore the hourly NVIDIA NIM/OpenCode product-development workflow's YAML and
   nested-shell contracts, and lint every GitHub Actions workflow with a pinned,
   checksum-verified `actionlint` release before ordinary CI may proceed.
-
-## [0.2.0] - 2026-08-04
-
 - Add iterative RFC 5256 `THREAD` and `UID THREAD` response serialization with
   search-result projection, sequence-number, UID, or callable identifier
   selection, dummy-root preservation, protocol-safe framing, and fail-closed
@@ -123,7 +127,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optional base-subject grouping.
 - `Message` input dataclass (`message_id`, `in_reply_to`, `references`,
   `subject`, `payload`) and loop-safe `Container` thread-tree node.
-- RFC 5322 §3.6.4 primitives extracted behaviour-preserving from naruon
+- RFC 5322 §3.6.4 primitives extracted behaviour-preserving from the naruon
   control plane: `normalize_message_id`, `extract_reference_ids`,
   `generate_email_fingerprint`.
 - `normalize_subject` / `is_reply_subject` base-subject helpers.

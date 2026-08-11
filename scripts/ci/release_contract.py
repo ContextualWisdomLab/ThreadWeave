@@ -58,21 +58,40 @@ class ReleaseEvidence:
     sbom_path: Path
 
 
-def _read_text(path: Path, label: str) -> str:
-    """Read strict UTF-8 text or raise a release-specific error."""
+def _read_text(path: Path, label: str, root: Path) -> str:
+    """Read one real UTF-8 file contained by the reviewed release root."""
 
     try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
+        trusted_root = root.resolve(strict=True)
+        candidate = path.absolute()
+        relative = candidate.relative_to(trusted_root)
+        current = trusted_root
+        for part in relative.parts:
+            current /= part
+            if current.is_symlink():
+                raise ReleaseContractError(
+                    f"{label} must be one regular file inside release root: {path}"
+                )
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(trusted_root)
+        metadata = candidate.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ReleaseContractError(
+                f"{label} must be one regular file inside release root: {path}"
+            )
+        return resolved.read_text(encoding="utf-8")
+    except ReleaseContractError:
+        raise
+    except (OSError, UnicodeError, ValueError) as exc:
         raise ReleaseContractError(f"could not read {label}: {path}") from exc
 
 
-def _read_project_version(path: Path) -> str:
+def _read_project_version(path: Path, root: Path) -> str:
     """Return the one literal ``[project].version`` value from ``pyproject.toml``."""
 
     in_project = False
     versions: list[str] = []
-    for line in _read_text(path, "project metadata").splitlines():
+    for line in _read_text(path, "project metadata", root).splitlines():
         if _PROJECT_SECTION.fullmatch(line):
             in_project = True
             continue
@@ -91,11 +110,11 @@ def _read_project_version(path: Path) -> str:
     return versions[0]
 
 
-def _read_package_version(path: Path) -> str:
+def _read_package_version(path: Path, root: Path) -> str:
     """Return one top-level literal ``__version__`` assignment from the package."""
 
     try:
-        module = ast.parse(_read_text(path, "package metadata"), filename=str(path))
+        module = ast.parse(_read_text(path, "package metadata", root), filename=str(path))
     except SyntaxError as exc:
         raise ReleaseContractError("package metadata is not valid Python") from exc
 
@@ -127,10 +146,25 @@ def _read_package_version(path: Path) -> str:
     return value.value
 
 
-def _read_changelog(path: Path, version: str) -> tuple[str, str]:
-    """Return the ISO date and material notes for one unique release section."""
+def _read_changelog(path: Path, version: str, root: Path) -> tuple[str, str]:
+    """Return final release notes only when the Unreleased section is empty."""
 
-    text = _read_text(path, "changelog")
+    text = _read_text(path, "changelog", root)
+    unreleased = re.search(r"^## Unreleased\s*$", text, re.MULTILINE)
+    if unreleased is not None:
+        following_unreleased = re.search(
+            r"^## ", text[unreleased.end() :], re.MULTILINE
+        )
+        unreleased_end = (
+            unreleased.end() + following_unreleased.start()
+            if following_unreleased is not None
+            else len(text)
+        )
+        if text[unreleased.end() : unreleased_end].strip():
+            raise ReleaseContractError(
+                "changelog has material Unreleased notes for a final release"
+            )
+
     header = re.compile(
         rf"^## \[{re.escape(version)}\] - (?P<date>[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}})\s*$",
         re.MULTILINE,
@@ -166,15 +200,22 @@ def validate_release(root: Path, requested_version: str) -> ReleaseContract:
         raise ReleaseContractError(
             "requested version must be a canonical three-part final version"
         )
-    project_version = _read_project_version(root / "pyproject.toml")
-    package_version = _read_package_version(root / "src/threadweave/__init__.py")
+    trusted_root = root.resolve(strict=True)
+    project_version = _read_project_version(
+        trusted_root / "pyproject.toml", trusted_root
+    )
+    package_version = _read_package_version(
+        trusted_root / "src/threadweave/__init__.py", trusted_root
+    )
     if project_version != package_version:
         raise ReleaseContractError("project and package version metadata disagrees")
     if requested_version != project_version:
         raise ReleaseContractError(
             "requested version does not match the reviewed project version"
         )
-    release_date, notes = _read_changelog(root / "CHANGELOG.md", requested_version)
+    release_date, notes = _read_changelog(
+        trusted_root / "CHANGELOG.md", requested_version, trusted_root
+    )
     return ReleaseContract(
         version=requested_version,
         tag=f"v{requested_version}",

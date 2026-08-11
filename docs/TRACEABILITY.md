@@ -22,9 +22,10 @@ This matrix links durable product/technical requirements to standards, source bo
 | ADR-0005 automation authority | supply-chain/security policy | `.github/workflows`, `scripts/ci` | secret isolation, patch guard, publisher/release boundary tests | accepted/implemented-main |
 | ADR-0006 work-conserving maintenance | repository governance | protected-main hourly maintenance/development workflow + PR #28 prompt hardening (`ab4595f`) | prompt contract forbids one-sub-step completion, requires two internal exit sweeps, preserves one-proposal/NVIDIA/reverification/publisher boundaries | accepted/implemented-main |
 | ADR-0007 exact evidence identity | repository governance | PR/check/release evidence handling | contributor-head/base-snapshot/live-base/tested-ref assertions | accepted/implemented-main documentation rule |
+| ADR-0008 trusted release identity | GitHub deployment environment + PyPI Trusted Publishing authority | `.github/workflows/release.yml`, `docs/RELEASE_PROVENANCE.md` | pre-created `pypi` environment, required reviewer/self-review/protected-branch checks, public-version preflight, no token/manual-upload bypass | accepted/active-PR until release-readiness workflow change integrates |
 | data governance/privacy boundary | product governance | core no-I/O runtime + host boundary | no network/database/model I/O; payload/output boundary tests | accepted/implemented-main documentation rule |
 | incident/RCA ownership | repository operations | runtime modules + CI/release boundary | first-failing-layer RCA + regression + exact-head revalidation | accepted/implemented-main documentation rule |
-| release/provenance/licensing gate | release architecture | release workflow/package metadata/license | exact-head package hashes, trusted publishing, post-publish smoke | partial until first 0.2.0 public release |
+| release/provenance/licensing gate | release architecture | release workflow/package metadata/license | exact-head package hashes, readiness preflight, trusted publishing, post-publish smoke | partial until first 0.2.0 public release |
 | Python 3.14 compatibility | Python Software Foundation release line + CWL quality contract | protected-main PR #27 merge `4fa4caf`; package metadata + CI matrix | exact-head Python 3.10–3.14 tests/coverage plus Python 3.14 package build/hash-install/outside-source smoke | implemented-main |
 | PEP 561 package typing | PEP 561 | package metadata / `py.typed` | wheel/sdist inclusion + external install smoke | implemented-main |
 | zero runtime dependency | standalone architecture | package metadata | `pip check`, lock/build smoke | implemented-main |
@@ -33,7 +34,7 @@ This matrix links durable product/technical requirements to standards, source bo
 
 ## Standards source of truth
 
-`docs/research/README.md` is the canonical research/standards grounding and contains APA 7th references and implemented-boundary explanations for JWZ, RFC 2047, RFC 5051, RFC 5256, RFC 5322, RFC 6532, RFC 9051, PEP 561, and the supported Python release line. Active incremental work additionally cites RFC 7162, RFC 8474, RFC 8621, and JSON where its snapshot/identity design requires them.
+`docs/research/README.md` is the canonical research/standards grounding and contains APA 7th references and implemented-boundary explanations for JWZ, RFC 2047, RFC 5051, RFC 5256, RFC 5322, RFC 6532, RFC 9051, PEP 561, and the supported Python release line. Active incremental work additionally cites RFC 7162, RFC 8474, RFC 8621, and JSON where its snapshot/identity design requires them. Release-identity implementation follows GitHub's deployment-environment/Actions permission model and PyPI Trusted Publishing rather than inventing a repository secret protocol.
 
 ## Documentation maturity rules
 
