@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Keep the root README a customer/operator guide for standalone
+  `pip install threadweave` and host composition through
+  `from threadweave import thread_messages`, and move the hourly autonomous
+  maintenance playbook to
+  [`docs/operations/hourly-autonomous-maintenance.md`](docs/operations/hourly-autonomous-maintenance.md).
+
 ## [0.2.0] - 2026-08-10
 
 - Add a fail-closed release-readiness gate that requires a pre-created `pypi`

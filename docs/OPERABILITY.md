@@ -1,7 +1,7 @@
 # ThreadWeave Operability, Integration, and Recovery Guide
 
 **Status:** Accepted for library operation and repository delivery.  
-**Last reviewed:** 2026-08-09
+**Last reviewed:** 2026-08-16
 
 ThreadWeave is a library, not an always-on service. Operability therefore means predictable resource behavior, integration observability, deterministic failures, reproducible packaging, and a safe release/rollback path. Host services own service SLOs, persistence, tenancy, distributed coordination, backups, and incident response for mailbox data.
 
@@ -107,3 +107,11 @@ For every deterministic failure, identify the first failing layer: adapter/heade
 ## Disaster recovery boundary
 
 ThreadWeave has no database backup to restore. The host's source mailbox data is the authoritative recovery source. If caches/projections/snapshots are lost, regenerate them from authorized canonical host metadata using a known-good ThreadWeave version. Host repositories must document their own backup/RPO/RTO separately.
+
+## Repository automation
+
+Hourly PR maintenance, exact-head verification, writer-boundary, NIM broker, and
+token-setup procedure live in
+[`docs/operations/hourly-autonomous-maintenance.md`](operations/hourly-autonomous-maintenance.md).
+That playbook is not a runtime operating dependency for `pip install threadweave`
+or host composition through `from threadweave import thread_messages`.

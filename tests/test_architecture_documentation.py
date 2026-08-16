@@ -19,6 +19,7 @@ REQUIRED_DOCUMENTS = (
     "docs/DATA_GOVERNANCE.md",
     "docs/TEST_STRATEGY.md",
     "docs/OPERABILITY.md",
+    "docs/operations/hourly-autonomous-maintenance.md",
     "docs/INCIDENT_RUNBOOK.md",
     "docs/RELEASE_PROVENANCE.md",
     "docs/TRACEABILITY.md",
@@ -52,6 +53,34 @@ def test_documentation_index_links_major_contracts() -> None:
         assert f"]({relative_path})" in documentation, (
             f"documentation index does not link {relative_path}"
         )
+
+
+def test_readme_stays_customer_operator_first() -> None:
+    """Keep the package front page a standalone/host guide, not a bot playbook."""
+
+    readme = _read("README.md")
+    operations = _read("docs/operations/hourly-autonomous-maintenance.md")
+    playbook_markers = (
+        "hourly-pr-maintenance.yml",
+        "hourly-product-development.yml",
+        "NVIDIA_NIM_API_KEY",
+        "PR_REVIEW_MERGE_TOKEN",
+        "OPENCODE_APPROVE_TOKEN",
+        "At minute 11",
+        "At minute 41",
+    )
+
+    assert "pip install threadweave" in readme
+    assert "from threadweave import" in readme
+    assert "thread_messages" in readme
+    assert "naruon" in readme.lower()
+    assert "docs/operations/hourly-autonomous-maintenance.md" in readme
+    assert readme.lower().count("## autonomous maintenance") <= 1
+    for marker in playbook_markers:
+        assert marker not in readme, f"README still embeds playbook detail: {marker}"
+        assert marker in operations, f"operations playbook is missing {marker}"
+    assert "do not merge" in operations.lower() or "never merges" in operations.lower()
+    assert "dry_run" in operations
 
 
 def test_active_incremental_work_is_not_claimed_as_protected_main() -> None:

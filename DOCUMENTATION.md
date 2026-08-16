@@ -16,6 +16,7 @@ Use this file as the discoverable index for product, technical, architecture, sa
 | Data governance / privacy boundary | [`docs/DATA_GOVERNANCE.md`](docs/DATA_GOVERNANCE.md) |
 | Test strategy | [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) |
 | Operability/rollback | [`docs/OPERABILITY.md`](docs/OPERABILITY.md) |
+| Hourly autonomous maintenance | [`docs/operations/hourly-autonomous-maintenance.md`](docs/operations/hourly-autonomous-maintenance.md) |
 | Incident / RCA runbook | [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) |
 | Release/provenance/licensing gate | [`docs/RELEASE_PROVENANCE.md`](docs/RELEASE_PROVENANCE.md) |
 | Requirement/standard/evidence traceability | [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) |
