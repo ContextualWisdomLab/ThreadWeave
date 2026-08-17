@@ -39,7 +39,7 @@ Documentation in this repository must distinguish:
 - **host-owned**: responsibility belongs to naruon, an IMAP server, archive service, or another wrapper;
 - **planned / known gap**: accepted requirement not yet implemented/proven.
 
-PR #20 incremental mailbox state is active-PR/proposed until integrated. Sent-date ordering and RFC 5256 THREAD serialization are already implemented-main capabilities and must not be left in historical backlog lists. Python 3.14 CI/package support is a current known gap until it is implemented and proven on an exact head.
+PR #20 incremental mailbox state is active-PR/proposed until integrated. Sent-date ordering and RFC 5256 THREAD serialization are already implemented-main capabilities and must not be left in historical backlog lists. Python 3.14 CI/package support is implemented-main and must stay aligned with package metadata and the complete test matrix.
 
 ## Documentation fitness rule
 

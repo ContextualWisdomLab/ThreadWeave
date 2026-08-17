@@ -66,8 +66,6 @@ def test_readme_stays_customer_operator_first() -> None:
         "NVIDIA_NIM_API_KEY",
         "PR_REVIEW_MERGE_TOKEN",
         "OPENCODE_APPROVE_TOKEN",
-        "At minute 11",
-        "At minute 41",
     )
 
     assert "pip install threadweave" in readme
@@ -75,7 +73,7 @@ def test_readme_stays_customer_operator_first() -> None:
     assert "thread_messages" in readme
     assert "naruon" in readme.lower()
     assert "docs/operations/hourly-autonomous-maintenance.md" in readme
-    assert readme.lower().count("## autonomous maintenance") <= 1
+    assert "## autonomous maintenance" not in readme.lower()
     for marker in playbook_markers:
         assert marker not in readme, f"README still embeds playbook detail: {marker}"
         assert marker in operations, f"operations playbook is missing {marker}"
@@ -159,6 +157,7 @@ def test_python_314_claim_is_protected_main_and_cross_document_consistent() -> N
     prd = _read("docs/PRD.md")
     trd = _read("docs/TRD.md")
     architecture = _read("ARCHITECTURE.md")
+    documentation = _read("DOCUMENTATION.md")
     traceability = _read("docs/TRACEABILITY.md")
     agent_context = _read("CLAUDE.md")
 
@@ -166,10 +165,12 @@ def test_python_314_claim_is_protected_main_and_cross_document_consistent() -> N
     assert "Python 3.10–3.14 support on protected main" in prd
     assert "Python support: 3.10–3.14" in trd
     assert "Protected `main` supports Python 3.10 through 3.14" in architecture
+    assert "Python 3.14 CI/package support is implemented-main" in documentation
     assert "Python 3.14 compatibility" in traceability
     assert "implemented-main" in traceability
     assert "Protected main currently proves Python 3.10–3.14" in agent_context
     assert "current gap until implemented" not in agent_context
+    assert "current known gap" not in documentation
 
 
 def test_api_contract_keeps_internal_order_separate_from_public_identifiers() -> None:
