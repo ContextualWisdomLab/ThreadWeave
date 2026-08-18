@@ -19,6 +19,7 @@ REQUIRED_DOCUMENTS = (
     "docs/DATA_GOVERNANCE.md",
     "docs/TEST_STRATEGY.md",
     "docs/OPERABILITY.md",
+    "docs/operations/hourly-autonomous-maintenance.md",
     "docs/INCIDENT_RUNBOOK.md",
     "docs/RELEASE_PROVENANCE.md",
     "docs/TRACEABILITY.md",
@@ -52,6 +53,32 @@ def test_documentation_index_links_major_contracts() -> None:
         assert f"]({relative_path})" in documentation, (
             f"documentation index does not link {relative_path}"
         )
+
+
+def test_readme_stays_customer_operator_first() -> None:
+    """Keep the package front page a standalone/host guide, not a bot playbook."""
+
+    readme = _read("README.md")
+    operations = _read("docs/operations/hourly-autonomous-maintenance.md")
+    playbook_markers = (
+        "hourly-pr-maintenance.yml",
+        "hourly-product-development.yml",
+        "NVIDIA_NIM_API_KEY",
+        "PR_REVIEW_MERGE_TOKEN",
+        "OPENCODE_APPROVE_TOKEN",
+    )
+
+    assert "pip install threadweave" in readme
+    assert "from threadweave import" in readme
+    assert "thread_messages" in readme
+    assert "naruon" in readme.lower()
+    assert "docs/operations/hourly-autonomous-maintenance.md" in readme
+    assert "## autonomous maintenance" not in readme.lower()
+    for marker in playbook_markers:
+        assert marker not in readme, f"README still embeds playbook detail: {marker}"
+        assert marker in operations, f"operations playbook is missing {marker}"
+    assert "do not merge" in operations.lower() or "never merges" in operations.lower()
+    assert "dry_run" in operations
 
 
 def test_active_incremental_work_is_not_claimed_as_protected_main() -> None:
@@ -130,6 +157,7 @@ def test_python_314_claim_is_protected_main_and_cross_document_consistent() -> N
     prd = _read("docs/PRD.md")
     trd = _read("docs/TRD.md")
     architecture = _read("ARCHITECTURE.md")
+    documentation = _read("DOCUMENTATION.md")
     traceability = _read("docs/TRACEABILITY.md")
     agent_context = _read("CLAUDE.md")
 
@@ -137,10 +165,12 @@ def test_python_314_claim_is_protected_main_and_cross_document_consistent() -> N
     assert "Python 3.10–3.14 support on protected main" in prd
     assert "Python support: 3.10–3.14" in trd
     assert "Protected `main` supports Python 3.10 through 3.14" in architecture
+    assert "Python 3.14 CI/package support is implemented-main" in documentation
     assert "Python 3.14 compatibility" in traceability
     assert "implemented-main" in traceability
     assert "Protected main currently proves Python 3.10–3.14" in agent_context
     assert "current gap until implemented" not in agent_context
+    assert "current known gap" not in documentation
 
 
 def test_api_contract_keeps_internal_order_separate_from_public_identifiers() -> None:

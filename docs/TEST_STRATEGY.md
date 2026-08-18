@@ -108,7 +108,7 @@ Verify immutable GitHub Action refs, secret isolation, no model-to-publisher cre
 
 ## Documentation contract tests
 
-Tests should require canonical PRD, TRD, Architecture, UML, ERD/domain model, API contract, ADR index, Security, Threat Model, Data Governance, Test Strategy, Operability, Incident Runbook, Release/Provenance, Traceability, Documentation Audit, AGENTS, CLAUDE, README, and CHANGELOG. They should assert actual Markdown discoverability links, ADR status on the correct row, conceptual-vs-persisted ownership, current Python-support claims, exact evidence-identity terminology, and that active PR #20 is labelled as non-main target rather than current capability until merged.
+Tests should require canonical PRD, TRD, Architecture, UML, ERD/domain model, API contract, ADR index, Security, Threat Model, Data Governance, Test Strategy, Operability, hourly autonomous maintenance, Incident Runbook, Release/Provenance, Traceability, Documentation Audit, AGENTS, CLAUDE, README, and CHANGELOG. They should assert actual Markdown discoverability links, ADR status on the correct row, conceptual-vs-persisted ownership, current Python-support claims, exact evidence-identity terminology, and that active PR #20 is labelled as non-main target rather than current capability until merged.
 
 ## Failure policy
 
