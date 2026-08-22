@@ -680,11 +680,26 @@ class GitHubJsonClient:
             the limit" from "over the limit" without a second read).
 
         Raises:
+            AuditError: If ``url`` does not use the ``https`` scheme.
+                ``urllib`` also honors ``file://`` and other schemes, which
+                would let a caller-controlled base URL read the local
+                filesystem instead of calling the GitHub API; this client
+                only ever calls GitHub over HTTPS.
             HttpStatusError: If the server returns a non-2xx status.
         """
+        if not url.startswith("https://"):
+            raise AuditError(f"refusing non-https GitHub API URL: {url!r}")
         request = urllib.request.Request(url, headers=dict(headers))
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+            # The scheme is checked immediately above, so a hostile "file://"
+            # or similar redirect cannot reach urlopen. `_base_url` defaults
+            # to the literal "https://api.github.com" and the sole production
+            # caller (`_build_client_from_env`) never overrides it; only the
+            # path/query built from already-validated repository/SHA/path
+            # identities varies.
+            with urllib.request.urlopen(  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected  # nosec B310
+                request, timeout=30
+            ) as response:
                 return response.read(MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as error:
             raise HttpStatusError(url=url, status=error.code) from error

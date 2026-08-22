@@ -1065,6 +1065,15 @@ class TestGitHubJsonClientTransport:
         result = client.get("/repos/ContextualWisdomLab/ThreadWeave/actions/workflows")
         assert result == {"total_count": 0, "workflows": []}
 
+    def test_default_opener_rejects_non_https_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def fake_urlopen(request: object, timeout: float):
+            raise AssertionError("urlopen must not be called for a non-https URL")
+
+        monkeypatch.setattr(audit.urllib.request, "urlopen", fake_urlopen)
+        client = audit.GitHubJsonClient(token="ghp_fake", base_url="file:///etc/passwd")
+        with pytest.raises(audit.AuditError, match="non-https"):
+            client.get("")
+
     def test_default_opener_wraps_http_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import urllib.error
 
