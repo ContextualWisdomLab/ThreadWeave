@@ -24,6 +24,7 @@ def _load(name: str, relative_path: str) -> ModuleType:
 
 
 MODULES = (
+    _load("threadweave_actions_registry_audit", "scripts/ci/actions_registry_audit.py"),
     _load("threadweave_hourly_product_guard", "scripts/ci/hourly_product_guard.py"),
     _load("threadweave_nim_proxy", "scripts/ci/nim_proxy.py"),
     _load("threadweave_release_contract", "scripts/ci/release_contract.py"),
