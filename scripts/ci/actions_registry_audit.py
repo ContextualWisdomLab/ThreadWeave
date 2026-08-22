@@ -320,7 +320,11 @@ def classify_workflow_records(
             reason = "backed by protected-main source"
         elif normalized_path in active_pr:
             classification = "active_pr_workflow"
-            reason = "backed by a current same-repository open-PR head"
+            reason = (
+                "backed by a current same-repository open-PR head"
+                if is_active
+                else "backed by a current same-repository open-PR head (currently disabled)"
+            )
         else:
             classification = "orphan_active" if is_active else "orphan_disabled"
             reason = "absent from protected main and every open-PR head"

@@ -190,6 +190,24 @@ class TestClassifyWorkflowRecords:
             active_pr_paths={".github/workflows/apply-pr20.yml"},
         )
         assert result[0].classification == "active_pr_workflow"
+        assert "disabled" not in result[0].reason
+
+    def test_active_pr_workflow_disabled_reason_notes_disabled_state(self) -> None:
+        """A PR-head-backed workflow that is currently disabled still gets the
+        active_pr_workflow bucket (Devin review finding on PR #32: the state
+        machine has no separate disabled-PR-head bucket and adding one is not
+        warranted), but its reason text must say so -- otherwise the report
+        reads as though the workflow is running when it is not."""
+        records = [
+            _record(2, "PR20 repair", ".github/workflows/apply-pr20.yml", "disabled_manually")
+        ]
+        result = audit.classify_workflow_records(
+            records,
+            protected_paths={".github/workflows/ci.yml"},
+            active_pr_paths={".github/workflows/apply-pr20.yml"},
+        )
+        assert result[0].classification == "active_pr_workflow"
+        assert "disabled" in result[0].reason
 
     def test_orphan_active_absent_from_main_and_every_pr_head(self) -> None:
         records = [
