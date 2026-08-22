@@ -132,7 +132,7 @@ git commit -m "test(operations): require Actions registry lifecycle audit"
 ### Task 7: Integrate the canonical governance record
 
 **Files:**
-- Create: `docs/adr/0009-actions-registry-lifecycle-evidence.md`
+- Create: `docs/adr/0010-actions-registry-lifecycle-evidence.md`
 - Modify: `docs/adr/README.md`
 - Modify: `docs/OPERABILITY.md`
 - Modify: `docs/INCIDENT_RUNBOOK.md`

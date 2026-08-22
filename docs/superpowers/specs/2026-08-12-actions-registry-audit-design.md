@@ -75,10 +75,11 @@ It excludes tokens, headers, raw response bodies, comments, PR titles, model out
 
 `.github/workflows/actions-registry-audit.yml` runs:
 
-- on relevant pull requests for contract verification;
 - on protected-main changes to the detector;
 - manually;
 - hourly at minute 53, separate from ThreadWeave's minute-11 PR maintenance and minute-41 product loop.
+
+It deliberately does **not** run on `pull_request`: the audit is meant to fail visibly on a genuine live orphan, and while any real orphan remains undisabled that would make it a permanently red check on every unrelated PR. `tests/test_actions_registry_audit.py`, exercised at exact 100% coverage in `ci.yml` on every PR that touches the detector, is the PR-time contract verification for the detector's own correctness.
 
 Permissions are exactly `actions: read`, `contents: read`, and `pull-requests: read`. The live job uploads evidence even when the audit detects an orphan or unresolved state, then fails visibly. It has no contents, pull-request, issue, environment, OIDC, model, secret, release, or Actions write authority.
 

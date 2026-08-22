@@ -27,8 +27,10 @@ import sys
 import tempfile
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -211,22 +213,38 @@ def classify_workflow_records(
         One :class:`ClassifiedWorkflow` per input record, in input order.
         A record is ``unresolved`` if its ``id`` is not a positive integer
         (or is a ``bool``, since ``bool`` is a ``int`` subclass in Python and
-        would otherwise silently pass an ``int`` check), if its ``id``
-        collides with another record's ``id``, or if its ``name``/``path``/
-        ``state`` fields are missing or malformed. A record whose path
-        parses but does not match the repository workflow-path shape is
-        ``dynamic_owned`` (GitHub reports non-repository-path identities,
-        such as externally managed dynamic workflows, this way).
+        would otherwise silently pass an ``int`` check); if its ``id``
+        collides with another record's ``id``; if its ``name``/``path``/
+        ``state`` fields are missing or malformed; if its normalized path
+        collides with another record's normalized path (two different
+        workflow IDs must never silently share one canonical source path);
+        or if its path starts with the repository workflow prefix
+        (``.github/workflows/``) but fails strict normalization — that shape
+        is ambiguous/suspicious rather than a legitimate non-repository
+        identity, so it is never silently treated as GitHub-owned. A record
+        whose path does not start with that prefix at all is
+        ``dynamic_owned`` (GitHub reports genuinely non-repository-path
+        identities, such as externally managed dynamic workflows, this way).
     """
     protected = set(protected_paths)
     active_pr = set(active_pr_paths)
 
     seen_ids: dict[object, int] = {}
+    seen_paths: dict[str, int] = {}
     for record in records:
-        if isinstance(record, Mapping) and "id" in record:
+        if not isinstance(record, Mapping):
+            continue
+        if "id" in record:
             raw_id = record["id"]
             if isinstance(raw_id, int) and not isinstance(raw_id, bool) and raw_id > 0:
                 seen_ids[raw_id] = seen_ids.get(raw_id, 0) + 1
+        path = record.get("path")
+        if isinstance(path, str) and path.startswith(".github/workflows/"):
+            try:
+                normalized = normalize_workflow_path(path)
+            except AuditError:
+                continue
+            seen_paths[normalized] = seen_paths.get(normalized, 0) + 1
 
     results: list[ClassifiedWorkflow] = []
     for record in records:
@@ -257,11 +275,27 @@ def classify_workflow_records(
             )
             continue
 
+        if not isinstance(path, str) or not path.startswith(".github/workflows/"):
+            results.append(
+                ClassifiedWorkflow(raw_id, name, path, state, "dynamic_owned", "non-repository-path identity")
+            )
+            continue
+
         try:
             normalized_path = normalize_workflow_path(path)
         except AuditError:
             results.append(
-                ClassifiedWorkflow(raw_id, name, path, state, "dynamic_owned", "non-repository-path identity")
+                ClassifiedWorkflow(
+                    raw_id, name, path, state, "unresolved", "malformed repository-shaped workflow path"
+                )
+            )
+            continue
+
+        if seen_paths.get(normalized_path, 0) > 1:
+            results.append(
+                ClassifiedWorkflow(
+                    raw_id, name, normalized_path, state, "unresolved", "duplicate normalized workflow path"
+                )
             )
             continue
 
@@ -515,12 +549,14 @@ def audit_actions_registry(client: _JsonGetter, repository: str) -> dict[str, An
 
     Raises:
         AuditError: If any underlying fetch, pagination, or tree read fails
-            closed, or if the protected-main default-branch SHA observed at
-            the start of the audit differs from the SHA observed again at
-            the end (a race between two reads that could otherwise bind
-            evidence to a branch state that no longer exists).
+            closed, or if the protected-main branch SHA, live workflow ID
+            set, or open-PR number/head-SHA snapshot observed at the start
+            of the audit differs from what is observed again at the end (a
+            race between the two reads that could otherwise bind evidence to
+            registry or branch state that no longer exists).
     """
     repository = normalize_repository(repository)
+    observed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     branch = client.get(f"/repos/{repository}/branches/main")
     if not isinstance(branch, Mapping):
@@ -558,6 +594,36 @@ def audit_actions_registry(client: _JsonGetter, repository: str) -> dict[str, An
             f"{protected_main_sha} -> {revalidation_sha}"
         )
 
+    revalidation_workflow_records, _ = list_workflow_records(client, repository)
+    revalidation_workflow_ids = {
+        record["id"]
+        for record in revalidation_workflow_records
+        if isinstance(record, Mapping)
+        and isinstance(record.get("id"), int)
+        and not isinstance(record.get("id"), bool)
+    }
+    initial_workflow_ids = {
+        record["id"]
+        for record in workflow_records
+        if isinstance(record, Mapping)
+        and isinstance(record.get("id"), int)
+        and not isinstance(record.get("id"), bool)
+    }
+    if revalidation_workflow_ids != initial_workflow_ids:
+        raise AuditError(
+            "workflow registry inventory drifted during the audit: "
+            f"{sorted(initial_workflow_ids)} -> {sorted(revalidation_workflow_ids)}"
+        )
+
+    revalidation_pull_requests, _ = list_open_pull_requests(client, repository)
+    revalidation_pr_snapshot = {(pr.number, pr.head_sha) for pr in revalidation_pull_requests}
+    initial_pr_snapshot = {(pr.number, pr.head_sha) for pr in pull_requests}
+    if revalidation_pr_snapshot != initial_pr_snapshot:
+        raise AuditError(
+            "open pull-request snapshot drifted during the audit: "
+            f"{sorted(initial_pr_snapshot)} -> {sorted(revalidation_pr_snapshot)}"
+        )
+
     summary: dict[str, int] = {}
     for record in classified:
         summary[record.classification] = summary.get(record.classification, 0) + 1
@@ -565,6 +631,7 @@ def audit_actions_registry(client: _JsonGetter, repository: str) -> dict[str, An
     return {
         "schema": REPORT_SCHEMA,
         "repository": repository,
+        "observed_at": observed_at,
         "protected_main_sha": protected_main_sha,
         "api_version": API_VERSION,
         "workflow_pagination": {
@@ -723,7 +790,7 @@ class GitHubJsonClient:
         """
         url = self._base_url + path
         if params:
-            query = "&".join(f"{key}={value}" for key, value in params.items())
+            query = urllib.parse.urlencode(params)
             url = f"{url}?{query}"
         headers = {
             "Accept": "application/vnd.github+json",

@@ -116,9 +116,11 @@ class TestNormalizeWorkflowPath:
             audit.normalize_workflow_path(value)  # type: ignore[arg-type]
 
     def test_rejects_non_nfc_path(self) -> None:
-        # "e" + combining acute accent (NFD) instead of the precomposed
-        # "é" (NFC); both render identically but must not silently collapse.
-        nfd_path = ".github/workflows/café.yml"
+        # "e" + combining acute accent U+0301 (NFD) instead of the
+        # precomposed "é" U+00E9 (NFC); both render identically but must
+        # not silently collapse. Explicit escapes rather than embedded
+        # combining characters keep the byte sequence visible in source.
+        nfd_path = ".github/workflows/cafe\u0301.yml"
         with pytest.raises(audit.AuditError):
             audit.normalize_workflow_path(nfd_path)
 
@@ -505,6 +507,8 @@ class _StubClient:
         main_tree: dict,
         pr_trees: dict[str, dict] | None = None,
         drift_default_branch_sha: str | None = None,
+        drift_workflow_records: list[dict] | None = None,
+        drift_pull_requests: list[dict] | None = None,
     ) -> None:
         self.default_branch_sha = default_branch_sha
         self.workflow_records = workflow_records
@@ -512,7 +516,11 @@ class _StubClient:
         self.main_tree = main_tree
         self.pr_trees = pr_trees or {}
         self._drift_default_branch_sha = drift_default_branch_sha
+        self._drift_workflow_records = drift_workflow_records
+        self._drift_pull_requests = drift_pull_requests
         self._branch_calls = 0
+        self._workflow_list_calls = 0
+        self._pull_list_calls = 0
 
     def get(self, path: str, *, params: dict | None = None) -> dict | list:
         params = params or {}
@@ -524,11 +532,20 @@ class _StubClient:
         if path.endswith("/actions/workflows"):
             page = int(params.get("page", 1))
             if page == 1:
-                return {"total_count": len(self.workflow_records), "workflows": self.workflow_records}
-            return {"total_count": len(self.workflow_records), "workflows": []}
+                self._workflow_list_calls += 1
+                records = self.workflow_records
+                if self._workflow_list_calls > 1 and self._drift_workflow_records is not None:
+                    records = self._drift_workflow_records
+                return {"total_count": len(records), "workflows": records}
+            return {"total_count": 0, "workflows": []}
         if path.endswith("/pulls"):
             page = int(params.get("page", 1))
-            return self.pull_requests if page == 1 else []
+            if page != 1:
+                return []
+            self._pull_list_calls += 1
+            if self._pull_list_calls > 1 and self._drift_pull_requests is not None:
+                return self._drift_pull_requests
+            return self.pull_requests
         if "/git/trees/" in path:
             sha = path.rsplit("/", 1)[-1]
             if sha == self.default_branch_sha:
@@ -611,6 +628,40 @@ class TestAuditActionsRegistry:
         client = _base_stub_client(drift_default_branch_sha="c" * 40)
         with pytest.raises(audit.AuditError):
             audit.audit_actions_registry(client, "ContextualWisdomLab/ThreadWeave")
+
+    def test_workflow_inventory_drift_fails_closed(self) -> None:
+        """A workflow appearing/disappearing between the two reads must fail closed."""
+        client = _base_stub_client(
+            drift_workflow_records=[
+                _record(1, "CI", ".github/workflows/ci.yml", "active"),
+                _record(2, "new", ".github/workflows/new.yml", "active"),
+            ]
+        )
+        with pytest.raises(audit.AuditError, match="inventory drifted"):
+            audit.audit_actions_registry(client, "ContextualWisdomLab/ThreadWeave")
+
+    def test_open_pull_request_snapshot_drift_fails_closed(self) -> None:
+        """A PR head moving (or a PR closing) mid-audit must fail closed."""
+        pr_head = "b" * 40
+        client = _base_stub_client(
+            pull_requests=[
+                {
+                    "number": 20,
+                    "head": {"sha": pr_head, "repo": {"full_name": "ContextualWisdomLab/ThreadWeave"}},
+                    "base": {"sha": "a" * 40},
+                }
+            ],
+            pr_trees={pr_head: {"sha": pr_head, "truncated": False, "tree": []}},
+            drift_pull_requests=[],
+        )
+        with pytest.raises(audit.AuditError, match="snapshot drifted"):
+            audit.audit_actions_registry(client, "ContextualWisdomLab/ThreadWeave")
+
+    def test_report_includes_observed_at_timestamp(self) -> None:
+        client = _base_stub_client()
+        report = audit.audit_actions_registry(client, "ContextualWisdomLab/ThreadWeave")
+        assert report["observed_at"].endswith("Z")
+        assert len(report["observed_at"]) == len("2026-08-22T00:00:00Z")
 
     def test_report_excludes_secret_shaped_and_uncontrolled_fields(self) -> None:
         client = _base_stub_client()
@@ -821,6 +872,43 @@ class TestClassifyWorkflowRecordsMalformedInput:
             active_pr_paths=set(),
         )
         assert result[0].classification == "unresolved"
+
+    def test_duplicate_normalized_path_is_unresolved_for_both_records(self) -> None:
+        """Two different workflow IDs must never silently share one canonical path."""
+        records = [
+            _record(1, "CI", ".github/workflows/ci.yml", "active"),
+            _record(2, "CI duplicate", ".github/workflows/ci.yml", "disabled_manually"),
+        ]
+        result = audit.classify_workflow_records(
+            records,
+            protected_paths={".github/workflows/ci.yml"},
+            active_pr_paths=set(),
+        )
+        assert all(r.classification == "unresolved" for r in result)
+        assert all(r.reason == "duplicate normalized workflow path" for r in result)
+
+    def test_malformed_repository_shaped_path_is_unresolved_not_dynamic(self) -> None:
+        """A `.github/workflows/`-prefixed but malformed path is suspicious, not GitHub-owned."""
+        records = [
+            _record(1, "evasive", ".github/workflows/../escape.yml", "active"),
+        ]
+        result = audit.classify_workflow_records(
+            records,
+            protected_paths=set(),
+            active_pr_paths=set(),
+        )
+        assert result[0].classification == "unresolved"
+        assert result[0].reason == "malformed repository-shaped workflow path"
+
+    def test_non_prefixed_path_remains_dynamic_owned(self) -> None:
+        """A path that never claimed the repository workflow prefix is genuinely dynamic."""
+        records = [_record(1, "Dependency Graph", "dynamic/dependabot/update-graph", "active")]
+        result = audit.classify_workflow_records(
+            records,
+            protected_paths=set(),
+            active_pr_paths=set(),
+        )
+        assert result[0].classification == "dynamic_owned"
 
 
 class TestListWorkflowRecordsMalformedInput:

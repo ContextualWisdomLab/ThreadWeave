@@ -87,9 +87,9 @@ Determine whether failure belongs to ThreadWeave or an organization-central depe
 
 Deleting a workflow's YAML from the tree does not disable its independent registry record; GitHub still advertises it as active until explicitly disabled. Do not restore the deleted source and do not disable by filename pattern. Instead:
 
-1. run `scripts/ci/actions_registry_audit.py audit --repository <owner>/<repo> --output <path>` (or read the latest `.github/workflows/actions-registry-audit.yml` scheduled run's uploaded evidence);
+1. run `scripts/ci/actions_registry_audit.py audit --repository <owner>/<repo> --output <path>` (or read the latest `.github/workflows/actions-registry-audit.yml` scheduled run's uploaded evidence) — the audit itself fails closed if the protected-main branch SHA, live workflow ID set, or open-PR snapshot drifted between its start and end, so a completed run's report is bound to one consistent registry state;
 2. re-read the report's `recommended_disable_workflow_ids` — only `orphan_active` records, bound to the exact protected-main SHA and open-PR-head snapshot the audit observed;
-3. an authorized operator independently re-verifies each ID is still an orphan against the current live registry immediately before disabling it (state can move between the audit run and the disable action);
+3. an authorized operator re-runs the full audit immediately before disabling (not just a spot check of individual IDs) and confirms each ID is still `orphan_active` in that fresh run — state can move between the original audit and the disable action, and a fresh full run also re-detects a new orphan, a re-added workflow, or a moved PR head that a narrower per-ID check would miss;
 4. disable only confirmed IDs through the GitHub Actions lifecycle API with an explicit mutation credential; the audit tool itself never holds write authority (ADR-0010);
 5. preserve every currently supported workflow (`ci`, `Hourly PR Maintenance`, `Hourly Product Development`, `Release ThreadWeave`, `Actions Registry Audit`, and current security workflows) and record before/after evidence.
 
