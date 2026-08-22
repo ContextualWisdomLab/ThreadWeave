@@ -6,12 +6,18 @@ name: Actions Registry Audit
 # authority. See docs/superpowers/specs/2026-08-12-actions-registry-audit-design.md
 # and ADR-0010.
 
+# Deliberately no `pull_request:` trigger. The live audit is meant to fail
+# visibly when it finds a genuine orphan (that is the incident-detection
+# point of the tool), which would make it a permanently red, noisy check on
+# every unrelated PR for as long as any confirmed orphan remains undisabled
+# in the live registry. `ci.yml` already runs
+# tests/test_actions_registry_audit.py with exact 100% coverage on every PR
+# that touches the script; that is this repository's PR-time contract
+# verification for the detector's own correctness. This workflow is the
+# separate, deliberately visible incident signal: it runs against the real
+# live registry only on protected-main changes to the detector, on manual
+# dispatch, and on the hourly heartbeat.
 on:
-  pull_request:
-    paths:
-      - "scripts/ci/actions_registry_audit.py"
-      - "tests/test_actions_registry_audit.py"
-      - ".github/workflows/actions-registry-audit.yml"
   push:
     branches: [main]
     paths:
@@ -24,7 +30,7 @@ on:
     - cron: "53 * * * *"
 
 concurrency:
-  group: actions-registry-audit-${{ github.repository }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
+  group: actions-registry-audit-${{ github.repository }}
   cancel-in-progress: true
 
 permissions:
@@ -44,13 +50,11 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - name: Check out the triggering ref without persisted credentials
-        # No explicit `ref:` override: this resolves to the PR head on
-        # `pull_request` (so the PR's own version of the script is what gets
-        # contract-verified) and to the default branch tip on `push`,
-        # `schedule`, and `workflow_dispatch`. The audit itself always
-        # queries the live GitHub API for the actual protected-main state
-        # regardless of which ref is checked out locally.
+      - name: Check out the default branch without persisted credentials
+        # No explicit `ref:` needed: every remaining trigger (push to main,
+        # workflow_dispatch, schedule) already resolves to the default
+        # branch tip. The audit itself always queries the live GitHub API
+        # for the actual protected-main state regardless of the local ref.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
