@@ -25,6 +25,7 @@ REQUIRED_DOCUMENTS = (
     "docs/TRACEABILITY.md",
     "docs/DOCUMENTATION_AUDIT.md",
     "docs/adr/README.md",
+    "docs/product-technical-gap-baseline.md",
     "AGENTS.md",
     "CLAUDE.md",
     "README.md",
@@ -276,3 +277,43 @@ def test_trusted_release_identity_adr_is_accepted_and_indexed() -> None:
     assert "manual upload" in decision
     assert "release-readiness" in release
     assert "ADR-0008" in traceability
+
+
+def test_lineage_evidence_consumer_boundary_adr_is_proposed_and_indexed() -> None:
+    """Keep the naruon/LineageWeave boundary a documentation-only ADR, not a runtime coupling."""
+
+    index = _read("docs/adr/README.md")
+    decision = _read("docs/adr/0009-lineage-evidence-consumer-boundary.md")
+    traceability = _read("docs/TRACEABILITY.md")
+
+    assert "0009-lineage-evidence-consumer-boundary.md" in index
+    assert any(
+        row.rstrip().endswith("| Proposed |")
+        for row in index.splitlines()
+        if "[ADR-0009](0009-lineage-evidence-consumer-boundary.md)" in row
+    )
+    assert "**Status:** Proposed" in decision
+    assert "naruon#1437" in decision
+    assert "LineageWeave#338" in decision
+    assert "ThreadWeave remains completely unaware of LineageWeave" in decision
+    assert "RFC 8474" in decision
+    assert "ADR-0009" in traceability
+
+
+def test_gap_baseline_tracks_lineageweave_cross_repository_chain() -> None:
+    """Record the confirmed naruon/LineageWeave dependency chain and open PR/issue inventory."""
+
+    gap_baseline = _read("docs/product-technical-gap-baseline.md")
+    documentation_map = _read("DOCUMENTATION.md")
+
+    assert "product-technical-gap-baseline.md" in documentation_map
+    assert "ThreadWeave has no PR or issue that mentions LineageWeave" in gap_baseline
+    assert "naruon#1437" in gap_baseline
+    assert "naruon#1350" in gap_baseline
+    assert "LineageWeave#338" in gap_baseline
+    assert "ADR-0009" in gap_baseline
+    assert "#20" in gap_baseline
+    assert "#32" in gap_baseline
+    assert "#17" in gap_baseline
+    assert "Not applicable to this repository" in gap_baseline
+    assert "Storybook" in gap_baseline
