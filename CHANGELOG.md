@@ -11,6 +11,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `from threadweave import thread_messages`, and move the hourly autonomous
   maintenance playbook to
   [`docs/operations/hourly-autonomous-maintenance.md`](docs/operations/hourly-autonomous-maintenance.md).
+- Add a read-only GitHub Actions registry lifecycle audit
+  (`scripts/ci/actions_registry_audit.py`) that classifies every live
+  workflow identity as backed by protected-main source, a current open-PR
+  head, disabled, GitHub-owned/dynamic, a confirmed orphan, or unresolved,
+  closing the evidence gap from issue #31 without granting the detector any
+  workflow-disable authority. Run it on relevant pull requests, on
+  protected-main changes to the detector, on manual dispatch, and hourly at
+  minute 53 through `.github/workflows/actions-registry-audit.yml` with
+  exactly `actions: read`, `contents: read`, and `pull-requests: read`. See
+  ADR-0010.
 
 ## [0.2.0] - 2026-08-10
 
