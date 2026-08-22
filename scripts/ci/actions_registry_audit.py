@@ -570,6 +570,11 @@ def audit_actions_registry(client: _JsonGetter, repository: str) -> dict[str, An
     pull_requests, pr_receipts = list_open_pull_requests(client, repository)
     protected_paths = workflow_paths_from_tree(client, repository, protected_main_sha)
 
+    # ponytail: one tree GET per open PR (bounded by MAX_PAGES * PULLS_PER_PAGE
+    # = 5,000 worst case); no request-count narrowing or 429 backoff yet.
+    # Upgrade if a target repository's open-PR count makes this a real rate
+    # -limit risk: filter to PRs whose diff touches .github/workflows/ before
+    # fetching their tree, and/or add bounded exponential backoff on 429.
     active_pr_paths: set[str] = set()
     for pr in pull_requests:
         active_pr_paths |= workflow_paths_from_tree(client, repository, pr.head_sha)
