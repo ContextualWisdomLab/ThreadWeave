@@ -20,6 +20,7 @@ Use this file as the discoverable index for product, technical, architecture, sa
 | Incident / RCA runbook | [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) |
 | Release/provenance/licensing gate | [`docs/RELEASE_PROVENANCE.md`](docs/RELEASE_PROVENANCE.md) |
 | Requirement/standard/evidence traceability | [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) |
+| Product/technical gap baseline (open PRs, cross-repo dependencies) | [`docs/product-technical-gap-baseline.md`](docs/product-technical-gap-baseline.md) |
 | Documentation fitness / maturity audit | [`docs/DOCUMENTATION_AUDIT.md`](docs/DOCUMENTATION_AUDIT.md) |
 | Standards and APA 7 references | [`docs/research/README.md`](docs/research/README.md) |
 | Supply-chain procedure | [`docs/supply-chain.md`](docs/supply-chain.md) |

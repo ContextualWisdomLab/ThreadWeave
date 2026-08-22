@@ -12,6 +12,7 @@ The status inside each ADR is authoritative. `Accepted` means the decision gover
 | [ADR-0006](0006-work-conserving-autonomous-maintenance.md) | Keep hourly maintenance work-conserving; external waiting blocks only the affected item. | Accepted |
 | [ADR-0007](0007-exact-evidence-identity.md) | Distinguish contributor head, PR base snapshot, live protected-base tip, synthetic merge, and tested checkout evidence. | Accepted |
 | [ADR-0008](0008-trusted-release-identity-boundary.md) | Fail closed on pre-created protected GitHub/PyPI release identity before irreversible release side effects. | Accepted |
+| [ADR-0009](0009-lineage-evidence-consumer-boundary.md) | Keep LineageWeave evidence consumption entirely inside the naruon host boundary; ThreadWeave stays unaware of LineageWeave. | Proposed |
 
 ## Status vocabulary
 
