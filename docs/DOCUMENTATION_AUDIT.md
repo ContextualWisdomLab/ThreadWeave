@@ -37,7 +37,7 @@ Protected-main merge `fe9b46f5404f368b311de205c4e647f47db89ab3` then ran push CI
 | Release/Provenance/Licensing | PRESENT-CURRENT | Trusted Publishing, provenance, SBOM, Apache-2.0 boundary |
 | Requirements/standards/evidence Traceability | PRESENT-CURRENT | main vs active-PR evidence separated |
 | APA 7 doctoring/research | PRESENT-CURRENT | RFC/research sources and product decisions |
-| AGENTS / CLAUDE / README / CHANGELOG | PRESENT-CURRENT | repository operating context and release history |
+| AGENTS / CLAUDE / README / CHANGELOG | PRESENT-CURRENT | README is the customer/operator guide; hourly automation playbook lives in `docs/operations/` |
 
 ## Capability maturity vocabulary
 

@@ -16,6 +16,7 @@ Use this file as the discoverable index for product, technical, architecture, sa
 | Data governance / privacy boundary | [`docs/DATA_GOVERNANCE.md`](docs/DATA_GOVERNANCE.md) |
 | Test strategy | [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) |
 | Operability/rollback | [`docs/OPERABILITY.md`](docs/OPERABILITY.md) |
+| Hourly autonomous maintenance | [`docs/operations/hourly-autonomous-maintenance.md`](docs/operations/hourly-autonomous-maintenance.md) |
 | Incident / RCA runbook | [`docs/INCIDENT_RUNBOOK.md`](docs/INCIDENT_RUNBOOK.md) |
 | Release/provenance/licensing gate | [`docs/RELEASE_PROVENANCE.md`](docs/RELEASE_PROVENANCE.md) |
 | Requirement/standard/evidence traceability | [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) |
@@ -38,7 +39,7 @@ Documentation in this repository must distinguish:
 - **host-owned**: responsibility belongs to naruon, an IMAP server, archive service, or another wrapper;
 - **planned / known gap**: accepted requirement not yet implemented/proven.
 
-PR #20 incremental mailbox state is active-PR/proposed until integrated. Sent-date ordering and RFC 5256 THREAD serialization are already implemented-main capabilities and must not be left in historical backlog lists. Python 3.14 CI/package support is a current known gap until it is implemented and proven on an exact head.
+PR #20 incremental mailbox state is active-PR/proposed until integrated. Sent-date ordering and RFC 5256 THREAD serialization are already implemented-main capabilities and must not be left in historical backlog lists. Python 3.14 CI/package support is implemented-main and must stay aligned with package metadata and the complete test matrix.
 
 ## Documentation fitness rule
 
