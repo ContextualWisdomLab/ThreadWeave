@@ -1,0 +1,92 @@
+name: Actions Registry Audit
+
+# Read-only GitHub Actions registry lifecycle evidence for issue #31. Detects
+# active workflow identities that lack exact protected-main or current
+# same-repository PR source, without granting the detector any mutation
+# authority. See docs/superpowers/specs/2026-08-12-actions-registry-audit-design.md
+# and ADR-0010.
+
+on:
+  pull_request:
+    paths:
+      - "scripts/ci/actions_registry_audit.py"
+      - "tests/test_actions_registry_audit.py"
+      - ".github/workflows/actions-registry-audit.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/ci/actions_registry_audit.py"
+  workflow_dispatch: {}
+  schedule:
+    # Minute 53, distinct from Hourly PR Maintenance (minute 11) and Hourly
+    # Product Development (minute 41), so all three heartbeats never
+    # contend for the same runner minute.
+    - cron: "53 * * * *"
+
+concurrency:
+  group: actions-registry-audit-${{ github.repository }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit the live Actions registry against protected main
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Exactly the read authority the design/threat model require: no
+    # `actions: write`, no `pull-requests: write`. This job can never
+    # disable, restore, or otherwise mutate a workflow; it only reads and
+    # reports.
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out the protected default branch without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up the trusted Python toolchain
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Run the read-only Actions registry audit
+        id: audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/actions-registry-audit"
+          report_path="$RUNNER_TEMP/actions-registry-audit/report.json"
+          set +e
+          python scripts/ci/actions_registry_audit.py audit \
+            --repository "${{ github.repository }}" \
+            --output "$report_path"
+          audit_exit_code=$?
+          set -e
+          echo "exit_code=${audit_exit_code}" >>"$GITHUB_OUTPUT"
+          echo "report_path=${report_path}" >>"$GITHUB_OUTPUT"
+          if [ -f "$report_path" ]; then
+            echo "Audit report:"
+            cat "$report_path"
+          fi
+          exit "$audit_exit_code"
+
+      - name: Upload the audit report as evidence
+        # Upload even when the audit step above exited nonzero (a found
+        # orphan/unresolved record, or a hard audit failure that still
+        # managed to write a partial report before failing later) so the
+        # evidence is never silently lost to a failed run.
+        if: always() && steps.audit.outputs.report_path != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: actions-registry-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.audit.outputs.report_path }}
+          if-no-files-found: warn
+          retention-days: 90

@@ -82,6 +82,7 @@ jobs:
         run: |
           coverage erase
           coverage run --branch --source=scripts/ci -m pytest -q \
+            tests/test_actions_registry_audit.py \
             tests/test_autonomous_documentation.py \
             tests/test_dependency_lock_contract.py \
             tests/test_hourly_product_guard.py \
@@ -94,7 +95,7 @@ jobs:
             tests/test_release_contract_coverage.py \
             tests/test_release_workflow.py
           coverage report \
-            --include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py,scripts/ci/release_contract.py,scripts/ci/secret_fingerprint_guard.py \
+            --include=scripts/ci/actions_registry_audit.py,scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py,scripts/ci/release_contract.py,scripts/ci/secret_fingerprint_guard.py \
             --fail-under=100 \
             --show-missing
       - run: coverage run -m pytest -q

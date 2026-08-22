@@ -25,6 +25,7 @@ ThreadWeave is a library, so incidents generally present as incorrect thread str
 | deep/cyclic crash | graph traversal/serializer guards | ThreadWeave |
 | high mailbox CPU/memory | workload dimensions + algorithm path | ThreadWeave/host split |
 | CI/coverage failure | exact failing workflow job and test | repository/central workflow owner |
+| orphaned Actions workflow identity (registry state outlives deleted YAML) | `scripts/ci/actions_registry_audit.py` report; see ADR-0010 | repository owner/authorized operator |
 | independent review failure | exact reviewer evidence job | repository or central reviewer owner |
 | release/publish failure | identity/environment/artifact/provenance step | repository/account owner |
 
@@ -81,6 +82,16 @@ Reproduce with controlled message count, reference count/depth, sibling width, s
 ### CI/reviewer failure
 
 Determine whether failure belongs to ThreadWeave or an organization-central dependency. If central, do not bypass or mutate that repository without authority; preserve the blocker and continue other ThreadWeave work. If local, repair test-first on the active PR branch and re-run exact-head evidence.
+
+### Orphaned Actions workflow identity
+
+Deleting a workflow's YAML from the tree does not disable its independent registry record; GitHub still advertises it as active until explicitly disabled. Do not restore the deleted source and do not disable by filename pattern. Instead:
+
+1. run `scripts/ci/actions_registry_audit.py audit --repository <owner>/<repo> --output <path>` (or read the latest `.github/workflows/actions-registry-audit.yml` scheduled run's uploaded evidence);
+2. re-read the report's `recommended_disable_workflow_ids` — only `orphan_active` records, bound to the exact protected-main SHA and open-PR-head snapshot the audit observed;
+3. an authorized operator independently re-verifies each ID is still an orphan against the current live registry immediately before disabling it (state can move between the audit run and the disable action);
+4. disable only confirmed IDs through the GitHub Actions lifecycle API with an explicit mutation credential; the audit tool itself never holds write authority (ADR-0010);
+5. preserve every currently supported workflow (`ci`, `Hourly PR Maintenance`, `Hourly Product Development`, `Release ThreadWeave`, `Actions Registry Audit`, and current security workflows) and record before/after evidence.
 
 ### Release failure
 

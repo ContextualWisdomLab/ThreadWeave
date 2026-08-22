@@ -102,7 +102,7 @@ Tests use injected deterministic fetch functions and local byte responses. They 
 
 ## Documentation and operational handoff
 
-ADR-0009 records the durable separation between source deletion, registry state, observation, and disable authority. Operability, incident response, threat model, test strategy, traceability, documentation map, and CHANGELOG link the detector to ThreadWeave #31, central `.github#945`, and AppGuardrail #929.
+ADR-0010 records the durable separation between source deletion, registry state, observation, and disable authority. Operability, incident response, threat model, test strategy, traceability, documentation map, and CHANGELOG link the detector to ThreadWeave #31, central `.github#945`, and AppGuardrail #929.
 
 Protected-main integration is not incident closure. After integration, an authorized operator must re-read the exact report, revalidate the default branch and registry records, disable only confirmed `orphan_active` IDs through the GitHub Actions lifecycle API, preserve all four supported ThreadWeave workflows, and retain before/after evidence.
 

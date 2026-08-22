@@ -197,7 +197,7 @@ def test_ci_overrides_package_only_coverage_source_for_autonomous_scripts():
 
     assert "coverage run --branch --source=scripts/ci -m pytest -q" in workflow
     assert (
-        "--include=scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py"
+        "--include=scripts/ci/actions_registry_audit.py,scripts/ci/hourly_product_guard.py,scripts/ci/nim_proxy.py"
         in workflow
     )
     assert "--fail-under=100" in workflow

@@ -146,7 +146,7 @@ git commit -m "test(operations): require Actions registry lifecycle audit"
 **Interfaces:**
 - Produces: accepted observation/mutation separation and explicit post-merge operator acceptance.
 
-- [ ] **Step 1: Add RED documentation contracts requiring ADR-0009, issue #31 traceability, central `.github#945`, AppGuardrail #929, and protected-main/post-disable evidence separation**
+- [ ] **Step 1: Add RED documentation contracts requiring ADR-0010, issue #31 traceability, central `.github#945`, AppGuardrail #929, and protected-main/post-disable evidence separation**
 - [ ] **Step 2: Run documentation tests and observe intended failures**
 - [ ] **Step 3: Add and index the canonical records with APA 7th primary-source citations**
 - [ ] **Step 4: Run documentation, complete repository, docstring, package, and exact coverage gates**
