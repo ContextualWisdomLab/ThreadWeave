@@ -214,17 +214,19 @@ def classify_workflow_records(
         A record is ``unresolved`` if its ``id`` is not a positive integer
         (or is a ``bool``, since ``bool`` is a ``int`` subclass in Python and
         would otherwise silently pass an ``int`` check); if its ``id``
-        collides with another record's ``id``; if its ``name``/``path``/
-        ``state`` fields are missing or malformed; if its normalized path
-        collides with another record's normalized path (two different
-        workflow IDs must never silently share one canonical source path);
-        or if its path starts with the repository workflow prefix
-        (``.github/workflows/``) but fails strict normalization — that shape
-        is ambiguous/suspicious rather than a legitimate non-repository
-        identity, so it is never silently treated as GitHub-owned. A record
-        whose path does not start with that prefix at all is
+        collides with another record's ``id``; if its ``name`` or ``state``
+        field is missing or malformed; if its normalized path collides with
+        another record's normalized path (two different workflow IDs must
+        never silently share one canonical source path); or if its path
+        starts with the repository workflow prefix (``.github/workflows/``)
+        but fails strict normalization — that shape is ambiguous/suspicious
+        rather than a legitimate non-repository identity, so it is never
+        silently treated as GitHub-owned. A record whose ``path`` is missing,
+        not a string, or does not start with that prefix at all is instead
         ``dynamic_owned`` (GitHub reports genuinely non-repository-path
-        identities, such as externally managed dynamic workflows, this way).
+        identities, such as externally managed dynamic workflows, this way,
+        and a missing/non-string path is treated the same as one that
+        provably never claimed the repository prefix).
     """
     protected = set(protected_paths)
     active_pr = set(active_pr_paths)
@@ -884,7 +886,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"::error::{error}", file=sys.stderr)
         return 2
 
-    write_report_atomically(Path(args.output), report)
+    try:
+        write_report_atomically(Path(args.output), report)
+    except OSError as error:
+        print(f"::error::failed to write the audit report: {error}", file=sys.stderr)
+        return 2
 
     unresolved_or_orphan = sum(
         count

@@ -796,6 +796,29 @@ class TestMain:
         assert exit_code == 0
         assert output.is_file()
 
+    def test_main_converts_report_write_failure_to_exit_two(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An OSError writing the report (permissions, missing directory,
+        disk full) must be caught and reported through the same
+        ::error::/exit-2 contract as an audit failure, not an unhandled
+        traceback with an unspecified exit code."""
+
+        output = tmp_path / "does-not-exist" / "report.json"
+        client = _base_stub_client()
+        monkeypatch.setattr(audit, "_build_client_from_env", lambda: client)
+        exit_code = audit.main(
+            [
+                "audit",
+                "--repository",
+                "ContextualWisdomLab/ThreadWeave",
+                "--output",
+                str(output),
+            ]
+        )
+        assert exit_code == 2
+        assert not output.exists()
+
     def test_main_exits_nonzero_and_still_writes_report_on_orphan(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
