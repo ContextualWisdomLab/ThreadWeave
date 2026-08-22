@@ -45,12 +45,19 @@ WORKFLOWS_PER_PAGE = 100
 #: Pull-request-list page size, matching ``WORKFLOWS_PER_PAGE``.
 PULLS_PER_PAGE = 100
 
-#: Hard ceiling on pages fetched per endpoint. A well-formed organization
-#: repository has at most a few dozen workflows or open PRs; anything beyond
-#: this indicates a pagination bug or a hostile/looping response rather than
-#: a legitimate registry, so the auditor fails closed instead of looping
-#: forever (GitHub, 2026b).
+#: Hard ceiling on pages of *data* fetched per endpoint. A well-formed
+#: organization repository has at most a few dozen workflows or open PRs;
+#: anything beyond this indicates a pagination bug or a hostile/looping
+#: response rather than a legitimate registry, so the auditor fails closed
+#: instead of looping forever (GitHub, 2026b).
 MAX_PAGES = 50
+
+#: Hard ceiling on total HTTP requests per endpoint: one more than
+#: :data:`MAX_PAGES` so a registry whose true size lands on an exact page
+#: boundary (a multiple of the endpoint's per-page size) can still make one
+#: trailing request that confirms an empty final page, without that
+#: confirmation request itself being misread as exceeding the data cap.
+_MAX_FETCHES = MAX_PAGES + 1
 
 #: Hard ceiling on a single HTTP response body, in bytes. Bounds memory use
 #: against a malformed or hostile oversized response.
@@ -236,12 +243,18 @@ def classify_workflow_records(
     for record in records:
         if not isinstance(record, Mapping):
             continue
-        if "id" in record:
-            raw_id = record["id"]
-            if isinstance(raw_id, int) and not isinstance(raw_id, bool) and raw_id > 0:
-                seen_ids[raw_id] = seen_ids.get(raw_id, 0) + 1
+        raw_id = record.get("id")
+        has_valid_id = (
+            isinstance(raw_id, int) and not isinstance(raw_id, bool) and raw_id > 0
+        )
+        if "id" in record and has_valid_id:
+            seen_ids[raw_id] = seen_ids.get(raw_id, 0) + 1
+        # Only a record with its own valid id can make a path collision real:
+        # an already-unresolved (invalid-id) record sharing a path string
+        # with a legitimate record must not falsely mark that legitimate
+        # record as a duplicate too.
         path = record.get("path")
-        if isinstance(path, str) and path.startswith(".github/workflows/"):
+        if has_valid_id and isinstance(path, str) and path.startswith(".github/workflows/"):
             try:
                 normalized = normalize_workflow_path(path)
             except AuditError:
@@ -335,6 +348,24 @@ def recommended_disable_workflow_ids(records: Sequence[ClassifiedWorkflow]) -> l
     return sorted(ids)  # type: ignore[type-var]
 
 
+def _classification_sort_key(record: ClassifiedWorkflow) -> tuple[int, object]:
+    """Order a valid positive-int ``workflow_id`` numerically, everything else after.
+
+    An ``unresolved`` record's ``workflow_id`` is whatever raw value the
+    registry reported — potentially a string, a list, ``None``, or any other
+    JSON type, none of which is comparable against another record's
+    differently-typed raw id. Comparing two such records directly (as a bare
+    ``r.workflow_id`` sort key would) can raise ``TypeError`` and crash the
+    audit instead of failing closed on a malformed record. Every malformed
+    value is instead compared by its ``repr``, which is always a string and
+    therefore always orderable against any other malformed value's ``repr``.
+    """
+    workflow_id = record.workflow_id
+    if isinstance(workflow_id, int) and not isinstance(workflow_id, bool):
+        return (0, workflow_id)
+    return (1, repr(workflow_id))
+
+
 @dataclass(frozen=True)
 class PageReceipts:
     """Pagination evidence for one paginated GitHub API listing.
@@ -354,7 +385,7 @@ class _JsonGetter:
 
     def get(self, path: str, *, params: Mapping[str, object] | None = None) -> Any:
         """Fetch and return one parsed JSON resource; see :meth:`GitHubJsonClient.get`."""
-        ...  # pragma: no cover - structural protocol, not executed
+        raise NotImplementedError  # pragma: no cover - structural protocol, not executed
 
 
 def list_workflow_records(
@@ -369,20 +400,26 @@ def list_workflow_records(
     Returns:
         The complete list of raw workflow objects (across every page), and
         the pagination receipts that prove the walk was complete.
+        ``PageReceipts.pages_fetched`` counts every HTTP request made,
+        including a trailing empty-page request issued only to confirm that
+        an exact-page-boundary registry (page count times ``per_page``) has
+        no further data.
 
     Raises:
         AuditError: If a page is malformed, if GitHub's own ``total_count``
             disagrees with what was actually collected, if a later page
             byte-for-byte repeats an earlier page (a sign of a broken or
             looping pagination cursor), or if more than :data:`MAX_PAGES`
-            pages would be required.
+            full pages of data would be required (one further request is
+            still allowed beyond that, solely to confirm an exact-boundary
+            registry's final page is empty).
     """
     records: list[dict[str, Any]] = []
     seen_pages: set[tuple[tuple[Any, ...], ...]] = set()
     total_count: int | None = None
     page = 1
     while True:
-        if page > MAX_PAGES:
+        if page > _MAX_FETCHES:
             raise AuditError(f"workflow pagination exceeded {MAX_PAGES} pages")
         response = client.get(
             f"/repos/{repository}/actions/workflows",
@@ -398,8 +435,11 @@ def list_workflow_records(
             if not isinstance(total_count, int) or isinstance(total_count, bool):
                 raise AuditError("malformed workflow list total_count")
 
+        # repr() rather than the raw id: a malformed id (list, dict, ...) is
+        # not hashable and would otherwise crash this repeated-page check
+        # with an unrelated TypeError instead of the intended AuditError.
         fingerprint = tuple(
-            (w.get("id"),) if isinstance(w, Mapping) else (None,) for w in page_workflows
+            repr(w.get("id")) if isinstance(w, Mapping) else repr(None) for w in page_workflows
         )
         if fingerprint and fingerprint in seen_pages:
             raise AuditError("workflow pagination returned a repeated page")
@@ -449,13 +489,15 @@ def list_open_pull_requests(
 
     Raises:
         AuditError: If a page is malformed, a same-repository PR's head SHA
-            is not an exact 40-hex identity, or pagination would exceed
-            :data:`MAX_PAGES`.
+            is not an exact 40-hex identity, or more than :data:`MAX_PAGES`
+            full pages of data would be required (one further request is
+            still allowed beyond that, solely to confirm an exact-boundary
+            queue's final page is empty).
     """
     pulls: list[OpenPullRequest] = []
     page = 1
     while True:
-        if page > MAX_PAGES:
+        if page > _MAX_FETCHES:
             raise AuditError(f"pull request pagination exceeded {MAX_PAGES} pages")
         response = client.get(
             f"/repos/{repository}/pulls",
@@ -535,6 +577,32 @@ def workflow_paths_from_tree(client: _JsonGetter, repository: str, tree_sha: str
     return paths
 
 
+def _workflow_identity_snapshot(records: Sequence[Mapping[str, Any]]) -> set[tuple[int, str, str]]:
+    """Return a comparable ``(id, path, state)`` snapshot of every valid-id record.
+
+    Args:
+        records: Raw workflow objects, as returned by the GitHub Actions
+            "list repository workflows" endpoint.
+
+    Returns:
+        One ``(workflow_id, repr(path), repr(state))`` tuple per record with
+        a valid positive integer ``id``. Comparing two snapshots this way (as
+        :func:`audit_actions_registry` does between its start and end reads)
+        catches not only a workflow appearing or disappearing, but also one
+        whose ``path`` or ``state`` (e.g. active flipping to disabled) changed
+        between the two reads while its ``id`` stayed the same. ``repr`` keeps
+        the tuple comparable/hashable even if ``path`` or ``state`` is itself
+        malformed (not a string).
+    """
+    return {
+        (record["id"], repr(record.get("path")), repr(record.get("state")))
+        for record in records
+        if isinstance(record, Mapping)
+        and isinstance(record.get("id"), int)
+        and not isinstance(record.get("id"), bool)
+    }
+
+
 def audit_actions_registry(client: _JsonGetter, repository: str) -> dict[str, Any]:
     """Run the complete read-only Actions registry lifecycle audit.
 
@@ -551,11 +619,14 @@ def audit_actions_registry(client: _JsonGetter, repository: str) -> dict[str, An
 
     Raises:
         AuditError: If any underlying fetch, pagination, or tree read fails
-            closed, or if the protected-main branch SHA, live workflow ID
-            set, or open-PR number/head-SHA snapshot observed at the start
-            of the audit differs from what is observed again at the end (a
-            race between the two reads that could otherwise bind evidence to
-            registry or branch state that no longer exists).
+            closed, or if the protected-main branch SHA, live
+            ``(id, path, state)`` workflow identity set, or open-PR
+            number/head-SHA snapshot observed at the start of the audit
+            differs from what is observed again at the end (a race between
+            the two reads that could otherwise bind evidence to registry or
+            branch state that no longer exists — including a workflow whose
+            ``state`` alone flipped, e.g. active to disabled, while its
+            ``id`` stayed the same).
     """
     repository = normalize_repository(repository)
     observed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -584,7 +655,7 @@ def audit_actions_registry(client: _JsonGetter, repository: str) -> dict[str, An
     classified = classify_workflow_records(
         workflow_records, protected_paths=protected_paths, active_pr_paths=active_pr_paths
     )
-    classified.sort(key=lambda r: (r.workflow_id is None, r.workflow_id))
+    classified.sort(key=_classification_sort_key)
 
     revalidation_branch = client.get(f"/repos/{repository}/branches/main")
     if not isinstance(revalidation_branch, Mapping):
@@ -602,24 +673,12 @@ def audit_actions_registry(client: _JsonGetter, repository: str) -> dict[str, An
         )
 
     revalidation_workflow_records, _ = list_workflow_records(client, repository)
-    revalidation_workflow_ids = {
-        record["id"]
-        for record in revalidation_workflow_records
-        if isinstance(record, Mapping)
-        and isinstance(record.get("id"), int)
-        and not isinstance(record.get("id"), bool)
-    }
-    initial_workflow_ids = {
-        record["id"]
-        for record in workflow_records
-        if isinstance(record, Mapping)
-        and isinstance(record.get("id"), int)
-        and not isinstance(record.get("id"), bool)
-    }
-    if revalidation_workflow_ids != initial_workflow_ids:
+    revalidation_workflow_identities = _workflow_identity_snapshot(revalidation_workflow_records)
+    initial_workflow_identities = _workflow_identity_snapshot(workflow_records)
+    if revalidation_workflow_identities != initial_workflow_identities:
         raise AuditError(
             "workflow registry inventory drifted during the audit: "
-            f"{sorted(initial_workflow_ids)} -> {sorted(revalidation_workflow_ids)}"
+            f"{sorted(initial_workflow_identities)} -> {sorted(revalidation_workflow_identities)}"
         )
 
     revalidation_pull_requests, _ = list_open_pull_requests(client, repository)
@@ -631,9 +690,12 @@ def audit_actions_registry(client: _JsonGetter, repository: str) -> dict[str, An
             f"{sorted(initial_pr_snapshot)} -> {sorted(revalidation_pr_snapshot)}"
         )
 
-    summary: dict[str, int] = {}
+    # Pre-seed every finite classification at 0 so a consumer never has to
+    # guess whether an absent key means "zero occurrences" or "this schema
+    # version doesn't report that classification yet".
+    summary: dict[str, int] = dict.fromkeys(_FINITE_CLASSIFICATIONS, 0)
     for record in classified:
-        summary[record.classification] = summary.get(record.classification, 0) + 1
+        summary[record.classification] += 1
 
     return {
         "schema": REPORT_SCHEMA,

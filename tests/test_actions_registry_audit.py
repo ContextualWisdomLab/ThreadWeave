@@ -253,6 +253,25 @@ class TestClassifyWorkflowRecords:
         recommended = audit.recommended_disable_workflow_ids(result)
         assert recommended == [2]
 
+    def test_invalid_id_record_does_not_falsely_mark_valid_record_as_duplicate(
+        self,
+    ) -> None:
+        """An already-unresolved (bad id) record sharing a path string with a
+        legitimate record must not also drag that legitimate record into
+        unresolved via a false duplicate-path collision."""
+        records = [
+            _record(1, "CI", ".github/workflows/ci.yml", "active"),
+            _record(-1, "garbage", ".github/workflows/ci.yml", "active"),
+        ]
+        result = audit.classify_workflow_records(
+            records,
+            protected_paths={".github/workflows/ci.yml"},
+            active_pr_paths=set(),
+        )
+        by_id = {r.workflow_id: r for r in result}
+        assert by_id[1].classification == "present_active"
+        assert by_id[-1].classification == "unresolved"
+
 
 # ---------------------------------------------------------------------------
 # Pagination
@@ -347,6 +366,44 @@ class TestListWorkflowRecords:
 
         with pytest.raises(audit.AuditError):
             audit.list_workflow_records(_UnboundedClient(), "ContextualWisdomLab/ThreadWeave")
+
+    def test_exact_page_boundary_registry_does_not_false_positive_the_cap(self) -> None:
+        """A registry whose size is an exact multiple of the page size needs
+        one trailing empty-page request to confirm completion; that request
+        must not itself be misread as exceeding MAX_PAGES."""
+        per_page = audit.WORKFLOWS_PER_PAGE
+        max_pages = audit.MAX_PAGES
+        full_pages = [
+            {
+                "total_count": max_pages * per_page,
+                "workflows": [
+                    _record(
+                        page * per_page + i,
+                        f"wf-{page}-{i}",
+                        f".github/workflows/wf-{page}-{i}.yml",
+                        "active",
+                    )
+                    for i in range(per_page)
+                ],
+            }
+            for page in range(max_pages)
+        ]
+        pages = full_pages + [{"total_count": max_pages * per_page, "workflows": []}]
+
+        class _ExactBoundaryClient:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get(self, path: str, *, params: dict | None = None) -> dict:
+                page_number = int((params or {}).get("page", 1))
+                self.calls += 1
+                return pages[page_number - 1]
+
+        records, receipts = audit.list_workflow_records(
+            _ExactBoundaryClient(), "ContextualWisdomLab/ThreadWeave"
+        )
+        assert len(records) == max_pages * per_page
+        assert receipts.pages_fetched == max_pages + 1
 
     def test_malformed_page_fails_closed(self) -> None:
         client = _FakePaginatedClient([{"total_count": 1, "workflows": "not-a-list"}])
@@ -640,6 +697,19 @@ class TestAuditActionsRegistry:
         with pytest.raises(audit.AuditError, match="inventory drifted"):
             audit.audit_actions_registry(client, "ContextualWisdomLab/ThreadWeave")
 
+    def test_workflow_state_flip_with_unchanged_id_fails_closed(self) -> None:
+        """A workflow whose `state` (or `path`) changes mid-audit while its
+        `id` stays the same must still fail closed -- comparing only the id
+        set would miss this (Devin review finding on #32)."""
+        client = _base_stub_client(
+            workflow_records=[_record(1, "CI", ".github/workflows/ci.yml", "active")],
+            drift_workflow_records=[
+                _record(1, "CI", ".github/workflows/ci.yml", "disabled_manually")
+            ],
+        )
+        with pytest.raises(audit.AuditError, match="inventory drifted"):
+            audit.audit_actions_registry(client, "ContextualWisdomLab/ThreadWeave")
+
     def test_open_pull_request_snapshot_drift_fails_closed(self) -> None:
         """A PR head moving (or a PR closing) mid-audit must fail closed."""
         pr_head = "b" * 40
@@ -680,6 +750,29 @@ class TestAuditActionsRegistry:
         report = audit.audit_actions_registry(client, "ContextualWisdomLab/ThreadWeave")
         ids = [r["workflow_id"] for r in report["records"]]
         assert ids == sorted(ids)
+
+    def test_ordering_survives_incomparable_invalid_workflow_ids(self) -> None:
+        """Two unresolved records with differently-typed raw ids must sort
+        without raising TypeError (a bare `r.workflow_id` sort key would
+        crash comparing e.g. a str id against a list id)."""
+        client = _base_stub_client(
+            workflow_records=[
+                _record(1, "CI", ".github/workflows/ci.yml", "active"),
+                {"id": "not-an-int", "name": "bad-a", "path": ".github/workflows/bad-a.yml", "state": "active"},
+                {"id": [1, 2], "name": "bad-b", "path": ".github/workflows/bad-b.yml", "state": "active"},
+                {"id": None, "name": "bad-c", "path": ".github/workflows/bad-c.yml", "state": "active"},
+            ]
+        )
+        report = audit.audit_actions_registry(client, "ContextualWisdomLab/ThreadWeave")
+        assert len(report["records"]) == 4
+        assert report["records"][0]["workflow_id"] == 1  # the one valid int id sorts first
+
+    def test_summary_pre_seeds_every_finite_classification_at_zero(self) -> None:
+        client = _base_stub_client()
+        report = audit.audit_actions_registry(client, "ContextualWisdomLab/ThreadWeave")
+        assert set(report["summary"]) == set(audit._FINITE_CLASSIFICATIONS)
+        assert report["summary"]["orphan_active"] == 0
+        assert report["summary"]["present_active"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -979,6 +1072,39 @@ class TestListOpenPullRequestsMalformedInput:
         with pytest.raises(audit.AuditError):
             audit.list_open_pull_requests(_UnboundedClient(), "ContextualWisdomLab/ThreadWeave")
 
+    def test_exact_page_boundary_queue_does_not_false_positive_the_cap(self) -> None:
+        """An open-PR queue whose size is an exact multiple of the page size
+        needs one trailing empty-page request to confirm completion; that
+        request must not itself be misread as exceeding MAX_PAGES."""
+        per_page = audit.PULLS_PER_PAGE
+        max_pages = audit.MAX_PAGES
+        full_pages = [
+            [
+                {
+                    "number": page * per_page + i + 1,
+                    "head": {
+                        "sha": f"{(page * per_page + i):040x}",
+                        "repo": {"full_name": "ContextualWisdomLab/ThreadWeave"},
+                    },
+                    "base": {},
+                }
+                for i in range(per_page)
+            ]
+            for page in range(max_pages)
+        ]
+        pages = full_pages + [[]]
+
+        class _ExactBoundaryClient:
+            def get(self, path: str, *, params: dict | None = None) -> list:
+                page_number = int((params or {}).get("page", 1))
+                return pages[page_number - 1]
+
+        pulls, receipts = audit.list_open_pull_requests(
+            _ExactBoundaryClient(), "ContextualWisdomLab/ThreadWeave"
+        )
+        assert len(pulls) == max_pages * per_page
+        assert receipts.pages_fetched == max_pages + 1
+
     def test_non_list_response_fails_closed(self) -> None:
         class _Client:
             def get(self, path: str, *, params: dict | None = None) -> dict:
@@ -1078,7 +1204,6 @@ class TestAuditActionsRegistryMalformedBranch:
 
         class _Client:
             def get(self, path: str, *, params: dict | None = None):
-                params = params or {}
                 if path.endswith("/branches/main"):
                     call_count["branch"] += 1
                     if call_count["branch"] > 1:
@@ -1101,7 +1226,6 @@ class TestAuditActionsRegistryMalformedBranch:
 
         class _Client:
             def get(self, path: str, *, params: dict | None = None):
-                params = params or {}
                 if path.endswith("/branches/main"):
                     call_count["branch"] += 1
                     if call_count["branch"] > 1:
