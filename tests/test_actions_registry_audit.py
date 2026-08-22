@@ -7,16 +7,39 @@ and credential-free, matching ADR-0005's automation-authority boundary.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from scripts.ci import actions_registry_audit as audit
-
 
 ROOT = Path(__file__).parents[1]
 MODULE_PATH = ROOT / "scripts" / "ci" / "actions_registry_audit.py"
+
+
+def _load_actions_registry_audit():
+    """Load the detector by file path rather than a package-relative import.
+
+    `scripts/` has no `__init__.py`, so `from scripts.ci import
+    actions_registry_audit` only resolves when the repository root happens
+    to already be on `sys.path` (true under `python -m pytest`/`coverage
+    run -m pytest`, as CI and AGENTS.md invoke it, but not guaranteed for a
+    bare `pytest` run from another directory). Loading by path, matching
+    the pattern already used in tests/test_autonomous_documentation.py,
+    removes that invocation-order dependency.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "threadweave_actions_registry_audit", MODULE_PATH
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+audit = _load_actions_registry_audit()
 
 
 def test_actions_registry_audit_production_module_exists() -> None:
@@ -705,6 +728,23 @@ class TestAuditActionsRegistry:
             workflow_records=[_record(1, "CI", ".github/workflows/ci.yml", "active")],
             drift_workflow_records=[
                 _record(1, "CI", ".github/workflows/ci.yml", "disabled_manually")
+            ],
+        )
+        with pytest.raises(audit.AuditError, match="inventory drifted"):
+            audit.audit_actions_registry(client, "ContextualWisdomLab/ThreadWeave")
+
+    def test_malformed_id_record_appearing_mid_audit_fails_closed(self) -> None:
+        """An already-unresolved (malformed-id) record appearing or
+        disappearing between the two reads must still fail closed -- its
+        `unresolved` classification is evidence the report asserts, so a
+        drift check that ignores it entirely (by excluding invalid ids from
+        the snapshot) would miss the same class of race the id-only guard
+        already misses (CodeRabbit/Devin review findings on #32)."""
+        client = _base_stub_client(
+            workflow_records=[_record(1, "CI", ".github/workflows/ci.yml", "active")],
+            drift_workflow_records=[
+                _record(1, "CI", ".github/workflows/ci.yml", "active"),
+                {"id": "not-an-int", "name": "new-garbage", "path": None, "state": "active"},
             ],
         )
         with pytest.raises(audit.AuditError, match="inventory drifted"):

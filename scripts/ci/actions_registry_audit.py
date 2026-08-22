@@ -577,29 +577,30 @@ def workflow_paths_from_tree(client: _JsonGetter, repository: str, tree_sha: str
     return paths
 
 
-def _workflow_identity_snapshot(records: Sequence[Mapping[str, Any]]) -> set[tuple[int, str, str]]:
-    """Return a comparable ``(id, path, state)`` snapshot of every valid-id record.
+def _workflow_identity_snapshot(records: Sequence[Mapping[str, Any]]) -> set[tuple[str, str, str]]:
+    """Return a comparable ``(id, path, state)`` snapshot of every record.
 
     Args:
         records: Raw workflow objects, as returned by the GitHub Actions
             "list repository workflows" endpoint.
 
     Returns:
-        One ``(workflow_id, repr(path), repr(state))`` tuple per record with
-        a valid positive integer ``id``. Comparing two snapshots this way (as
+        One ``(repr(id), repr(path), repr(state))`` tuple per mapping
+        record, valid-id or not. Comparing two snapshots this way (as
         :func:`audit_actions_registry` does between its start and end reads)
-        catches not only a workflow appearing or disappearing, but also one
-        whose ``path`` or ``state`` (e.g. active flipping to disabled) changed
-        between the two reads while its ``id`` stayed the same. ``repr`` keeps
-        the tuple comparable/hashable even if ``path`` or ``state`` is itself
-        malformed (not a string).
+        catches a workflow appearing or disappearing, one whose ``path`` or
+        ``state`` (e.g. active flipping to disabled) changed while its
+        ``id`` stayed the same, and — using ``repr(id)`` rather than
+        excluding invalid ids — an already-unresolved (malformed-id) record
+        itself appearing or disappearing mid-audit too, since that record's
+        ``unresolved`` classification is still evidence the report asserts.
+        ``repr`` keeps every field comparable/hashable even when malformed
+        (not a string, or not an ``int``).
     """
     return {
-        (record["id"], repr(record.get("path")), repr(record.get("state")))
+        (repr(record.get("id")), repr(record.get("path")), repr(record.get("state")))
         for record in records
         if isinstance(record, Mapping)
-        and isinstance(record.get("id"), int)
-        and not isinstance(record.get("id"), bool)
     }
 
 
