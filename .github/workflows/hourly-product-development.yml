@@ -169,7 +169,7 @@ jobs:
           standards-grounded email-threading library.
 
           Inspect AGENTS.md, README.md, CHANGELOG.md, docs/, src/threadweave/, and
-          tests/. Select exactly one highest-value buyer-visible correctness,
+          tests/. Select exactly one highest-value host-visible correctness,
           interoperability, performance, reliability, documentation, or release-readiness
           gap that can be completed safely in this run. If the protected branch is not
           green, restoring it is the only permitted objective.

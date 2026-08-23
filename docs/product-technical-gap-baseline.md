@@ -45,11 +45,11 @@ ContextualWisdomLab/naruon#1437 (Consume LineageWeave for email lineage and
 
 **What this means for ThreadWeave:** nothing changes in ThreadWeave's own scope or runtime surface. ADR-0009 (Proposed) records that boundary explicitly so a future contributor does not add a LineageWeave adapter, HTTP call, or runtime dependency here if the ADR is accepted. The one concrete piece of leverage ThreadWeave contributes to this chain is finishing PR #20 through its existing, already-documented acceptance path (ADR-0004) — that PR is blocked by both its current `CONFLICTING` merge state and issue #17's release gate, not by anything LineageWeave- or naruon-specific.
 
-**What this means for naruon and LineageWeave:** naruon#1437 and LineageWeave#338 are tracked and owned in their own repositories; this document does not restate their acceptance criteria. See naruon#1437 for the full consumer design (admission policy, bounded evidence projection, async durable execution, result projection, buyer surface) and LineageWeave#338 for the provider-side contract.
+**What this means for naruon and LineageWeave:** naruon#1437 and LineageWeave#338 are tracked and owned in their own repositories; this document does not restate their acceptance criteria. See naruon#1437 for the full consumer design (admission policy, bounded evidence projection, async durable execution, result projection, consumer-facing surface) and LineageWeave#338 for the provider-side contract.
 
-## Buyer-visible product gaps (independent of the LineageWeave chain)
+## Host-visible product gaps (independent of the LineageWeave chain)
 
-| Gap | Why a buyer would notice | Current maturity |
+| Gap | Why a host would notice | Current maturity |
 |---|---|---|
 | Incremental mailbox threading (large-mailbox performance) | A host with a large, actively-changing mailbox must currently rebuild the full thread forest on every arrival/expunge/correction; PR #20 removes that cost but is not yet mergeable | proposed/active-PR (ADR-0004), blocked on issue #17 |
 | Published 0.2.0 release | `pip install threadweave` still installs 0.1.0; Python 3.14 support, the documentation graph, and the release-readiness preflight (PR #30) are already on protected main but not yet publicly released | blocked on issue #17 external account-side configuration |

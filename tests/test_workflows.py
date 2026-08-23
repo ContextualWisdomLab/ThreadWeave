@@ -237,7 +237,7 @@ def test_product_task_is_test_first_documented_and_never_self_releases():
     assert "Use test-driven development" in workflow
     assert "Maintain 100% production statement and branch coverage" in workflow
     assert "Record user-visible changes under CHANGELOG.md [Unreleased]" in workflow
-    assert "highest-value buyer-visible" in workflow
+    assert "highest-value host-visible" in workflow
     assert "Do not stage, commit, push, open a pull request, tag, or publish" in workflow
     assert "PR_MESSAGE.md" in workflow
 

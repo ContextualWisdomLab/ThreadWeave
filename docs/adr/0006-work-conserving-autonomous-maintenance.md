@@ -17,7 +17,7 @@ ThreadWeave maintenance is **work-conserving**:
 2. for each actionable PR, perform review inspection → root-cause analysis → test-first repair where behavior changes → focused/full verification → exact-head gate refetch → merge/auto-merge only when policy permits;
 3. after any merge, close, head change, or blocker transition, refetch immediately and continue;
 4. queued/pending external work blocks only that item; select the next safe executable repository action instead of waiting;
-5. when the PR/issue queue is genuinely drained, perform documentation fitness plus buyer-visible/release-readiness gap analysis and open at most one bounded high-value implementation line at a time;
+5. when the PR/issue queue is genuinely drained, perform documentation fitness plus host-visible/release-readiness gap analysis and open at most one bounded high-value implementation line at a time;
 6. before stopping, perform a double exit sweep and stop only when the invocation budget is exhausted or every remaining item is externally blocked/read-only/unsafe.
 
 The hourly recurrence is continuation, not permission to defer work that is executable now.
@@ -40,7 +40,7 @@ Scheduled model-backed product work uses an immutably pinned OpenCode Agent and 
 ### Positive
 
 - CI/review queues no longer create idle repository-wide dead time.
-- Documentation, operational hardening, and buyer gaps continue while one PR is externally blocked.
+- Documentation, operational hardening, and host-visible gaps continue while one PR is externally blocked.
 - Every action remains tied to current evidence and branch protection.
 - The loop naturally converges toward zero actionable PRs/issues and then toward higher product quality.
 

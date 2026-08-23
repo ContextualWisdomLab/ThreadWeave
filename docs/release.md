@@ -84,7 +84,7 @@ emits SPDX 2.3 JSON for this release path because GitHub's current SBOM
 attestation and verification contract uses the predicate URI
 `https://spdx.dev/Document/v2.3`. This is an interoperability choice, not a claim
 that SPDX 2.3 is the newest model. Migration to SPDX 3.x should occur only when
-the attestation producer, GitHub verifier, downstream buyer tooling, and stored
+the attestation producer, GitHub verifier, downstream consumer tooling, and stored
 predicate contract can move together.
 
 The SPDX 2.3 file model requires a SHA-1 checksum, and a package with

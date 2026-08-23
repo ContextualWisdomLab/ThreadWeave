@@ -93,7 +93,7 @@ Documentation sufficiency is not completion. Current remaining lanes are:
 - issue #17: configure the GitHub `pypi` environment and the PyPI Trusted Publisher identity, dispatch `0.2.0` only from a then-current protected head, and verify public wheel/sdist/provenance plus a clean install; the public PyPI project still exposes 0.1.0 only at the latest audit probe;
 - issue #22: after the open PR queue is genuinely drained and release policy permits, execute the final protected-main OpenCode/NVIDIA operational-acceptance path; criteria 1–4 are already satisfied;
 - Draft PR #20: only after the `0.2.0` publication boundary closes, refresh it onto released protected main, resolve conflicts, rerun Python 3.10–3.14 exact-head gates plus mailbox-scale parity/performance evidence, obtain current-head independent review, and merge only if policy permits;
-- after every integration or release, re-audit the graph and immediately continue to the next buyer-visible interoperability, resource-efficiency, operability, or ecosystem gap.
+- after every integration or release, re-audit the graph and immediately continue to the next host-visible interoperability, resource-efficiency, operability, or ecosystem gap.
 
 ## Acceptance rule
 

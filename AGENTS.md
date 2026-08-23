@@ -79,7 +79,7 @@ Hourly cadence, writer boundaries, NIM broker, and token setup are documented in
 1. Open pull requests always take priority: inspect review threads and checks,
    make the smallest fixes, revalidate, merge only after the evidence is sound,
    then search again until the queue is empty.
-2. When the queue is empty, select one highest-value buyer-visible gap. Work
+2. When the queue is empty, select one highest-value host-visible gap. Work
    test-first and create exactly one bounded pull request. The product task must
    not merge or publish its own result; the maintenance loop owns that decision.
 3. Maintain 100% production statement and branch coverage and complete authored

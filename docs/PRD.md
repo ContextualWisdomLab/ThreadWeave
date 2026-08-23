@@ -126,7 +126,7 @@ Standalone use is mandatory. Optional CWL integrations MUST use public typed int
 
 A release candidate is acceptable only from an integrated protected head with all required current-head CI/security/review gates passing, package artifacts freshly built and installed outside the source tree, supply-chain lock/provenance evidence verified, CHANGELOG/version/tag consistency proven, and rollback/recovery procedure reviewed. A successful local suite does not substitute for required GitHub evidence.
 
-## 11. Buyer-visible roadmap
+## 11. Host-visible roadmap
 
 1. complete the `0.2.0` Trusted Publishing prerequisite and verify the public artifact;
 2. land and validate the bounded incremental mailbox state boundary after that release prerequisite is satisfied;
