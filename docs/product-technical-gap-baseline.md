@@ -19,6 +19,37 @@ Read this first if you are deciding what to work on next in ThreadWeave. It list
 | [#32](https://github.com/ContextualWisdomLab/ThreadWeave/pull/32) | `fix(operations): audit orphaned Actions workflow identities` | Open (marked ready for review), all required checks green, no unresolved review threads | Production module (`scripts/ci/actions_registry_audit.py`) is fully implemented and has been through several review rounds (CodeRabbit/Devin/github-code-quality) with every finding fixed or explicitly addressed: identity/path validation, complete verified pagination, protected-main/PR-head tree reads, the seven-way finite classification model, atomic schema-v1 evidence, a strict `GitHubJsonClient`, and `.github/workflows/actions-registry-audit.yml` at exactly `actions: read`/`contents: read`/`pull-requests: read`. 100% statement/branch/docstring coverage. Will be recorded as **ADR-0010** once PR #32 merges; the ADR file is not yet on this branch. | Blocked purely on the org-wide review-dispatch outage — see `ContextualWisdomLab/.github#624` (GitHub Models retirement + provider credit exhaustion causing every model-pool candidate to fail). No repository-side action remains; re-check once that issue's provider access is restored. |
 | [#34](https://github.com/ContextualWisdomLab/ThreadWeave/pull/34) | `docs: add product/technical gap baseline and LineageWeave consumer boundary ADR` | Open, all required checks green, no unresolved review threads (this document's own PR) | Same review-dispatch blocker as #32. | Same as #32 — re-check once `.github#624` clears. |
 
+### Correction to the "`#624` blocks everything" reading (2026-08-23)
+
+`.github#624` is real but is no longer the whole story, and treating it as the
+single blocker sends the next contributor to the wrong repository. Two further,
+independently-reproduced root causes now sit between these PRs and a merge:
+
+1. **`strix` provider-routing defect (org-wide, in `.github` `main`).**
+   `STRIX_FALLBACK_MODELS` ends in the hyphenated `openai-direct/gpt-5.6-luna`
+   alias — a spelling protected main's own trusted
+   `scripts/ci/strix_required_workflow_smoke.sh` pins verbatim, so the value
+   cannot be changed. `scripts/ci/strix_quick_gate.sh` recognized only the
+   underscored `openai_direct/` form, so once NVIDIA NIM rate-limited the
+   primary and first fallback model, the third fallback reached LiteLLM as a
+   literal unrecognized provider string and the scan died with
+   `litellm.BadRequestError: LLM Provider NOT provided`. Reproduced three times
+   deterministically; the same signature is failing LineageWeave's own required
+   `strix` check. Fix in flight as `.github#1213`.
+2. **`pull_request_target` self-reference trap.** `strix.yml` resolves its
+   trusted source via `job.workflow_sha`, which on `pull_request_target`
+   resolves to the **base branch** commit. Every `.github` PR's own `strix`
+   check therefore fetches `strix_quick_gate.sh` from protected `main`,
+   regardless of the PR branch's contents. A PR that fixes that file cannot
+   verify its own fix; only a merge to `main` can. This is why the standalone
+   fix attempt (`.github#1256`) was correctly closed as superseded rather than
+   iterated on.
+
+**What this means for ThreadWeave:** no repository-side action exists for #32 or
+#34. Both are green except for review dispatch, and the shared unblocker is
+`.github#1213` reaching protected `main` — not anything in this repository, and
+not `#624` alone. Re-check both PRs once `#1213` merges.
+
 ## Open issue inventory (2026-08-23)
 
 | Issue | Title | Blocking dependency | Next action |
