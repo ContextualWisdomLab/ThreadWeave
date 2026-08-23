@@ -16,7 +16,7 @@ Read this first if you are deciding what to work on next in ThreadWeave. It list
 | PR | Title | State | Blocking dependency | Next action |
 |---|---|---|---|---|
 | [#20](https://github.com/ContextualWisdomLab/ThreadWeave/pull/20) | `feat: add incremental mailbox threading with stable identity handoff` | Draft, `CONFLICTING` | Issue #17 (external PyPI Trusted Publisher) must close first; the PR body forbids merging before that | Do not rebase/merge yet. Once #17 closes: refresh onto released main, resolve conflicts, rerun full Python 3.10–3.14 + coverage + mailbox-scale parity evidence, get independent review. |
-| [#32](https://github.com/ContextualWisdomLab/ThreadWeave/pull/32) | `fix(operations): audit orphaned Actions workflow identities` | Open (marked ready for review), all required checks green, no unresolved review threads | Production module (`scripts/ci/actions_registry_audit.py`) is fully implemented and has been through several review rounds (CodeRabbit/Devin/github-code-quality) with every finding fixed or explicitly addressed: identity/path validation, complete verified pagination, protected-main/PR-head tree reads, the seven-way finite classification model, atomic schema-v1 evidence, a strict `GitHubJsonClient`, and `.github/workflows/actions-registry-audit.yml` at exactly `actions: read`/`contents: read`/`pull-requests: read`. 100% statement/branch/docstring coverage. Recorded as **ADR-0010**. | Blocked purely on the org-wide review-dispatch outage — see `ContextualWisdomLab/.github#624` (GitHub Models retirement + provider credit exhaustion causing every model-pool candidate to fail). No repository-side action remains; re-check once that issue's provider access is restored. |
+| [#32](https://github.com/ContextualWisdomLab/ThreadWeave/pull/32) | `fix(operations): audit orphaned Actions workflow identities` | Open (marked ready for review), all required checks green, no unresolved review threads | Production module (`scripts/ci/actions_registry_audit.py`) is fully implemented and has been through several review rounds (CodeRabbit/Devin/github-code-quality) with every finding fixed or explicitly addressed: identity/path validation, complete verified pagination, protected-main/PR-head tree reads, the seven-way finite classification model, atomic schema-v1 evidence, a strict `GitHubJsonClient`, and `.github/workflows/actions-registry-audit.yml` at exactly `actions: read`/`contents: read`/`pull-requests: read`. 100% statement/branch/docstring coverage. Will be recorded as **ADR-0010** once PR #32 merges; the ADR file is not yet on this branch. | Blocked purely on the org-wide review-dispatch outage — see `ContextualWisdomLab/.github#624` (GitHub Models retirement + provider credit exhaustion causing every model-pool candidate to fail). No repository-side action remains; re-check once that issue's provider access is restored. |
 | [#34](https://github.com/ContextualWisdomLab/ThreadWeave/pull/34) | `docs: add product/technical gap baseline and LineageWeave consumer boundary ADR` | Open, all required checks green, no unresolved review threads (this document's own PR) | Same review-dispatch blocker as #32. | Same as #32 — re-check once `.github#624` clears. |
 
 ## Open issue inventory (2026-08-23)
@@ -29,7 +29,7 @@ Read this first if you are deciding what to work on next in ThreadWeave. It list
 
 ## Cross-repository gap: LineageWeave evidence consumption (naruon#1437)
 
-**Finding:** ThreadWeave has no PR or issue that mentions LineageWeave — the two products do not connect directly, and per ADR-0009 they never should. The actual dependency chain runs through naruon, ThreadWeave's host:
+**Finding:** ThreadWeave has no production-integration PR or issue that mentions LineageWeave — the two products do not connect directly, and ADR-0009 (Proposed) records that they should not connect directly if accepted. The actual dependency chain runs through naruon, ThreadWeave's host:
 
 ```text
 ContextualWisdomLab/naruon#1437 (Consume LineageWeave for email lineage and
@@ -43,7 +43,7 @@ ContextualWisdomLab/naruon#1437 (Consume LineageWeave for email lineage and
     provider-side evidence-bounded lineage contract)
 ```
 
-**What this means for ThreadWeave:** nothing changes in ThreadWeave's own scope or runtime surface. ADR-0009 records that boundary explicitly so a future contributor does not add a LineageWeave adapter, HTTP call, or runtime dependency here. The one concrete piece of leverage ThreadWeave contributes to this chain is finishing PR #20 through its existing, already-documented acceptance path (ADR-0004) — that PR is blocked purely by issue #17, not by anything LineageWeave- or naruon-specific.
+**What this means for ThreadWeave:** nothing changes in ThreadWeave's own scope or runtime surface. ADR-0009 (Proposed) records that boundary explicitly so a future contributor does not add a LineageWeave adapter, HTTP call, or runtime dependency here if the ADR is accepted. The one concrete piece of leverage ThreadWeave contributes to this chain is finishing PR #20 through its existing, already-documented acceptance path (ADR-0004) — that PR is blocked by both its current `CONFLICTING` merge state and issue #17's release gate, not by anything LineageWeave- or naruon-specific.
 
 **What this means for naruon and LineageWeave:** naruon#1437 and LineageWeave#338 are tracked and owned in their own repositories; this document does not restate their acceptance criteria. See naruon#1437 for the full consumer design (admission policy, bounded evidence projection, async durable execution, result projection, buyer surface) and LineageWeave#338 for the provider-side contract.
 
@@ -53,7 +53,7 @@ ContextualWisdomLab/naruon#1437 (Consume LineageWeave for email lineage and
 |---|---|---|
 | Incremental mailbox threading (large-mailbox performance) | A host with a large, actively-changing mailbox must currently rebuild the full thread forest on every arrival/expunge/correction; PR #20 removes that cost but is not yet mergeable | proposed/active-PR (ADR-0004), blocked on issue #17 |
 | Published 0.2.0 release | `pip install threadweave` still installs 0.1.0; Python 3.14 support, the documentation graph, and the release-readiness preflight (PR #30) are already on protected main but not yet publicly released | blocked on issue #17 external account-side configuration |
-| Orphaned Actions workflow identities | Does not affect library consumers directly, but leaves 27 live workflow identities against 4 supported sources in the organization's automation surface, which is a governance/audit gap for a repository claiming SOC 2/CSAP-aligned practice | PR #32 GREEN implementation complete (ADR-0010); pending CI/review/merge |
+| Orphaned Actions workflow identities | Does not affect library consumers directly, but leaves 27 live workflow identities against 4 supported sources in the organization's automation surface, which is a governance/audit gap for a repository claiming SOC 2/CSAP-aligned practice | PR #32 GREEN implementation complete (to be recorded as ADR-0010 after merge); pending CI/review/merge |
 
 ## Not applicable to this repository
 

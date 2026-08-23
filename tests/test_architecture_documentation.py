@@ -299,6 +299,15 @@ def test_lineage_evidence_consumer_boundary_adr_is_proposed_and_indexed() -> Non
     assert "RFC 8474" in decision
     assert "ADR-0009" in traceability
 
+    # Lock the branched dependency ordering: naruon#1437 → naruon#1350 → ThreadWeave PR #20
+    # and naruon#1437 → LineageWeave#338 as a separate branch, not a sequential chain.
+    idx_1437 = decision.index("naruon#1437")
+    idx_1350 = decision.index("naruon#1350")
+    idx_pr20 = decision.index("ThreadWeave PR #20")
+    idx_lw338 = decision.index("LineageWeave#338")
+    assert idx_1437 < idx_1350 < idx_pr20
+    assert idx_1437 < idx_lw338
+
 
 def test_gap_baseline_tracks_lineageweave_cross_repository_chain() -> None:
     """Record the confirmed naruon/LineageWeave dependency chain and open PR/issue inventory."""
@@ -307,7 +316,7 @@ def test_gap_baseline_tracks_lineageweave_cross_repository_chain() -> None:
     documentation_map = _read("DOCUMENTATION.md")
 
     assert "product-technical-gap-baseline.md" in documentation_map
-    assert "ThreadWeave has no PR or issue that mentions LineageWeave" in gap_baseline
+    assert "ThreadWeave has no production-integration PR or issue that mentions LineageWeave" in gap_baseline
     assert "naruon#1437" in gap_baseline
     assert "naruon#1350" in gap_baseline
     assert "LineageWeave#338" in gap_baseline
@@ -317,3 +326,11 @@ def test_gap_baseline_tracks_lineageweave_cross_repository_chain() -> None:
     assert "#17" in gap_baseline
     assert "Not applicable to this repository" in gap_baseline
     assert "Storybook" in gap_baseline
+
+    # Lock the branched dependency chain recorded in the baseline.
+    idx_1437 = gap_baseline.index("naruon#1437")
+    idx_1350 = gap_baseline.index("naruon#1350")
+    idx_pr20 = gap_baseline.index("PR #20")
+    idx_lw338 = gap_baseline.index("LineageWeave#338")
+    assert idx_1437 < idx_1350 < idx_pr20
+    assert idx_1350 < idx_lw338
