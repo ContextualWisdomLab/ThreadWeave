@@ -104,7 +104,7 @@ Until that work lands on protected main, these are active-PR acceptance tests an
 
 ## Security and automation tests
 
-Verify immutable GitHub Action refs, secret isolation, no model-to-publisher credential inheritance, bounded patch paths/modes/sizes, exact patch digest handoff, credential-free independent verification, and separation of development from approve/merge/release authority. Workflow tests must also preserve work-conserving continuation without allowing one autonomous run to publish multiple competing product PRs.
+Verify immutable GitHub Action refs, secret isolation, no model-to-publisher credential inheritance, bounded patch paths/modes/sizes, exact patch digest handoff, credential-free independent verification, and separation of development from approve/merge/release authority. Workflow tests must also preserve work-conserving continuation without allowing one autonomous run to publish multiple competing product PRs. The Actions registry lifecycle audit (`scripts/ci/actions_registry_audit.py`, ADR-0010) additionally requires exact 100% statement/branch coverage, finite-classification tests for every one of its seven buckets, and fail-closed tests for malformed/hostile registry, pull-request, and Git-tree API responses; its workflow keeps exactly `actions: read`/`contents: read`/`pull-requests: read` with no mutation authority.
 
 ## Documentation contract tests
 

@@ -31,6 +31,7 @@ This matrix links durable product/technical requirements to standards, source bo
 | zero runtime dependency | standalone architecture | package metadata | `pip check`, lock/build smoke | implemented-main |
 | 100% production coverage/docstrings | CWL quality contract | all production modules | protected-main push CI run `31354471651`, coverage gate, `tests/test_documentation.py` | implemented-main; re-prove on every later merge/release head |
 | documentation reconstruction fitness | acquisition/readiness governance | canonical documentation graph merged by PR #25 at `fe9b46f` | protected-main push CI run `31354471651`; `tests/test_architecture_documentation.py`; `docs/DOCUMENTATION_AUDIT.md` | implemented-main |
+| ADR-0010 Actions registry lifecycle evidence | GitHub Actions/Git trees REST API + issue #31 fleet incident | PR #32 `scripts/ci/actions_registry_audit.py`, `.github/workflows/actions-registry-audit.yml` | exact protected-main/PR-head tree binding, complete pagination with page-repeat/total-count checks, finite classification tests, full start/end drift revalidation (branch SHA, workflow inventory, PR snapshot), `actions: read`-only workflow permissions, 100% coverage/docstrings | accepted/active-PR |
 
 ## Standards source of truth
 
