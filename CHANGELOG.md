@@ -6,6 +6,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Record retained and transient traced allocation for each isolated incremental
+  benchmark delta so scheduled 100,000-message evidence detects mailbox-wide
+  copying regressions alongside wall time, affected-message count, and peak RSS.
+- Apply default-mode incremental deltas through bounded overlay mappings and
+  touched reverse indexes instead of cloning or scanning every mailbox state map;
+  unchanged records, positions, components, and RFC 8474 identity namespaces stay
+  in place until one validated commit.
+- Preflight incremental snapshot root fields and record counts before nested
+  traversal, and cap plain-container validation by the configured byte limit so
+  oversized hostile trees fail before JSON encoder construction.
+- Bound incremental snapshot size checks to streaming UTF-8 code-point
+  accounting without encoding each JSON chunk into a second bytes object, and
+  reject reused container identities so compact Python object graphs cannot
+  trigger exponential JSON expansion.
+- Reject cyclic built-in dictionaries and lists at the incremental snapshot
+  restore boundary without recursion or unbounded traversal.
+- Reject container and scalar subclasses plus non-plain-string object keys at
+  the incremental snapshot restore boundary before sorted JSON encoding can
+  invoke attacker-controlled iteration or comparison methods.
+- Serialize every read and write on one `IncrementalThreadIndex` with a
+  process-local reentrant lock so same-version concurrent writers yield one
+  commit and one explicit conflict, while readers observe only committed state.
+- Keep implicit RFC 5256 sent-date tie-break positions internal to the incremental
+  engine instead of exposing invented IMAP sequence numbers on public roots.
+- Return defensive structural copies from `IncrementalThreadIndex.roots` so caller
+  graph edits cannot corrupt reusable index state while payload objects remain
+  caller-owned references.
+- Replace quadratic disconnected-component partitioning and pairwise thread-delta
+  comparisons with bounded indexed passes, copy reverse-token buckets only when
+  touched, and defer complete forest materialization until a caller requests it.
+- Add deterministic 100,000-message incremental-versus-full-rebuild benchmark
+  evidence with projection parity, affected-message counts, wall time, and peak RSS.
+- Harden incremental snapshot publication and restore so schema versions require
+  exact non-boolean integers and hostile nesting or unencodable Unicode fails
+  closed with `IncrementalThreadError` instead of leaking runtime exceptions.
+- Add an atomic `IncrementalThreadIndex` for mailbox additions, replacements,
+  and removals with stable caller message keys, affected-component
+  recomputation, batch-result parity, and explicit thread merge/split deltas.
+- Add strict RFC 8474 `EMAILID` and `THREADID` handoff, including immutable
+  values, exact ObjectID grammar, disjoint namespaces, and consistent THREADID
+  values for equal EMAILIDs.
+- Add versioned, bounded, JSON-safe incremental snapshots that omit arbitrary
+  caller payloads and rebuild derived graph state through validated metadata.
 - Keep the root README a customer/operator guide for standalone
   `pip install threadweave` and host composition through
   `from threadweave import thread_messages`, and move the hourly autonomous
@@ -26,6 +69,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tests/test_actions_registry_audit.py` provides exact 100%
   statement/branch coverage of the detector itself in `ci.yml`'s existing
   PR-time gate. See ADR-0010.
+
+## [0.2.0] - 2026-08-04
 
 ## [0.2.0] - 2026-08-10
 
