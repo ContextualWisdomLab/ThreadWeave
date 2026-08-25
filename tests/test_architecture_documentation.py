@@ -299,14 +299,19 @@ def test_lineage_evidence_consumer_boundary_adr_is_proposed_and_indexed() -> Non
     assert "RFC 8474" in decision
     assert "ADR-0009" in traceability
 
-    # Lock the branched dependency ordering: naruon#1437 → naruon#1350 → ThreadWeave PR #20
-    # and naruon#1437 → LineageWeave#338 as a separate branch, not a sequential chain.
-    idx_1437 = decision.index("naruon#1437")
-    idx_1350 = decision.index("naruon#1350")
-    idx_pr20 = decision.index("ThreadWeave PR #20")
-    idx_lw338 = decision.index("LineageWeave#338")
-    assert idx_1437 < idx_1350 < idx_pr20
-    assert idx_1437 < idx_lw338
+    # Lock the branched dependency ordering at RELATION level: two separate
+    # edges must be stated explicitly, not a single sequential chain.
+    #   Edge A: naruon#1437 -> naruon#1350 -> ThreadWeave PR #20
+    #   Edge B: naruon#1437 -> LineageWeave#338
+    flat_decision = " ".join(decision.split())
+    assert (
+        "`naruon#1437` depends on `naruon#1350`, which depends on ThreadWeave PR #20"
+        in flat_decision
+    )
+    assert "`naruon#1437` also depends on `LineageWeave#338`" in flat_decision
+    # The separate-branch wording ("also depends") must exist so a reader cannot
+    # misread the two relations as one transitive chain through naruon#1350.
+    assert "also depends" in decision
 
 
 def test_gap_baseline_tracks_lineageweave_cross_repository_chain() -> None:
@@ -327,10 +332,12 @@ def test_gap_baseline_tracks_lineageweave_cross_repository_chain() -> None:
     assert "Not applicable to this repository" in gap_baseline
     assert "Storybook" in gap_baseline
 
-    # Lock the branched dependency chain recorded in the baseline.
-    idx_1437 = gap_baseline.index("naruon#1437")
-    idx_1350 = gap_baseline.index("naruon#1350")
-    idx_pr20 = gap_baseline.index("PR #20")
-    idx_lw338 = gap_baseline.index("LineageWeave#338")
-    assert idx_1437 < idx_1350 < idx_pr20
-    assert idx_1350 < idx_lw338
+    # Relation-level lock of the branched chain as recorded in the baseline
+    # (mirrors ADR-0009's two-edge statement; no sequential-chain reading).
+    # Whitespace-normalized so markdown line wrapping cannot hide a relation.
+    flat = " ".join(gap_baseline.split())
+    assert (
+        "`naruon#1437` depends on `naruon#1350`, which depends on ThreadWeave PR #20"
+        in flat
+    )
+    assert "`naruon#1437` also depends on `LineageWeave#338`" in flat

@@ -16,8 +16,8 @@ Read this first if you are deciding what to work on next in ThreadWeave. It list
 | PR | Title | State | Blocking dependency | Next action |
 |---|---|---|---|---|
 | [#20](https://github.com/ContextualWisdomLab/ThreadWeave/pull/20) | `feat: add incremental mailbox threading with stable identity handoff` | Draft, `CONFLICTING` | Issue #17 (external PyPI Trusted Publisher) must close first; the PR body forbids merging before that | Do not rebase/merge yet. Once #17 closes: refresh onto released main, resolve conflicts, rerun full Python 3.10–3.14 + coverage + mailbox-scale parity evidence, get independent review. |
-| [#32](https://github.com/ContextualWisdomLab/ThreadWeave/pull/32) | `fix(operations): audit orphaned Actions workflow identities` | Open (marked ready for review), all required checks green, no unresolved review threads | Production module (`scripts/ci/actions_registry_audit.py`) is fully implemented and has been through several review rounds (CodeRabbit/Devin/github-code-quality) with every finding fixed or explicitly addressed: identity/path validation, complete verified pagination, protected-main/PR-head tree reads, the seven-way finite classification model, atomic schema-v1 evidence, a strict `GitHubJsonClient`, and `.github/workflows/actions-registry-audit.yml` at exactly `actions: read`/`contents: read`/`pull-requests: read`. 100% statement/branch/docstring coverage. Will be recorded as **ADR-0010** once PR #32 merges; the ADR file is not yet on this branch. | Blocked purely on the org-wide review-dispatch outage — see `ContextualWisdomLab/.github#624` (GitHub Models retirement + provider credit exhaustion causing every model-pool candidate to fail). No repository-side action remains; re-check once that issue's provider access is restored. |
-| [#34](https://github.com/ContextualWisdomLab/ThreadWeave/pull/34) | `docs: add product/technical gap baseline and LineageWeave consumer boundary ADR` | Open, all required checks green, no unresolved review threads (this document's own PR) | Same review-dispatch blocker as #32. | Same as #32 — re-check once `.github#624` clears. |
+| [#32](https://github.com/ContextualWisdomLab/ThreadWeave/pull/32) | `fix(operations): audit orphaned Actions workflow identities` | Open (marked ready for review), all required checks green, no unresolved review threads | Production module (`scripts/ci/actions_registry_audit.py`) is fully implemented and has been through several review rounds (CodeRabbit/Devin/github-code-quality) with every finding fixed or explicitly addressed: identity/path validation, complete verified pagination, protected-main/PR-head tree reads, the seven-way finite classification model, atomic schema-v1 evidence, a strict `GitHubJsonClient`, and `.github/workflows/actions-registry-audit.yml` at exactly `actions: read`/`contents: read`/`pull-requests: read`. 100% statement/branch/docstring coverage. Will be recorded as **ADR-0010** once PR #32 merges; the ADR file is not yet on this branch. | Historically blocked by two org-level conditions, both now cleared on protected `.github` main: `.github#624` (provider outage) and the strix provider-routing defect fixed via `.github` PR #1322 (superseding #1213). No repository-side action remains; merge gates now evaluate normally. |
+| [#34](https://github.com/ContextualWisdomLab/ThreadWeave/pull/34) | `docs: add product/technical gap baseline and LineageWeave consumer boundary ADR` | Open, all required checks green, no unresolved review threads (this document's own PR) | Same dual blocker as #32 (`.github#624` + strix routing fixed by `.github` PR #1322 superseding #1213) — both cleared; this PR is merging through normal gates. |
 
 ### Correction to the "`#624` blocks everything" reading (2026-08-23)
 
@@ -45,17 +45,14 @@ independently-reproduced root causes now sit between these PRs and a merge:
    fix attempt (`.github#1256`) was correctly closed as superseded rather than
    iterated on.
 
-**What this means for ThreadWeave:** no repository-side action exists for #32 or
-#34. Both are green except for review dispatch, and the shared unblocker is
-`.github#1213` reaching protected `main` — not anything in this repository, and
-not `#624` alone. Re-check both PRs once `#1213` merges.
+**What this means for ThreadWeave (2026-08-25 update):** no repository-side action was ever required for PR #32 or PR #34. Both org-level blockers have now cleared — provider access is restored past `.github#624`, and the strix provider-routing defect is fixed on protected `.github` main by PR #1322 (which supersedes #1213). Both PRs proceed through their normal merge gates.
 
 ## Open issue inventory (2026-08-23)
 
 | Issue | Title | Blocking dependency | Next action |
 |---|---|---|---|
 | [#17](https://github.com/ContextualWisdomLab/ThreadWeave/issues/17) | Release operations: complete PyPI Trusted Publishing for 0.2.0 | Repository-owned prerequisite (PR #30) is merged. Remaining blockers are both external and cannot be closed by a source change alone: (a) create a GitHub `pypi` deployment environment with protected-branch-only deployment and an independent required reviewer; (b) configure a PyPI Trusted Publisher on the `threadweave` PyPI project for `ContextualWisdomLab/ThreadWeave`, workflow `release.yml`, environment `pypi`. As of 2026-08-23, `GET /repos/ContextualWisdomLab/ThreadWeave/environments` returns `total_count: 0` and PyPI's public `threadweave` project JSON exposes only `0.1.0`. | A repository admin creates the `pypi` environment and an account owner configures the PyPI Trusted Publisher; do not manually upload a distribution or add a long-lived PyPI token as a substitute (explicit non-bypass rule in the issue). |
-| [#31](https://github.com/ContextualWisdomLab/ThreadWeave/issues/31) | `[Fleet incident] Disable orphaned PR 20 repair and hourly-diagnostics workflow identities` | PR #32's real implementation (see above) is the repository-owned detector this issue needs before an authorized operator can safely disable orphan workflow identities | Same as PR #32's next action — blocked on `ContextualWisdomLab/.github#624`, not on repository work. |
+| [#31](https://github.com/ContextualWisdomLab/ThreadWeave/issues/31) | `[Fleet incident] Disable orphaned PR 20 repair and hourly-diagnostics workflow identities` | PR #32's real implementation (see above) is the repository-owned detector this issue needs before an authorized operator can safely disable orphan workflow identities | Unblocked with PR #32: both org-level blockers (`.github#624`; strix routing, fixed by `.github` PR #1322 superseding #1213) are cleared, so the detector can be operated against live workflow identities. |
 | [#22](https://github.com/ContextualWisdomLab/ThreadWeave/issues/22) | `[Incident] Hourly Product Development blocks its own GitHub API egress` | Criterion 5 only: needs the PR queue genuinely drained and release policy (issue #17) to permit product development before the bounded OpenCode/NVIDIA path can produce its proof run | Re-check after #17 and the PR queue above both close. The queue (#32, #34) isn't stuck on scheduling — it's the same `.github#624` review-dispatch outage. |
 
 ## Cross-repository gap: LineageWeave evidence consumption (naruon#1437)
@@ -73,6 +70,11 @@ ContextualWisdomLab/naruon#1437 (Consume LineageWeave for email lineage and
   → also depends on ContextualWisdomLab/LineageWeave#338 (publish the
     provider-side evidence-bounded lineage contract)
 ```
+
+Relation-level statement (authoritative, mirrors ADR-0009): `naruon#1437`
+depends on `naruon#1350`, which depends on ThreadWeave PR #20;
+`naruon#1437` also depends on `LineageWeave#338` as a separate branch —
+not as a transitive step through `naruon#1350`.
 
 **What this means for ThreadWeave:** nothing changes in ThreadWeave's own scope or runtime surface. ADR-0009 (Proposed) records that boundary explicitly so a future contributor does not add a LineageWeave adapter, HTTP call, or runtime dependency here if the ADR is accepted. The one concrete piece of leverage ThreadWeave contributes to this chain is finishing PR #20 through its existing, already-documented acceptance path (ADR-0004) — that PR is blocked by both its current `CONFLICTING` merge state and issue #17's release gate, not by anything LineageWeave- or naruon-specific.
 
