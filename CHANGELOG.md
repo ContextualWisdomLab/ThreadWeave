@@ -41,7 +41,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Harden incremental snapshot publication and restore so schema versions require
   exact non-boolean integers and hostile nesting or unencodable Unicode fails
   closed with `IncrementalThreadError` instead of leaking runtime exceptions.
-
 - Add an atomic `IncrementalThreadIndex` for mailbox additions, replacements,
   and removals with stable caller message keys, affected-component
   recomputation, batch-result parity, and explicit thread merge/split deltas.
@@ -50,9 +49,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   values for equal EMAILIDs.
 - Add versioned, bounded, JSON-safe incremental snapshots that omit arbitrary
   caller payloads and rebuild derived graph state through validated metadata.
+- Keep the root README a customer/operator guide for standalone
+  `pip install threadweave` and host composition through
+  `from threadweave import thread_messages`, and move the hourly autonomous
+  maintenance playbook to
+  [`docs/operations/hourly-autonomous-maintenance.md`](docs/operations/hourly-autonomous-maintenance.md).
 
 ## [0.2.0] - 2026-08-04
 
+## [0.2.0] - 2026-08-10
+
+- Add a fail-closed release-readiness gate that requires a pre-created `pypi`
+  environment with required reviewers, self-review prevention, protected-branch
+  deployment policy, and an unpublished target version before build,
+  attestation, tag, or GitHub Release side effects can begin; record the Trusted
+  Publishing boundary in ADR-0008.
+- Extend the canonical architecture graph with a reconstruction-oriented
+  documentation fitness audit, data-governance/privacy boundary, incident/RCA
+  runbook, release/provenance/licensing gate, work-conserving autonomous
+  maintenance ADR, and exact evidence-identity ADR.
+- Restore `CLAUDE.md` as canonical agent context, explicitly preserving the
+  OpenCode + `NVIDIA_NIM_API_KEY` development boundary, prohibiting Copilot-token
+  use for development-model execution, and recording the protected-main Python
+  3.10–3.14 compatibility contract.
+- Add Python 3.14 to package classifiers and the full CI matrix, and build,
+  hash-install, and smoke-test the distribution under Python 3.14 while
+  preserving Python 3.10 as the minimum supported runtime.
+- Add a canonical product/technical architecture documentation graph with PRD,
+  TRD, root architecture, UML, conceptual ERD, API/version contract, indexed
+  ADRs, security/threat model, data governance, test strategy, operability,
+  incident/recovery, release provenance, traceability, and machine-checkable
+  documentation maturity guards that distinguish protected-main behavior from
+  active PR #20 incremental-state work.
+- Restore the hourly NVIDIA NIM/OpenCode product-development workflow's YAML and
+  nested-shell contracts, and lint every GitHub Actions workflow with a pinned,
+  checksum-verified `actionlint` release before ordinary CI may proceed.
 - Add iterative RFC 5256 `THREAD` and `UID THREAD` response serialization with
   search-result projection, sequence-number, UID, or callable identifier
   selection, dummy-root preservation, protocol-safe framing, and fail-closed
@@ -122,9 +153,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Add opt-in `sort_by_sent_date` processing for RFC 5256 steps 4 and 6, including
   top-level dummy-child ordering, first-child dummy keys, bottom-up sibling
   sorting, and sequence-number tie-breaking.
-- Carry `Date`, `INTERNALDATE`, and sequence metadata through the standard-
-  library email adapters; direct iterable order supplies deterministic one-based
-  sequence numbers.
+- Carry `Date` plus explicitly supplied `INTERNALDATE`, sequence-number, and UID
+  metadata through `message_from_email`; `thread_email_messages` leaves public
+  sequence/UID metadata unset and relies on the canonical threader's one-based
+  input position only as an internal deterministic sent-date ordering fallback.
 - Reject invalid or duplicate effective mailbox sequence numbers instead of
   silently producing contradictory ordering.
 - Preserve decoded Unicode header values, including internationalized subjects,

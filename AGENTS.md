@@ -90,6 +90,9 @@ standards-grounded, and impossible to hang on malformed input. Treat changes to
 
 ## Autonomous development loop
 
+Hourly cadence, writer boundaries, NIM broker, and token setup are documented in
+[`docs/operations/hourly-autonomous-maintenance.md`](docs/operations/hourly-autonomous-maintenance.md).
+
 1. Open pull requests always take priority: inspect review threads and checks,
    make the smallest fixes, revalidate, merge only after the evidence is sound,
    then search again until the queue is empty.

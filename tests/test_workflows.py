@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 WORKFLOW_DIRECTORY = Path(__file__).parents[1] / ".github" / "workflows"
+CENTRAL_MERGE_REVISION = "3f65dbee6672b78802e7d71d49c390f3817bb03b"
 
 
 def _workflow(name: str) -> str:
@@ -12,32 +13,72 @@ def _workflow(name: str) -> str:
 
 
 def test_hourly_pr_maintenance_uses_central_cwl_workflows():
-    """PR review, autofix, branch update, and merge stay centrally governed."""
+    """PR review, branch update, and merge stay centrally governed."""
     workflow = _workflow("hourly-pr-maintenance.yml")
+    review_merge = workflow.split("  review-merge:\n", 1)[1]
 
     assert 'cron: "11 * * * *"' in workflow
+    assert "pr-review-fix-scheduler.yml" not in workflow
     assert (
         "ContextualWisdomLab/.github/.github/workflows/"
-        "pr-review-fix-scheduler.yml@main"
+        f"pr-review-merge-scheduler.yml@{CENTRAL_MERGE_REVISION}"
     ) in workflow
-    assert (
-        "ContextualWisdomLab/.github/.github/workflows/"
-        "pr-review-merge-scheduler.yml@main"
-    ) in workflow
-    assert 'target_repository: "ContextualWisdomLab/ThreadWeave"' in workflow
-    assert 'retry_hours: "1"' in workflow
+    assert "@main" not in workflow
+    assert 'base_branch: "main"' in workflow
+    assert 'review_dispatch_limit: "1"' in workflow
+    assert 'branch_update_limit: "1"' in workflow
     assert 'merge_mode: "direct_or_auto"' in workflow
-    assert "secrets: inherit" in workflow
+    assert "trigger_reviews: true" in workflow
+    assert "update_branches: true" in workflow
+    assert "enable_auto_merge: true" in workflow
+    assert "secrets: inherit" not in workflow
+    assert "\n    secrets:" not in review_merge
+    assert "issues: write" not in workflow
 
 
 def test_product_development_brokers_nim_outside_the_model_process():
     """The model gets a placeholder key while a loopback broker owns the secret."""
     workflow = _workflow("hourly-product-development.yml")
+    develop = workflow.split("  develop-product-gap:\n", 1)[1].split(
+        "  reverify-product-gap:\n", 1
+    )[0]
+    job_header = develop.split("    steps:\n", 1)[0]
+    gate = develop.split(
+        "      - name: Enforce the pull-request-first deterministic gate", 1
+    )[1].split(
+        "      - name: Check out the protected default branch without persisted credentials", 1
+    )[0]
+    broker = develop.split(
+        "      - name: Start the loopback-only NIM credential broker", 1
+    )[1].split("      - name: Run the NVIDIA NIM development agent", 1)[0]
+    capture = develop.split("      - name: Capture the bounded credential-free patch", 1)[
+        1
+    ].split("      - name: Upload the bounded proposal", 1)[0]
+    secret_binding = "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}"
 
     assert 'cron: "41 * * * *"' in workflow
     assert "cancel-in-progress: false" in workflow
-    assert "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}" in workflow
-    assert "python scripts/ci/nim_proxy.py" in workflow
+    assert workflow.count(secret_binding) == 1
+    assert secret_binding not in job_header
+    assert "NIM_UPSTREAM_API_KEY" not in job_header
+    assert "secrets.NVIDIA_NIM_API_KEY" not in gate
+    assert "NIM_UPSTREAM_API_KEY" not in gate
+    assert "if: steps.gate.outputs.develop == 'true'" in broker
+    assert secret_binding in broker
+    assert "python scripts/ci/nim_proxy.py" in broker
+    assert "secret_fingerprint_guard.py fingerprint" in broker
+    assert 'forbidden_fingerprint_file="${RUNNER_TEMP}/threadweave-secret-fingerprint.json"' in broker
+    assert "set -euo pipefail" in capture
+    assert "secret_fingerprint_guard.py scan" in capture
+    assert '--fingerprint-file "$forbidden_fingerprint_file"' in capture
+    assert "continue-on-error: true" not in capture
+    assert develop.index("secret_fingerprint_guard.py scan") < develop.index(
+        "actions/upload-artifact@"
+    )
+    assert workflow.index("secret_fingerprint_guard.py scan") < workflow.index(
+        "scripts/ci/hourly_product_guard.py apply"
+    )
+    assert "THREADWEAVE_FORBIDDEN_SECRET" not in workflow
     assert '"baseURL": "http://127.0.0.1:8765/v1"' in workflow
     assert "NVIDIA_API_KEY=threadweave-local-broker" in workflow
     assert "NVIDIA_API_KEY=\"$NIM_UPSTREAM_API_KEY\"" not in workflow
@@ -54,10 +95,10 @@ def test_product_development_brokers_nim_outside_the_model_process():
 def test_product_development_pauses_while_a_release_blocker_is_open():
     """A release freeze prevents autonomous product drift before publication."""
     workflow = _workflow("hourly-product-development.yml")
-    gate = workflow.split("      - name: Enforce the credential and pull-request-first gate", 1)[
+    gate = workflow.split("      - name: Enforce the pull-request-first deterministic gate", 1)[
         1
     ].split(
-        "      - name: Check out the protected default branch", 1
+        "      - name: Check out the protected default branch without persisted credentials", 1
     )[0]
 
     assert "issues?state=open&labels=release-blocker&per_page=1" in gate
@@ -66,6 +107,7 @@ def test_product_development_pauses_while_a_release_blocker_is_open():
     assert "A release-blocker issue is open" in gate
     assert gate.index("reason=open_pull_request") < gate.index("reason=release_blocker")
     assert gate.index("reason=release_blocker") < gate.index("reason=dry_run")
+    assert "NVIDIA_NIM_API_KEY" not in gate
 
 
 def test_model_job_blocks_undeclared_network_egress():
@@ -90,7 +132,9 @@ def test_product_development_packages_and_reverifies_a_bounded_patch():
 
     assert "scripts/ci/hourly_product_guard.py capture" in workflow
     assert workflow.count("scripts/ci/hourly_product_guard.py apply") == 2
-    assert "THREADWEAVE_FORBIDDEN_SECRET" in workflow
+    assert "THREADWEAVE_FORBIDDEN_SECRET" not in workflow
+    assert "secret_fingerprint_guard.py fingerprint" in workflow
+    assert "secret_fingerprint_guard.py scan" in workflow
     assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in workflow
     assert "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" in workflow
     assert "reverify-product-gap:" in workflow
@@ -196,3 +240,52 @@ def test_product_task_is_test_first_documented_and_never_self_releases():
     assert "highest-value buyer-visible" in workflow
     assert "Do not stage, commit, push, open a pull request, tag, or publish" in workflow
     assert "PR_MESSAGE.md" in workflow
+
+
+def test_product_prompt_is_work_conserving_inside_the_bounded_slice():
+    """The model must continue safe sub-steps instead of stopping after one success."""
+    workflow = _workflow("hourly-product-development.yml")
+
+    assert "Do not stop after completing one useful sub-step" in workflow
+    assert "two fresh internal exit sweeps" in workflow
+    assert "If either sweep finds another safe action" in workflow
+    assert "within the same coherent product gap and allowed file scope" in workflow
+    assert "one bounded proposal" in workflow
+    assert "Do not open or publish a second pull request" in workflow
+
+
+def test_product_workflow_keeps_hash_requirement_inside_the_yaml_block():
+    """The multiline requirement must remain valid YAML and pip input."""
+    workflow = _workflow("hourly-product-development.yml")
+    expected = (
+        "          printf 'threadweave @ file://%s \\\n"
+        "            --hash=sha256:%s\\n' \\\n"
+    )
+
+    assert expected in workflow
+    assert "\n    --hash=sha256:%s\\n' \\\n" not in workflow
+
+
+def test_product_workflow_documents_intentional_nested_shell_expansion():
+    """ShellCheck must not flag positional parameters expanded by the inner shell."""
+    workflow = _workflow("hourly-product-development.yml")
+    expected = (
+        "            # shellcheck disable=SC2016\n"
+        '            if timeout --kill-after=30s "${OPENCODE_RUN_TIMEOUT_SECONDS}s"'
+    )
+
+    assert expected in workflow
+
+
+def test_ci_lints_every_workflow_with_a_pinned_actionlint_release():
+    """A malformed scheduled workflow must fail ordinary pull-request CI."""
+    workflow = _workflow("ci.yml")
+
+    assert 'ACTIONLINT_VERSION: "1.7.12"' in workflow
+    assert (
+        "ACTIONLINT_SHA256: "
+        "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        in workflow
+    )
+    assert "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" in workflow
+    assert '"${RUNNER_TEMP}/actionlint" -color=false .github/workflows/*.yml' in workflow
