@@ -86,6 +86,7 @@ At minimum maintain tests for:
 - package built/installed outside source tree;
 - action SHA and dependency lock integrity;
 - secret/credential absence from untrusted automation phases;
+- hostile/malformed GitHub Actions registry, pull-request, and Git-tree API responses (truncated tree, repeated/mismatched pagination, duplicate workflow IDs, non-NFC/traversal-shaped workflow paths, oversized/non-UTF-8/duplicate-key JSON) fail closed in `scripts/ci/actions_registry_audit.py` rather than under-reporting a live orphan workflow identity (ADR-0010);
 - if incremental lands: hostile/cyclic/aliased/oversized snapshot inputs and same-version concurrent writers.
 
 ## Residual risk

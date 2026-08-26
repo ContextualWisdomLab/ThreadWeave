@@ -18,6 +18,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   contract → `LineageWeave#338`), and record ADR-0009 documenting that
   ThreadWeave stays unaware of LineageWeave — naruon owns the projection.
 
+- Add a read-only GitHub Actions registry lifecycle audit
+  (`scripts/ci/actions_registry_audit.py`) that classifies every live
+  workflow identity as backed by protected-main source, a current open-PR
+  head, disabled, GitHub-owned/dynamic, a confirmed orphan, or unresolved,
+  closing the evidence gap from issue #31 without granting the detector any
+  workflow-disable authority. Run it on protected-main changes to the
+  detector, on manual dispatch, and hourly at minute 53 through
+  `.github/workflows/actions-registry-audit.yml` with exactly
+  `actions: read`, `contents: read`, and `pull-requests: read` — not on pull
+  requests, since the audit is meant to fail visibly on a genuine live
+  orphan and running it there would make it a permanently red check on
+  every unrelated PR for as long as any real orphan remains undisabled.
+  `tests/test_actions_registry_audit.py` provides exact 100%
+  statement/branch coverage of the detector itself in `ci.yml`'s existing
+  PR-time gate. See ADR-0010.
+
 ## [0.2.0] - 2026-08-10
 
 - Add a fail-closed release-readiness gate that requires a pre-created `pypi`

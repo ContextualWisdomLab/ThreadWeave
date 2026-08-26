@@ -14,6 +14,8 @@ The status inside each ADR is authoritative. `Accepted` means the decision gover
 | [ADR-0008](0008-trusted-release-identity-boundary.md) | Fail closed on pre-created protected GitHub/PyPI release identity before irreversible release side effects. | Accepted |
 | [ADR-0009](0009-lineage-evidence-consumer-boundary.md) | Keep LineageWeave evidence consumption entirely inside the naruon host boundary; ThreadWeave stays unaware of LineageWeave. | Proposed |
 
+| [ADR-0010](0010-actions-registry-lifecycle-evidence.md) | Separate Actions registry observation (read-only audit) from workflow-disable authority (a separate, out-of-band operator action). | Accepted |
+
 ## Status vocabulary
 
 - `Proposed`: under review; not an as-built product claim.

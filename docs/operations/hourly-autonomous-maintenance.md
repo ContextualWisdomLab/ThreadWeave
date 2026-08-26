@@ -10,7 +10,7 @@ should use [`README.md`](../../README.md) and [`docs/OPERABILITY.md`](../OPERABI
 Decision records remain [`ADR-0005`](../adr/0005-automation-authority-separation.md)
 and [`ADR-0006`](../adr/0006-work-conserving-autonomous-maintenance.md).
 
-Two staggered workflows keep development review-first and single-flight.
+Three staggered workflows keep development review-first and single-flight.
 
 At minute 11 of every hour, `hourly-pr-maintenance.yml` calls the organization
 workflows in `ContextualWisdomLab/.github` to inspect reviews, dispatch bounded
@@ -59,9 +59,18 @@ PR workflows start without that manual gate. The product-development agent never
 merges, tags, or publishes a release. Do not merge a product-development PR from
 the model job or treat a successful model run as merge evidence.
 
-Both workflows expose a manual `dry_run` input. Missing credentials, an open PR,
-a moved base, a changed patch digest, failed independent verification, or an
-unavailable safe proposal stops the cycle without mutation.
+At minute 53, `actions-registry-audit.yml` runs the read-only Actions registry
+lifecycle audit (`scripts/ci/actions_registry_audit.py`, [`ADR-0010`](../adr/0010-actions-registry-lifecycle-evidence.md)).
+It holds only `actions: read`, `contents: read`, and `pull-requests: read` —
+never `actions: write` — and reports which live registry identities are backed
+by protected-main source, a current open-PR head, disabled, GitHub-owned/dynamic,
+a confirmed orphan, or unresolved. It never disables a workflow itself; disabling
+a confirmed orphan remains a separate, authorized, out-of-band operator action.
+
+All three workflows expose a manual `dry_run` or `workflow_dispatch` entry
+point. Missing credentials, an open PR, a moved base, a changed patch digest,
+failed independent verification, or an unavailable safe proposal stops the
+review/development cycle without mutation.
 
 The autonomous patch guard and NIM credential broker require **100%** statement
 and branch coverage. `COPILOT_GITHUB_TOKEN` is not a development-model credential
