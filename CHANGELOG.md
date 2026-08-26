@@ -11,6 +11,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `from threadweave import thread_messages`, and move the hourly autonomous
   maintenance playbook to
   [`docs/operations/hourly-autonomous-maintenance.md`](docs/operations/hourly-autonomous-maintenance.md).
+- Add [`docs/product-technical-gap-baseline.md`](docs/product-technical-gap-baseline.md)
+  tracking every open PR/issue's exact blocking dependency and the confirmed
+  cross-repository LineageWeave/naruon evidence-consumption chain
+  (`naruon#1437` → `naruon#1350` → this repository's PR #20 stable-identity
+  contract → `LineageWeave#338`), and record ADR-0009 documenting that
+  ThreadWeave stays unaware of LineageWeave — naruon owns the projection.
+
 - Add a read-only GitHub Actions registry lifecycle audit
   (`scripts/ci/actions_registry_audit.py`) that classifies every live
   workflow identity as backed by protected-main source, a current open-PR
