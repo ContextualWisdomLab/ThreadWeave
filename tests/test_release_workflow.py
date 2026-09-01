@@ -106,22 +106,22 @@ def _hardened_endpoints(job: str) -> set[str]:
     return {line.strip() for line in endpoint_block.splitlines() if line.strip()}
 
 
-def test_release_is_changelog_driven_on_protected_main_and_manually_recoverable() -> None:
-    """Main pushes can release while manual dispatch remains an idempotent recovery path."""
+def test_release_waits_for_completed_main_ci_and_keeps_manual_recovery() -> None:
+    """Automatic release authority starts from completed main CI, not raw push."""
 
     workflow = _workflow()
     trigger = workflow.split("permissions:", 1)[0]
     assert "workflow_dispatch:" in trigger
     assert "required: false" in trigger
-    assert "push:" in trigger
-    assert "branches:\n      - main" in trigger
-    assert "CHANGELOG.md" in trigger
-    assert "pyproject.toml" in trigger
-    assert ".github/workflows/release.yml" in trigger
+    assert "workflow_run:" in trigger
+    assert 'workflows: ["ci"]' in trigger
+    assert "types: [completed]" in trigger
+    assert "branches: [main]" in trigger
+    assert "\n  push:\n" not in trigger
     assert "pull_request_target" not in trigger
-    assert "github.ref == 'refs/heads/main'" in workflow
+    assert "github.event.workflow_run.head_sha" in workflow
     assert "github.repository == 'ContextualWisdomLab/ThreadWeave'" in workflow
-    assert "group: release-${{ github.ref }}" in workflow
+    assert "group: release-${{" in workflow
     assert "cancel-in-progress: false" in workflow
 
 
@@ -132,17 +132,38 @@ def test_readiness_derives_version_and_exposes_only_boolean_publisher_state() ->
     assert workflow.index("  release-readiness:\n") < workflow.index("  build-release:\n")
     readiness = _job_block(workflow, "release-readiness", "build-release")
     assert "PIPY_TOKEN_AVAILABLE: ${{ secrets.PIPY_TOKEN != '' }}" in readiness
+    assert "SOURCE_SHA:" in readiness
     assert "tomllib.load" in readiness
     assert 'project["version"]' in readiness
     assert "GITHUB_REF_PROTECTED" in readiness
     assert "https://pypi.org/pypi/threadweave/$release_version/json" in readiness
     assert "publisher_available" in readiness
     assert "public_version_exists" in readiness
+    assert "run_release" in readiness
+    assert "source_sha" in readiness
     assert "release_required" not in readiness
     assert "environments/pypi" not in readiness
     build = _job_block(workflow, "build-release", "publication-plan")
     assert "needs: release-readiness" in build
-    assert "release_required" not in build
+    assert "needs.release-readiness.outputs.run_release == 'true'" in build
+    assert "ref: ${{ needs.release-readiness.outputs.source_sha }}" in build
+
+
+def test_release_authority_is_bound_to_integrated_and_pr_security_evidence() -> None:
+    """Automatic or manual release work proves the exact accepted source boundary."""
+
+    readiness = _job_block(_workflow(), "release-readiness", "build-release")
+    assert "actions: read" in readiness
+    assert "pull-requests: read" in readiness
+    assert "require_workflow_success" in readiness
+    assert 'require_workflow_success "ci" "push" "$SOURCE_SHA"' in readiness
+    assert 'require_workflow_success "SAST Semgrep" "push" "$SOURCE_SHA"' in readiness
+    assert 'require_workflow_success "ci" "pull_request" "$source_pr_head"' in readiness
+    assert 'require_workflow_success "SAST Semgrep" "pull_request" "$source_pr_head"' in readiness
+    assert 'require_workflow_success "Security Scan" "pull_request" "$source_pr_head"' in readiness
+    assert '"repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls"' in readiness
+    assert "merge_commit_sha" in readiness
+    assert "associated merged pull request" in readiness
 
 
 def test_partial_publication_is_planned_before_attestation_or_release_side_effects() -> None:
@@ -165,16 +186,19 @@ def test_partial_publication_is_planned_before_attestation_or_release_side_effec
     assert "if-no-files-found: error" in plan
 
 
-def test_complete_existing_publication_skips_upload_but_still_reaches_verification() -> None:
-    """A retry can rebuild, verify GitHub evidence, and verify public artifacts without upload."""
+def test_automatic_existing_version_noops_while_manual_recovery_can_verify() -> None:
+    """Routine main CI does not re-tag an existing version; manual recovery may rebuild it."""
 
     workflow = _workflow()
+    readiness = _job_block(workflow, "release-readiness", "build-release")
+    assert 'if [ "$GITHUB_EVENT_NAME" = "workflow_run" ] && [ "$public_version_exists" = "true" ]; then' in readiness
+    assert "run_release=false" in readiness
+    assert 'if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then' in readiness
+    assert "run_release=true" in readiness
     publish = _job_block(workflow, "publish-pypi", "verify-publication")
     assert "needs.publication-plan.outputs.publication_required == 'true'" in publish
     verify = _job_block(workflow, "verify-publication", None)
     assert "always()" in verify
-    assert "needs.publication-plan.result == 'success'" in verify
-    assert "needs.github-release.result == 'success'" in verify
     assert "needs.publish-pypi.result == 'success' ||" in verify
     assert "needs.publish-pypi.result == 'skipped'" in verify
 
@@ -282,14 +306,18 @@ def test_attestation_tag_and_github_release_keep_immutable_evidence() -> None:
     assert "skip-existing" not in workflow
 
 
-def test_publication_is_verified_against_hashes_and_clean_install() -> None:
-    """Release completion requires exact PyPI digests and an installed-package smoke."""
+def test_publication_is_verified_with_bounded_registry_retry_and_clean_install() -> None:
+    """Release completion tolerates propagation only for matching incomplete public state."""
 
     workflow = _workflow()
     verify = _job_block(workflow, "verify-publication", None)
     assert "SHA256SUMS.txt" in verify
     assert "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json" in verify
-    assert "observed != expected" in verify
+    assert "for attempt in $(seq 1 12); do" in verify
+    assert "sleep 10" in verify
+    assert "exit 10" in verify
+    assert "exit 20" in verify
+    assert "PyPI artifact set did not converge" in verify
     assert "python3 -m venv" in verify
     assert 'threadweave==${RELEASE_VERSION}' in verify
     assert "serialize_thread_response" in verify
