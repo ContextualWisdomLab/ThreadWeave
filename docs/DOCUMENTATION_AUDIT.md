@@ -29,7 +29,7 @@ Protected-main push CI run `31354471651` then completed successfully after PR #2
 | Operability / Incident Runbook | PRESENT-CURRENT | owning-layer RCA, publisher recovery and exact evidence identity |
 | Release/Provenance/Licensing | PRESENT-CURRENT | approved secret-backed publisher, optional Trusted Publishing, SLSA/SPDX, Apache-2.0, public digest/install completion boundary |
 | Traceability / product gap baseline | PRESENT-CURRENT | main vs active-PR/release evidence and cross-repository ownership separated |
-| APA 7 doctoring/research | PRESENT-CURRENT | protocol/research sources plus release authority references |
+| APA 7 standards/research traceability | PRESENT-CURRENT | protocol/research sources plus release authority references |
 | AGENTS / CLAUDE / README / CHANGELOG | PRESENT-CURRENT | customer/operator README, current 0.2.0 release notes, automation playbook under `docs/operations/` |
 
 ## Capability maturity vocabulary
