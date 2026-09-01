@@ -12,14 +12,18 @@ That assumption no longer matches the accepted organization credential boundary.
 
 The architectural requirement is therefore not “OIDC only.” The requirement is that one approved publisher identity be selected before irreversible release work, that its credential surface be isolated from build/test/release evidence, that release authority be tied to the exact reviewed integration and required checks, and that the public artifact be verified after publication.
 
+A second release-authority problem is concurrency. GitHub Flow permits `main` to continue after an integrated release candidate has been accepted. A tag is an immutable name for the authorized commit; it is not a lock on the branch. Trying to require `main` to remain unchanged until the later tag push creates an unavoidable time-of-check/time-of-use window because the branch read and the tag-ref creation are different remote operations. Git's `--atomic` option makes the refs included in one push transactional, while `--force-with-lease=<ref>:<expect>` only protects a ref that is itself being updated. A no-op push of `main` is not a portable cross-ref compare-and-swap primitive for tag creation. Therefore release authority must have one explicit linearization point rather than pretending a later branch read can atomically guard the tag.
+
 ## Decision
 
 The release workflow SHALL begin only after the repository's ordinary `ci` workflow has completed successfully for `main`, or through an explicit manual recovery invocation on the exact current protected-main head. A raw `push` SHALL NOT directly authorize publication.
 
-The credential-minimal `release-readiness` job SHALL execute before build, attestation, tag creation, GitHub Release creation, or PyPI publication and SHALL:
+All release workflow runs for the repository SHALL use one repository-scoped concurrency group with `cancel-in-progress: false`. The complete workflow run, not only the publisher job, is serialized across candidate SHAs.
+
+The credential-minimal `release-readiness` job is the **release-authority linearization point**. It SHALL execute before build, attestation, tag creation, GitHub Release creation, or PyPI publication and SHALL:
 
 1. bind one immutable source SHA from the completed `ci` run or the explicit manual protected-main recovery invocation;
-2. verify that source SHA is still the exact current protected `main` tip; stale automatic completions are successful no-ops and a stale manual recovery fails closed;
+2. verify at this linearization point that the source SHA is the exact current protected `main` tip; stale automatic completions are successful no-ops and a stale manual recovery fails closed;
 3. require terminal-success `ci` and `SAST Semgrep` push runs for that integrated source SHA;
 4. resolve the merged pull request that produced the source SHA and require its exact head to have terminal-success `ci`, `SAST Semgrep`, and `Security Scan` pull-request runs;
 5. derive one canonical `MAJOR.MINOR.PATCH` version from reviewed package metadata and require any manual recovery version to equal it;
@@ -27,6 +31,8 @@ The credential-minimal `release-readiness` job SHALL execute before build, attes
 7. make an automatic invocation a successful no-op when that reviewed version is already public, while preserving `workflow_dispatch` as the explicit exact-main recovery/verification path;
 8. prove only the **availability** of the selected publisher credential without materializing its value into shell, logs, outputs, artifacts, caches, SBOM/provenance, or release receipts;
 9. fail closed on missing required release authority, malformed metadata, unavailable publisher for missing files, or unexpected GitHub/PyPI responses.
+
+Once a serialized run passes this complete readiness boundary, that exact SHA is the immutable release source for the selected version. A later `main` commit does **not** retroactively supersede the already-authorized release candidate; it is later GitHub-Flow work. If later work must replace an already-authorized candidate before publication, it must establish a different release identity/version rather than silently stealing the same immutable version. This makes the readiness decision the auditable serialization point and avoids claiming a cross-ref atomicity guarantee that GitHub tag creation does not provide.
 
 After the exact wheel and sdist are rebuilt, a separate credential-free publication-planning job SHALL compare every already-public PyPI filename and SHA-256 against the reviewed `SHA256SUMS.txt` **before** attestation/tag/GitHub Release side effects. Unexpected files or digest mismatches fail immediately. A complete matching public set requires no registry upload. A matching partial set may recover only by publishing the reviewed missing distributions; already-public filenames are not resent and `skip-existing` is not used.
 
@@ -44,7 +50,7 @@ Trusted Publishing remains an accepted and preferred credential-minimization opt
 
 ### Automatic release entry point
 
-The automatic release entry point is `workflow_run` completion of the repository `ci` workflow for `main`, not a raw push. The completed run supplies the candidate source SHA, which readiness independently verifies against live protected `main` and the required exact integrated/source-PR evidence before release work may begin.
+The automatic release entry point is `workflow_run` completion of the repository `ci` workflow for `main`, not a raw push. The completed run supplies the candidate source SHA. Because release runs are repository-serialized, readiness independently verifies that SHA against live protected `main` and the required exact integrated/source-PR evidence before the run is authorized. That successful readiness decision is the release candidate's linearization point.
 
 If the reviewed version is already public, ordinary automatic invocations stop successfully before build. `workflow_dispatch` remains an idempotent recovery/verification entry point for the exact current protected-main release identity, including a matching partial publication. Both paths converge on one release contract and do not create separate release engines.
 
@@ -71,6 +77,7 @@ Public verification may retry bounded registry propagation only when PyPI is abs
 - OIDC can be adopted later without changing package/release semantics.
 - A missing token for required missing distributions fails before attestation/tag/GitHub Release side effects.
 - Raw protected-main pushes cannot race publication against required checks; automatic release begins from completed main CI and revalidates the complete accepted evidence boundary.
+- Repository-scoped workflow concurrency gives one release candidate at a time. The exact readiness decision is the linearization point, so later GitHub-Flow commits cannot rewrite the already-authorized version/source pairing.
 - A version already present on PyPI becomes a successful no-op for ordinary automatic release invocations, preserving public-version immutability and avoiding repeated tag failures.
 - Manual recovery can rebuild and verify an existing/partial publication without resending already-public files.
 - Public-artifact digest and clean-install evidence become part of release completion rather than an out-of-band manual step.
@@ -94,6 +101,10 @@ Rejected because every job would inherit publication authority. The token belong
 
 Rejected because required integrated/review evidence can still be running after the push event. Starting from completed main CI and independently rechecking the exact evidence prevents irreversible release work from outrunning required gates.
 
+### Re-read `main` immediately before tag creation and treat it as an atomic guard
+
+Rejected because the branch read and the tag-ref creation are separate remote operations. `main` can move between them. Git's documented atomic push guarantees apply only to refs in the same remote transaction, and an exact-value lease protects the ref being updated; ThreadWeave will not directly update protected `main` merely to manufacture a tag CAS. The serialized readiness snapshot is the release-authority boundary instead.
+
 ### Treat any existing PyPI version as complete
 
 Rejected because PyPI can expose one distribution while another upload failed or is still propagating. Existing public files must be compared to the rebuilt reviewed bundle, and only matching missing files may be recovered.
@@ -111,7 +122,9 @@ Rejected because authentication ambiguity after side effects makes incident reco
 Repository tests must prove that:
 
 - the automatic trigger is completed main `ci`, not raw `push`, and manual recovery remains explicit;
-- readiness binds one source SHA, rejects/stops stale authority appropriately, and precedes all release work;
+- all release runs share one repository-scoped, non-cancelling concurrency group;
+- readiness binds one source SHA, rejects/stops stale authority appropriately, is the single release-authority linearization point, and precedes all release work;
+- tag creation uses the exact already-authorized source SHA and does not claim a later non-atomic `main` read as a CAS guarantee;
 - exact integrated `ci`/`SAST Semgrep` plus associated merged-PR head `ci`/`SAST Semgrep`/`Security Scan` must be terminal-success before release work;
 - automatic already-public versions are successful no-ops while manual exact-main recovery may rebuild/verify an existing or partial publication;
 - readiness sees only token availability, not token bytes;
@@ -126,6 +139,8 @@ Repository tests must prove that:
 Public release completion still requires issue #17 acceptance: exact protected-head CI/security/coverage/package evidence, SLSA/SPDX evidence, immutable tag/GitHub Release identity, public PyPI wheel and sdist, digest equality, and clean post-publication install/THREAD smoke.
 
 ## References — APA 7th
+
+Git. (n.d.). *git-push documentation*. Git. Retrieved September 1, 2026, from https://git-scm.com/docs/git-push
 
 GitHub. (n.d.). *Secrets*. GitHub Docs. Retrieved September 1, 2026, from https://docs.github.com/en/actions/concepts/security/secrets
 
