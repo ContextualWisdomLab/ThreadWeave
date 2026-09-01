@@ -65,21 +65,25 @@ def test_release_runs_are_serialized_across_source_shas() -> None:
     assert "cancel-in-progress: false" in concurrency
 
 
-def test_tag_revalidates_main_before_first_immutable_side_effect() -> None:
-    """A superseded candidate exits unless its matching release tag already exists."""
+def test_readiness_is_the_serialized_release_authority_linearization_point() -> None:
+    """Once exact protected-main evidence passes, later main work cannot rewrite that release."""
 
     workflow = _workflow()
+    readiness = _job(workflow, "release-readiness", "build-release")
+    assert '"repos/$GITHUB_REPOSITORY/branches/main"' in readiness
+    assert 'if [ "$SOURCE_SHA" != "$current_main_sha" ]; then' in readiness
+    assert "associated merged pull request" in readiness
+    assert "require_workflow_success" in readiness
+
     tag = _job(workflow, "tag-release", "github-release")
-    assert "actions: read" not in tag
-    assert "current_main_sha" in tag
-    assert '"repos/$GITHUB_REPOSITORY/branches/main"' in tag
-    assert 'if [ "$current_main_sha" != "$SOURCE_SHA" ] && [ -z "$tag_object" ]; then' in tag
-    assert "release_authorized=false" in tag
-    assert "release_authorized=true" in tag
-    assert "release_authorized: ${{ steps.tag.outputs.release_authorized }}" in tag
+    assert "current_main_sha" not in tag
+    assert "release_authorized" not in tag
     assert "Existing release tag is not an annotated tag for this exact release source" in tag
+    assert 'git tag -a "$RELEASE_TAG" "$SOURCE_SHA"' in tag
+
     github_release = _job(workflow, "github-release", "publish-pypi")
-    assert "needs.tag-release.outputs.release_authorized == 'true'" in github_release
+    assert "needs.tag-release.result == 'success'" in github_release
+    assert "release_authorized" not in github_release
 
 
 def test_stale_or_already_public_automatic_runs_are_successful_noops() -> None:
@@ -100,10 +104,11 @@ def test_stale_or_already_public_automatic_runs_are_successful_noops() -> None:
 def test_manual_recovery_can_rebuild_an_existing_or_partial_publication() -> None:
     """Manual recovery remains explicit and exact-main-bound after automatic no-op."""
 
-    readiness = _job(_workflow(), "release-readiness", "build-release")
-    assert "workflow_dispatch" in _workflow().split("permissions:", 1)[0]
+    workflow = _workflow()
+    readiness = _job(workflow, "release-readiness", "build-release")
+    assert "workflow_dispatch" in workflow.split("permissions:", 1)[0]
     assert "REQUESTED_VERSION: ${{ inputs.version || '' }}" in readiness
-    assert 'if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then' in readiness
+    assert 'if [ "$GITHUB_EVENT_NAME" = "workflow_run" ] && [ "$public_version_exists" = "true" ]; then' in readiness
     assert "run_release=true" in readiness
 
 
