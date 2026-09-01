@@ -1,6 +1,6 @@
 # Release operations
 
-ThreadWeave releases are built once from an exact reviewed protected `main` commit, transferred between jobs as one immutable Actions artifact, attested, tagged, published to GitHub, uploaded to PyPI through an explicitly approved publisher, and then verified from the public index. Runtime dependencies remain empty; release tooling is installed only from the reviewed hash lock.
+ThreadWeave releases are rebuilt from an exact reviewed protected `main` commit, transferred between jobs as immutable Actions artifacts, reconciled against any already-public PyPI files, attested, tagged, published to GitHub, uploaded to PyPI only where distributions are missing, and then verified from the public index. Runtime dependencies remain empty; release tooling is installed only from the reviewed hash lock.
 
 ## Publisher configuration
 
@@ -25,21 +25,22 @@ The workflow fails closed unless all of the following agree:
 - an empty material `## Unreleased` section for a final release;
 - exactly one regular, non-linked wheel and one regular, non-linked source distribution whose filenames contain that version.
 
-Before new release work, the readiness job queries PyPI. If the exact reviewed version is already public, an ordinary protected-main trigger is a no-op rather than an attempted overwrite. If the version is not public, the approved publisher must be available before build/tag/GitHub Release side effects begin.
+Readiness records whether the exact version is already visible on PyPI, but HTTP 200 never means “release complete.” The workflow always rebuilds the reviewed wheel/sdist set. A publication-planning job then compares every already-public filename/SHA-256 to the reviewed `SHA256SUMS.txt`: unexpected or mismatched files fail closed; a complete matching set skips registry upload and proceeds to verification; a partial matching set produces a second immutable artifact containing only the missing reviewed distributions. If any file is missing and the approved publisher is unavailable, the run fails before attestation/tag/GitHub Release side effects.
 
 The release section must contain material notes and no `TODO`, `TBD`, or `Unreleased` placeholder. Public versions follow PEP 440; the narrower three-component release rule preserves Semantic Versioning and makes tags, artifacts, PyPI records, and support documentation unambiguous. Symbolic links, hard links, stale output directories, mismatched versions, and duplicate artifacts are rejected rather than normalized or overwritten.
 
 ## Job separation
 
-The workflow uses seven distinct authority boundaries:
+The workflow uses eight distinct authority boundaries:
 
-1. **Release readiness** — read-only exact-head checkout; confirm protected `main`, derive the reviewed version, compare any manual recovery version, check public-version existence, and reduce publisher-secret availability to a boolean without materializing token bytes.
+1. **Release readiness** — read-only exact-head checkout; confirm protected `main`, derive the reviewed version, compare any manual recovery version, observe public-version existence, and reduce publisher-secret availability to a boolean without materializing token bytes.
 2. **Build** — read-only checkout; install `requirements/ci.lock` with `--require-hashes`; regenerate and compare the lock; run Ruff, compileall, doctests, full statement and branch coverage, package checks, and an installed-wheel smoke test; create wheel, sdist, `SHA256SUMS.txt`, release notes, and an SPDX 2.3 JSON SBOM.
-3. **Attest** — download the exact build artifact; verify its checksum manifest; generate signed SLSA build provenance and an SBOM attestation with GitHub's OIDC-backed `actions/attest`. This is the only API-token-mode job that needs `id-token: write`.
-4. **Tag** — create an annotated `v<version>` tag only after build and attestation. A retry accepts an existing tag only when it is annotated and peels to the same reviewed commit.
-5. **GitHub Release** — publish the exact distributions, checksum manifest, SPDX document, and release notes against the verified tag. A matching existing release is accepted only when its notes, complete asset-name set, checksum manifest, SPDX document, and downloaded distribution digests are identical. The workflow never edits or clobbers existing release evidence.
-6. **PyPI publish** — download the same artifact, verify `SHA256SUMS.txt` immediately before upload, and invoke the pinned PyPA publisher with only `PIPY_TOKEN`. PyPA-side attestations are disabled in this credential mode because GitHub SLSA/SBOM attestations are already generated separately and the publisher does not receive OIDC authority.
-7. **Public verification** — download the reviewed bundle without any publisher secret, compare PyPI's wheel/sdist filename and SHA-256 set with `SHA256SUMS.txt`, create a clean virtual environment, install the exact public version, and reproduce representative `THREAD` and `UID THREAD` behavior.
+3. **Publication plan** — download the reviewed bundle, compare any already-public PyPI filename/SHA-256 set, fail closed on unexpected/mismatched files, and package only missing reviewed distributions for registry recovery. This job never receives a registry credential.
+4. **Attest** — after the publication plan is safe, download the exact build artifact; verify its checksum manifest; generate signed SLSA build provenance and an SBOM attestation with GitHub's OIDC-backed `actions/attest`. This is the only API-token-mode job that needs `id-token: write`.
+5. **Tag** — create an annotated `v<version>` tag only after build, planning, and attestation. A retry accepts an existing tag only when it is annotated and peels to the same reviewed commit.
+6. **GitHub Release** — publish the exact distributions, checksum manifest, SPDX document, and release notes against the verified tag. A matching existing release is accepted only when its notes, complete asset-name set, checksum manifest, SPDX document, and downloaded distribution digests are identical. The workflow never edits or clobbers existing release evidence.
+7. **PyPI publish** — only when the publication plan found missing files, download that exact missing-distribution artifact, reverify each file against `SHA256SUMS.txt`, and invoke the pinned PyPA publisher with only `PIPY_TOKEN`. Already-public filenames are not resent, `skip-existing` is not used, and PyPA-side attestations are disabled in this credential mode because GitHub SLSA/SBOM attestations are already generated separately.
+8. **Public verification** — download the reviewed bundle without any publisher secret, compare PyPI's complete wheel/sdist filename and SHA-256 set with `SHA256SUMS.txt`, create a clean virtual environment, install the exact public version, and reproduce representative `THREAD` and `UID THREAD` behavior. This runs after a successful upload or after a deliberately skipped upload for a complete pre-existing matching public set.
 
 No build or test command runs in jobs that hold tag, release, attestation, or PyPI publishing authority. Every runner blocks undeclared network egress and each external action is pinned to a complete commit SHA.
 
@@ -68,7 +69,7 @@ gh attestation verify threadweave-0.2.0-py3-none-any.whl \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
 
-For PyPI files, compare the public project JSON filename/SHA-256 set to the reviewed `SHA256SUMS.txt`; the release workflow performs this check before clean-install smoke.
+For PyPI files, compare the public project JSON filename/SHA-256 set to the reviewed `SHA256SUMS.txt`; the release workflow performs this check before any recovery upload and again before clean-install smoke.
 
 ## Procedure
 
@@ -76,16 +77,18 @@ For PyPI files, compare the public project JSON filename/SHA-256 set to the revi
 2. Confirm `CHANGELOG.md`, `pyproject.toml`, and `threadweave.__version__` contain the same intended version and that material `Unreleased` notes are empty.
 3. Confirm the approved organization publisher secret is available to ThreadWeave. Do not expose or copy its value.
 4. Merge the release-authority change to protected `main`; the changelog-driven workflow starts automatically when its watched release files changed. Use **Release ThreadWeave** manual dispatch only for an idempotent recovery attempt.
-5. Review each job's exact commit, artifact digest, annotated tag, GitHub Release, GitHub attestations, PyPI filename/digest set, and clean-install smoke result.
-6. Close the release blocker only after the public artifact verification succeeds.
+5. Review the publication plan: any pre-existing public file must match the rebuilt reviewed digest; only absent files may be selected for upload.
+6. Review each downstream job's exact commit, artifact digest, annotated tag, GitHub Release, GitHub attestations, PyPI filename/digest set, and clean-install smoke result.
+7. Close the release blocker only after the complete public artifact verification succeeds.
 
 ## Failure and rollback
 
-- A readiness, validation, or build failure creates no new tag and publishes nothing.
+- A readiness, validation, build, or publication-planning failure creates no new tag and publishes nothing.
 - An attestation failure creates no new tag and publishes nothing.
 - If a matching tag already exists, the workflow accepts it only when it is an annotated tag that resolves to the current reviewed commit.
 - A GitHub Release retry is read-only. Any changed note, missing or extra asset, modified checksum manifest, modified SPDX document, or distribution digest mismatch is a hard failure.
 - If PyPI authentication fails after the tag/GitHub Release exists, repair the approved publisher authority and retry the same exact protected release head; tag/release verification is idempotent and must not rewrite evidence.
+- If PyPI contains a correct subset of the reviewed files, rerun the exact protected release head: the planner verifies existing hashes and selects only the missing reviewed files. Never use `skip-existing` to hide a mismatch or resend an already-public filename.
 - PyPI versions and files are immutable. Do not replace a broken file. Yank the affected release when appropriate, document the reason, fix the source through a new PR, and publish a new patch version.
 - Never bypass a failed hash, provenance, version, release-immutability, or publisher-authority check with a manual workstation upload, an ad-hoc credential, or weakened branch/review/security policy.
 
