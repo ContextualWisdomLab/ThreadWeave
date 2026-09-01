@@ -42,7 +42,7 @@ The following are no longer open implementation PRs, but they remain important r
 
 | Condition | Release behavior |
 |---|---|
-| protected `main`; reviewed version absent from PyPI; `PIPY_TOKEN` available; current release gates pass | build → attest → immutable tag → GitHub Release → PyPI publish → public digest/install verification |
+| protected `main`; reviewed version absent from PyPI; `PIPY_TOKEN` available; current release gates pass; no material `Unreleased` notes; no conflicting tag/release evidence | build → attest → immutable tag → GitHub Release → PyPI publish → public digest/install verification |
 | reviewed version already exists on PyPI | no new publication; preserve immutable public version and treat the automatic trigger as a no-op |
 | new version required but approved publisher unavailable | fail before build/tag/GitHub Release side effects |
 | changelog has material `Unreleased` notes for the requested final version | fail closed until notes are moved into the dated release section |
