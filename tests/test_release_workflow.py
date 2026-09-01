@@ -30,6 +30,12 @@ EXPECTED_RELEASE_ENDPOINTS = {
         "*.actions.githubusercontent.com:443",
         "*.blob.core.windows.net:443",
     },
+    "publication-plan": {
+        "pypi.org:443",
+        "results-receiver.actions.githubusercontent.com:443",
+        "*.actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
+    },
     "attest-release": {
         "api.github.com:443",
         "fulcio.sigstore.dev:443",
@@ -119,8 +125,8 @@ def test_release_is_changelog_driven_on_protected_main_and_manually_recoverable(
     assert "cancel-in-progress: false" in workflow
 
 
-def test_readiness_derives_version_and_fails_before_irreversible_work_without_token() -> None:
-    """The release version and publisher availability are resolved before build/tag/release."""
+def test_readiness_derives_version_and_exposes_only_boolean_publisher_state() -> None:
+    """Version/public presence/publisher availability are facts, never secret material."""
 
     workflow = _workflow()
     assert workflow.index("  release-readiness:\n") < workflow.index("  build-release:\n")
@@ -130,15 +136,47 @@ def test_readiness_derives_version_and_fails_before_irreversible_work_without_to
     assert 'project["version"]' in readiness
     assert "GITHUB_REF_PROTECTED" in readiness
     assert "https://pypi.org/pypi/threadweave/$release_version/json" in readiness
-    assert "release_required=true" in readiness
-    assert "release_required=false" in readiness
-    assert 'if [ "$PIPY_TOKEN_AVAILABLE" != "true" ]; then' in readiness
+    assert "publisher_available" in readiness
+    assert "public_version_exists" in readiness
+    assert "release_required" not in readiness
     assert "environments/pypi" not in readiness
-    assert "required_reviewers" not in readiness
-    assert "prevent_self_review" not in readiness
-    build = _job_block(workflow, "build-release", "attest-release")
+    build = _job_block(workflow, "build-release", "publication-plan")
     assert "needs: release-readiness" in build
-    assert "needs.release-readiness.outputs.release_required == 'true'" in build
+    assert "release_required" not in build
+
+
+def test_partial_publication_is_planned_before_attestation_or_release_side_effects() -> None:
+    """Existing files must match the rebuilt bundle and only missing files may upload."""
+
+    workflow = _workflow()
+    assert workflow.index("  build-release:\n") < workflow.index("  publication-plan:\n")
+    assert workflow.index("  publication-plan:\n") < workflow.index("  attest-release:\n")
+    plan = _job_block(workflow, "publication-plan", "attest-release")
+    assert "needs: [release-readiness, build-release]" in plan
+    assert "SHA256SUMS.txt" in plan
+    assert "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json" in plan
+    assert "unexpected public artifact" in plan
+    assert "public artifact digest mismatch" in plan
+    assert "missing_filenames" in plan
+    assert "publication_required=true" in plan
+    assert "publication_required=false" in plan
+    assert "publisher_available" in plan
+    assert "publication-missing-${{ github.run_id }}-${{ github.run_attempt }}" in plan
+    assert "if-no-files-found: error" in plan
+
+
+def test_complete_existing_publication_skips_upload_but_still_reaches_verification() -> None:
+    """A retry can rebuild, verify GitHub evidence, and verify public artifacts without upload."""
+
+    workflow = _workflow()
+    publish = _job_block(workflow, "publish-pypi", "verify-publication")
+    assert "needs.publication-plan.outputs.publication_required == 'true'" in publish
+    verify = _job_block(workflow, "verify-publication", None)
+    assert "always()" in verify
+    assert "needs.publication-plan.result == 'success'" in verify
+    assert "needs.github-release.result == 'success'" in verify
+    assert "needs.publish-pypi.result == 'success' ||" in verify
+    assert "needs.publish-pypi.result == 'skipped'" in verify
 
 
 def test_release_separates_build_attestation_release_and_registry_credentials() -> None:
@@ -159,10 +197,12 @@ def test_release_separates_build_attestation_release_and_registry_credentials() 
     assert "attestations: false" in publish
     assert "print-hash: true" in publish
     assert "id-token: write" not in publish
+    assert "skip-existing" not in publish
+    assert "publication-missing-${{ github.run_id }}-${{ github.run_attempt }}" in publish
 
 
-def test_release_uses_full_sha_actions_and_one_reviewed_artifact_bundle() -> None:
-    """External actions are immutable and jobs exchange one reviewed release bundle."""
+def test_release_uses_full_sha_actions_and_reviewed_artifact_handoffs() -> None:
+    """External actions are immutable and artifact handoffs are explicit."""
 
     workflow = _workflow()
     required_actions = {
@@ -180,8 +220,8 @@ def test_release_uses_full_sha_actions_and_one_reviewed_artifact_bundle() -> Non
         if line.strip().startswith("uses: ")
     }
     assert "release-bundle-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
-    assert workflow.count("actions/download-artifact@") == 5
-    assert "retention-days: 7" in workflow
+    assert "publication-missing-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
+    assert workflow.count("retention-days: 7") >= 2
 
 
 def test_release_harden_runner_endpoints_are_exact_and_folded() -> None:
@@ -190,7 +230,8 @@ def test_release_harden_runner_endpoints_are_exact_and_folded() -> None:
     workflow = _workflow()
     jobs = (
         ("release-readiness", "build-release"),
-        ("build-release", "attest-release"),
+        ("build-release", "publication-plan"),
+        ("publication-plan", "attest-release"),
         ("attest-release", "tag-release"),
         ("tag-release", "github-release"),
         ("github-release", "publish-pypi"),
@@ -242,14 +283,14 @@ def test_attestation_tag_and_github_release_keep_immutable_evidence() -> None:
 
 
 def test_publication_is_verified_against_hashes_and_clean_install() -> None:
-    """Release completion requires PyPI digests and an installed-package smoke test."""
+    """Release completion requires exact PyPI digests and an installed-package smoke."""
 
     workflow = _workflow()
     verify = _job_block(workflow, "verify-publication", None)
-    assert "needs: [build-release, publish-pypi]" in verify
-    assert "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json" in verify
     assert "SHA256SUMS.txt" in verify
-    assert "python -m venv" in verify
+    assert "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json" in verify
+    assert "observed != expected" in verify
+    assert "python3 -m venv" in verify
     assert 'threadweave==${RELEASE_VERSION}' in verify
     assert "serialize_thread_response" in verify
 
