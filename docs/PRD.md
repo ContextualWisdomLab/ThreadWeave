@@ -1,8 +1,8 @@
 # ThreadWeave Product Requirements Document
 
-**Status:** Accepted baseline for protected `main` at `4fa4caf86651193497002a3730ec19d8917f8818`  
+**Status:** Accepted baseline for protected `main` plus active 0.2.0 release candidate  
 **Product version represented:** `0.2.0`  
-**Last reviewed:** 2026-08-10
+**Last reviewed:** 2026-09-01
 
 ## 1. Product purpose
 
@@ -33,6 +33,8 @@ Python 3.14 support is a protected-main claim only because PR #27 merged as `4fa
 ## 3. Active but not protected-main capability
 
 PR #20 (`feature/incremental-thread-index`) is an **ACTIVE-PR target**, not a current product claim. It proposes an `IncrementalThreadIndex` that applies atomic mailbox additions, replacements, and removals using stable caller keys while delegating affected-component reconstruction to the canonical batch threader. Until that PR is merged, public documentation must label incremental indexing, RFC 8474 identity handoff, payload-free snapshots, and incremental benchmark claims as active-PR behavior.
+
+PR #35 is an **ACTIVE RELEASE-AUTHORITY PR**, not protected-main behavior until merged. It replaces the obsolete OIDC-only PyPI prerequisite with the approved organization `PIPY_TOKEN` publisher, makes release execution changelog/version-driven on exact protected `main`, and adds public registry digest plus clean-install verification. The package remains unreleased at `0.2.0` until that protected-main workflow completes and issue #17 records public-artifact proof.
 
 ## 4. Primary users
 
@@ -93,6 +95,7 @@ The active incremental design SHALL preserve the batch threader as the structura
 - Traversal SHALL be iterative or identity-guarded such that hostile cyclic/deep graphs cannot recurse indefinitely.
 - Protocol serializers SHALL reject CR/LF-unsafe, missing, duplicate, or out-of-range identifiers rather than normalizing or inventing different values.
 - Automated development and release workflows SHALL keep model credentials separated from repository-controlled code and SHALL not allow the development model to approve, merge, tag, or publish its own change.
+- Registry credentials SHALL be isolated to the registry-publisher authority. In the approved PyPI API-token mode, only the pinned PyPA publisher action may materialize `PIPY_TOKEN`; build/test/attestation/tag/GitHub Release/public-verification jobs MUST NOT receive the token.
 
 See `docs/SECURITY.md` and `docs/THREAT_MODEL.md`.
 
@@ -116,24 +119,32 @@ ThreadWeave does not own:
 - SMTP delivery;
 - anti-spam/phishing judgments;
 - arbitrary locale-specific collation beyond the adopted protocol algorithm;
-- guaranteed conversational identity from subject equality alone.
+- guaranteed conversational identity from subject equality alone;
+- organization-wide generic release governance or package-registry account administration.
 
 ## 9. Integration requirements
 
 Standalone use is mandatory. Optional CWL integrations MUST use public typed interfaces and degrade to ordinary library operation when unavailable. Host services own tenancy, authorization, durable versions, mailbox synchronization, distributed write serialization, public sequence/UID lifecycle, and external stable-ID lifecycle.
 
+Generic fleet changelog/tag/GitHub Release governance is owned by `ContextualWisdomLab/.github#1552`; ThreadWeave retains only its product-specific Python build and PyPI publication adapter until an accepted canonical publisher abstraction replaces it.
+
 ## 10. Release acceptance
 
-A release candidate is acceptable only from an integrated protected head with all required current-head CI/security/review gates passing, package artifacts freshly built and installed outside the source tree, supply-chain lock/provenance evidence verified, CHANGELOG/version/tag consistency proven, and rollback/recovery procedure reviewed. A successful local suite does not substitute for required GitHub evidence.
+A release candidate is acceptable only from one exact integrated protected head with all required current-head CI/security/review gates passing, package artifacts freshly built and installed outside the source tree, supply-chain lock/provenance evidence verified, CHANGELOG/package version consistency proven, and rollback/recovery procedure reviewed.
+
+For a new public PyPI version, release readiness SHALL prove an approved publisher is available before irreversible release work. The current accepted mode is the organization GitHub Secret `PIPY_TOKEN`, reduced to a boolean availability fact in readiness and materialized only by the pinned PyPA publisher action. Trusted Publishing may replace that credential in a later reviewed mode change but is not a prerequisite for `0.2.0`.
+
+Release completion additionally requires PyPI to expose exactly the reviewed wheel/sdist filename and SHA-256 set and a clean environment to install the exact public version and reproduce representative `THREAD` and `UID THREAD` behavior. A merge, tag, GitHub Release, or successful upload alone is insufficient.
 
 ## 11. Host-visible roadmap
 
-1. complete the `0.2.0` Trusted Publishing prerequisite and verify the public artifact;
-2. land and validate the bounded incremental mailbox state boundary after that release prerequisite is satisfied;
-3. expose stable adapter guidance for naruon/JMAP/IMAP hosts without importing host persistence into the core;
-4. keep mailbox-scale parity/performance evidence reproducible and versioned;
-5. add only standards-backed protocol projections that preserve the transport-neutral threading kernel.
+1. merge PR #35 through exact current-head gates and complete the verified public `0.2.0` release using the approved publisher;
+2. close issue #17 only after public wheel/sdist digest equality and clean-install protocol smoke;
+3. refresh, validate, and integrate the bounded incremental mailbox state boundary in PR #20 after that release prerequisite is satisfied;
+4. expose stable adapter guidance for naruon/JMAP/IMAP hosts without importing host persistence into the core;
+5. keep mailbox-scale parity/performance evidence reproducible and versioned;
+6. add only standards-backed protocol projections that preserve the transport-neutral threading kernel.
 
 ## 12. Standards baseline
 
-The normative/research bibliography is maintained under `docs/research/`. Product decisions materially rely on JWZ threading behavior and RFC 2047, RFC 5051, RFC 5256, RFC 5322, RFC 6532, RFC 7162, RFC 8474, RFC 8621, and RFC 9051 where applicable. References are recorded in APA 7 style in the research documentation. Python release-line compatibility is grounded in Python Software Foundation release/schedule documentation recorded there and in the Python 3.14 integration change.
+The normative/research bibliography is maintained under `docs/research/`. Product decisions materially rely on JWZ threading behavior and RFC 2047, RFC 5051, RFC 5256, RFC 5322, RFC 6532, RFC 7162, RFC 8474, RFC 8621, and RFC 9051 where applicable. References are recorded in APA 7 style in the research documentation. Python release-line compatibility is grounded in Python Software Foundation release/schedule documentation recorded there and in the Python 3.14 integration change. Release-authority references for GitHub Actions secrets and PyPI/PyPA publishing are recorded in ADR-0008 and `docs/RELEASE_PROVENANCE.md`.
