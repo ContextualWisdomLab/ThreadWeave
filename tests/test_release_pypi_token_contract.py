@@ -31,7 +31,7 @@ def test_readiness_checks_token_availability_without_materializing_the_secret() 
     readiness = _job(workflow, "release-readiness", "build-release")
     assert "PIPY_TOKEN_AVAILABLE: ${{ secrets.PIPY_TOKEN != '' }}" in readiness
     assert 'if [ "$PIPY_TOKEN_AVAILABLE" != "true" ]; then' in readiness
-    assert "secrets.PIPY_TOKEN }}" not in readiness
+    assert "${{ secrets.PIPY_TOKEN }}" not in readiness
     assert "environments/pypi" not in readiness
     assert "required_reviewers" not in readiness
     assert "prevent_self_review" not in readiness
@@ -41,7 +41,7 @@ def test_publish_job_uses_only_the_existing_api_token_secret() -> None:
     """The pinned PyPA publisher receives the token only in the publish job."""
 
     workflow = _workflow()
-    publish = _job(workflow, "publish-pypi", None)
+    publish = _job(workflow, "publish-pypi", "verify-publication")
     assert "pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b" in publish
     assert "password: ${{ secrets.PIPY_TOKEN }}" in publish
     assert "PIPY_USERNAME" not in workflow
@@ -55,9 +55,9 @@ def test_token_secret_is_never_materialized_in_shell_or_release_evidence() -> No
 
     workflow = _workflow()
     assert workflow.count("${{ secrets.PIPY_TOKEN }}") == 1
+    assert workflow.count("secrets.PIPY_TOKEN") == 2
     for block in workflow.split("run: |")[1:]:
         shell = block.split("\n      - name:", 1)[0]
         assert "secrets.PIPY_TOKEN" not in shell
-    assert "PIPY_TOKEN" not in workflow.split("  publish-pypi:\n", 1)[0].replace(
-        "PIPY_TOKEN_AVAILABLE", ""
-    )
+    before_publish = workflow.split("  publish-pypi:\n", 1)[0]
+    assert "${{ secrets.PIPY_TOKEN }}" not in before_publish
