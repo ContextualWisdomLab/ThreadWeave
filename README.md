@@ -1,5 +1,7 @@
 # threadweave
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ContextualWisdomLab/ThreadWeave)
+
 **Standards-grounded JWZ/RFC 5256 email reference threading for Python, with no
 runtime dependencies.**
 
@@ -235,7 +237,7 @@ The package remains useful both as a standalone dependency and as a module in
 are transport-neutral. IMAP `THREAD` response serialization is a separate
 presentation layer rather than protocol state embedded in the core model.
 
-See [`docs/research`](docs/research/README.md) for JWZ, RFC 5322, RFC 2047,
+See the [documentation home](docs/index.md) and [`docs/research`](docs/research/README.md) for JWZ, RFC 5322, RFC 2047,
 RFC 5051, RFC 5256, RFC 6532, RFC 9051, Unicode-version boundaries, and PEP 561.
 
 Hourly autonomous maintenance is documented in
