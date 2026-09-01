@@ -156,30 +156,45 @@ jobs:
             exit 0
           fi
 
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            run_release=true
-          else
-            run_release=true
-          fi
+          run_release=true
 
           require_workflow_success() {
             workflow_name="$1"
             event_name="$2"
             head_sha="$3"
+            pull_request_number="${4:-}"
             for attempt in $(seq 1 40); do
               runs="$(
                 gh api \
                   "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$head_sha&event=$event_name&per_page=100"
               )"
-              state="$(
-                jq -r --arg workflow "$workflow_name" '
-                  [.workflow_runs[] | select(.name == $workflow)]
-                  | sort_by(.created_at)
-                  | last
-                  | if . == null then "missing:"
-                    else (.status + ":" + (.conclusion // "")) end
-                ' <<<"$runs"
-              )"
+              if [ -n "$pull_request_number" ]; then
+                state="$(
+                  jq -r \
+                    --arg workflow "$workflow_name" \
+                    --argjson pr "$pull_request_number" '
+                      [.workflow_runs[]
+                       | select(
+                           .name == $workflow and
+                           any(.pull_requests[]?; .number == $pr)
+                         )]
+                      | sort_by(.created_at)
+                      | last
+                      | if . == null then "missing:"
+                        else (.status + ":" + (.conclusion // "")) end
+                    ' <<<"$runs"
+                )"
+              else
+                state="$(
+                  jq -r --arg workflow "$workflow_name" '
+                    [.workflow_runs[] | select(.name == $workflow)]
+                    | sort_by(.created_at)
+                    | last
+                    | if . == null then "missing:"
+                      else (.status + ":" + (.conclusion // "")) end
+                  ' <<<"$runs"
+                )"
+              fi
               case "$state" in
                 completed:success)
                   return 0
@@ -228,9 +243,9 @@ jobs:
             exit 1
           fi
 
-          require_workflow_success "ci" "pull_request" "$source_pr_head"
-          require_workflow_success "SAST Semgrep" "pull_request" "$source_pr_head"
-          require_workflow_success "Security Scan" "pull_request" "$source_pr_head"
+          require_workflow_success "ci" "pull_request" "$source_pr_head" "$source_pr_number"
+          require_workflow_success "SAST Semgrep" "pull_request" "$source_pr_head" "$source_pr_number"
+          require_workflow_success "Security Scan" "pull_request" "$source_pr_head" "$source_pr_number"
 
           if [ "$public_version_exists" = "false" ] && [ "$PIPY_TOKEN_AVAILABLE" != "true" ]; then
             echo "::error::PIPY_TOKEN is unavailable for a new PyPI release."
