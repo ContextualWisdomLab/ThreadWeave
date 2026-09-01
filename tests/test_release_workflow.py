@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+
 ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 HARDEN_RUNNER = "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920"
+PYPI_PUBLISH = "pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b"
 EXPECTED_RELEASE_ENDPOINTS = {
     "release-readiness": {
         "api.github.com:443",
+        "github.com:443",
+        "objects.githubusercontent.com:443",
         "pypi.org:443",
         "results-receiver.actions.githubusercontent.com:443",
         "*.actions.githubusercontent.com:443",
@@ -58,8 +62,14 @@ EXPECTED_RELEASE_ENDPOINTS = {
     "publish-pypi": {
         "pypi.org:443",
         "results-receiver.actions.githubusercontent.com:443",
-        "token.actions.githubusercontent.com:443",
         "upload.pypi.org:443",
+        "*.actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
+    },
+    "verify-publication": {
+        "files.pythonhosted.org:443",
+        "pypi.org:443",
+        "results-receiver.actions.githubusercontent.com:443",
         "*.actions.githubusercontent.com:443",
         "*.blob.core.windows.net:443",
     },
@@ -82,7 +92,7 @@ def _job_block(workflow: str, job_name: str, next_job_name: str | None) -> str:
 
 
 def _hardened_endpoints(job: str) -> set[str]:
-    """Return the exact entries supplied through the runtime-safe folded scalar."""
+    """Return the exact Harden Runner endpoint allowlist for one job."""
 
     marker = "          allowed-endpoints: >-\n"
     assert marker in job
@@ -90,62 +100,69 @@ def _hardened_endpoints(job: str) -> set[str]:
     return {line.strip() for line in endpoint_block.splitlines() if line.strip()}
 
 
-def test_release_is_manual_main_only_and_single_flight() -> None:
-    """A release requires an explicit version and one protected main invocation."""
+def test_release_is_changelog_driven_on_protected_main_and_manually_recoverable() -> None:
+    """Main pushes can release while manual dispatch remains an idempotent recovery path."""
 
     workflow = _workflow()
-    assert "workflow_dispatch:" in workflow
-    assert "version:" in workflow
-    assert "required: true" in workflow
-    assert "pull_request_target" not in workflow
-    assert "push:" not in workflow.split("jobs:", 1)[0]
+    trigger = workflow.split("permissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger
+    assert "required: false" in trigger
+    assert "push:" in trigger
+    assert "branches:\n      - main" in trigger
+    assert "CHANGELOG.md" in trigger
+    assert "pyproject.toml" in trigger
+    assert ".github/workflows/release.yml" in trigger
+    assert "pull_request_target" not in trigger
     assert "github.ref == 'refs/heads/main'" in workflow
     assert "github.repository == 'ContextualWisdomLab/ThreadWeave'" in workflow
-    assert "group: release-${{ inputs.version }}" in workflow
+    assert "group: release-${{ github.ref }}" in workflow
     assert "cancel-in-progress: false" in workflow
 
 
-def test_release_requires_environment_readiness_before_build_or_irreversible_work() -> None:
-    """Fail before build/attest/tag if the protected PyPI environment is not ready."""
+def test_readiness_derives_version_and_fails_before_irreversible_work_without_token() -> None:
+    """The release version and publisher availability are resolved before build/tag/release."""
 
     workflow = _workflow()
     assert workflow.index("  release-readiness:\n") < workflow.index("  build-release:\n")
     readiness = _job_block(workflow, "release-readiness", "build-release")
-    assert "actions: read" in readiness
-    assert "contents: read" in readiness
-    assert "gh api \"repos/$GITHUB_REPOSITORY/environments/pypi\"" in readiness
-    assert 'required_reviewers' in readiness
-    assert 'prevent_self_review' in readiness
-    assert 'protected_branches' in readiness
-    assert 'curl' in readiness
-    assert 'https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json' in readiness
-    assert "already exists on PyPI" in readiness
+    assert "PIPY_TOKEN_AVAILABLE: ${{ secrets.PIPY_TOKEN != '' }}" in readiness
+    assert "tomllib.load" in readiness
+    assert 'project["version"]' in readiness
+    assert "GITHUB_REF_PROTECTED" in readiness
+    assert "https://pypi.org/pypi/threadweave/$release_version/json" in readiness
+    assert "release_required=true" in readiness
+    assert "release_required=false" in readiness
+    assert 'if [ "$PIPY_TOKEN_AVAILABLE" != "true" ]; then' in readiness
+    assert "environments/pypi" not in readiness
+    assert "required_reviewers" not in readiness
+    assert "prevent_self_review" not in readiness
     build = _job_block(workflow, "build-release", "attest-release")
     assert "needs: release-readiness" in build
+    assert "needs.release-readiness.outputs.release_required == 'true'" in build
 
 
-def test_release_separates_build_attestation_tag_release_and_publish_privileges() -> None:
-    """Build code never shares a job with publish, tag, or release credentials."""
+def test_release_separates_build_attestation_release_and_registry_credentials() -> None:
+    """Only the registry publisher can materialize the approved PyPI API token."""
 
     workflow = _workflow()
-    assert "release-readiness:" in workflow
-    assert "build-release:" in workflow
-    assert "attest-release:" in workflow
-    assert "tag-release:" in workflow
-    assert "github-release:" in workflow
-    assert "publish-pypi:" in workflow
-    assert workflow.count("id-token: write") == 2
+    assert workflow.count("id-token: write") == 1
     assert workflow.count("attestations: write") == 1
     assert workflow.count("artifact-metadata: write") == 1
     assert workflow.count("contents: write") == 2
-    assert "environment:\n      name: pypi" in workflow
-    assert "username:" not in workflow
-    assert "password:" not in workflow
-    assert "PYPI_API_TOKEN" not in workflow
+    assert "environment:\n      name: pypi" not in workflow
+    assert "PIPY_USERNAME" not in workflow
+    assert workflow.count("${{ secrets.PIPY_TOKEN }}") == 1
+    assert workflow.count("secrets.PIPY_TOKEN") == 2
+    publish = _job_block(workflow, "publish-pypi", "verify-publication")
+    assert PYPI_PUBLISH in publish
+    assert "password: ${{ secrets.PIPY_TOKEN }}" in publish
+    assert "attestations: false" in publish
+    assert "print-hash: true" in publish
+    assert "id-token: write" not in publish
 
 
-def test_release_uses_full_sha_actions_and_reviewed_artifact_handoff() -> None:
-    """Every external action is immutable and jobs exchange one named bundle."""
+def test_release_uses_full_sha_actions_and_one_reviewed_artifact_bundle() -> None:
+    """External actions are immutable and jobs exchange one reviewed release bundle."""
 
     workflow = _workflow()
     required_actions = {
@@ -154,7 +171,7 @@ def test_release_uses_full_sha_actions_and_reviewed_artifact_handoff() -> None:
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         "actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26",
-        "pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b",
+        PYPI_PUBLISH,
         HARDEN_RUNNER,
     }
     assert required_actions <= {
@@ -163,36 +180,34 @@ def test_release_uses_full_sha_actions_and_reviewed_artifact_handoff() -> None:
         if line.strip().startswith("uses: ")
     }
     assert "release-bundle-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
-    assert workflow.count("actions/download-artifact@") == 4
+    assert workflow.count("actions/download-artifact@") == 5
     assert "retention-days: 7" in workflow
 
 
-def test_release_harden_runner_endpoint_input_is_space_delimited() -> None:
-    """Every release job presents its exact endpoint list as one runtime-safe value."""
+def test_release_harden_runner_endpoints_are_exact_and_folded() -> None:
+    """Every release job gets only its reviewed outbound network surface."""
 
     workflow = _workflow()
-    literal_marker = "          allowed-endpoints: |\n"
-    folded_marker = "          allowed-endpoints: >-\n"
     jobs = (
         ("release-readiness", "build-release"),
         ("build-release", "attest-release"),
         ("attest-release", "tag-release"),
         ("tag-release", "github-release"),
         ("github-release", "publish-pypi"),
-        ("publish-pypi", None),
+        ("publish-pypi", "verify-publication"),
+        ("verify-publication", None),
     )
-
-    assert literal_marker not in workflow
+    assert "          allowed-endpoints: |\n" not in workflow
     for job_name, next_job_name in jobs:
         job = _job_block(workflow, job_name, next_job_name)
         assert job.count(HARDEN_RUNNER) == 1, job_name
         assert job.count("          egress-policy: block\n") == 1, job_name
-        assert job.count(folded_marker) == 1, job_name
+        assert job.count("          allowed-endpoints: >-\n") == 1, job_name
         assert _hardened_endpoints(job) == EXPECTED_RELEASE_ENDPOINTS[job_name], job_name
 
 
 def test_build_repeats_quality_gates_and_prepares_release_evidence() -> None:
-    """The released files are rebuilt from reviewed, hash-locked source."""
+    """The published files are rebuilt from reviewed hash-locked source."""
 
     workflow = _workflow()
     assert "python -m pip install --require-hashes -r requirements/ci.lock" in workflow
@@ -207,22 +222,13 @@ def test_build_repeats_quality_gates_and_prepares_release_evidence() -> None:
     assert ".spdx.json" in workflow
 
 
-def test_attestation_covers_distributions_and_spdx_sbom() -> None:
-    """GitHub records both SLSA provenance and the release SBOM."""
+def test_attestation_tag_and_github_release_keep_immutable_evidence() -> None:
+    """Attestation and retries never rewrite an existing release identity."""
 
     workflow = _workflow()
     assert workflow.count(
         "actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26"
     ) == 2
-    assert "subject-path: ${{ runner.temp }}/release-bundle/dist/*" in workflow
-    assert "sbom-path: ${{ runner.temp }}/release-bundle/release/" in workflow
-    assert "threadweave-${{ needs.build-release.outputs.version }}.spdx.json" in workflow
-
-
-def test_tag_and_github_release_are_idempotent_and_pypi_publish_is_final() -> None:
-    """Retries preserve immutable evidence while PyPI remains fail-closed."""
-
-    workflow = _workflow()
     assert "git ls-remote --tags origin" in workflow
     assert "git tag -a" in workflow
     assert "git push origin" in workflow
@@ -233,22 +239,26 @@ def test_tag_and_github_release_are_idempotent_and_pypi_publish_is_final() -> No
     assert "gh release edit" not in workflow
     assert "--clobber" not in workflow
     assert "skip-existing" not in workflow
-    assert "needs: [build-release, attest-release, tag-release, github-release]" in workflow
-    assert "attestations: true" in workflow
-    assert "print-hash: true" in workflow
-    publish_job = workflow.split("publish-pypi:", 1)[1]
-    assert publish_job.count("Verify distributions immediately before publication") == 1
-    assert "sha256sum --check ../release/SHA256SUMS.txt" in publish_job
 
 
-def test_workflow_passes_user_input_via_environment_not_shell_interpolation() -> None:
-    """The manually supplied version never becomes an unquoted command fragment."""
+def test_publication_is_verified_against_hashes_and_clean_install() -> None:
+    """Release completion requires PyPI digests and an installed-package smoke test."""
 
     workflow = _workflow()
-    assert "RELEASE_VERSION: ${{ inputs.version }}" in workflow
-    assert "--version \"$RELEASE_VERSION\"" in workflow
-    assert 'os.environ["RELEASE_VERSION"]' in workflow
-    assert 'threadweave.__version__ == "0.2.0"' not in workflow
+    verify = _job_block(workflow, "verify-publication", None)
+    assert "needs: [build-release, publish-pypi]" in verify
+    assert "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json" in verify
+    assert "SHA256SUMS.txt" in verify
+    assert "python -m venv" in verify
+    assert 'threadweave==${RELEASE_VERSION}' in verify
+    assert "serialize_thread_response" in verify
+
+
+def test_manual_input_never_becomes_an_unquoted_shell_fragment() -> None:
+    """A requested recovery version is compared as data before downstream use."""
+
+    workflow = _workflow()
+    assert "REQUESTED_VERSION: ${{ inputs.version || '' }}" in workflow
     run_blocks = workflow.split("run: |")
     assert all(
         "${{ inputs.version }}" not in block.split("\n      - name:", 1)[0]
