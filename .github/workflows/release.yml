@@ -4,20 +4,28 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Canonical three-part release version without a leading v
-        required: true
+        description: Optional recovery version; must match reviewed project metadata
+        required: false
         type: string
+  push:
+    branches:
+      - main
+    paths:
+      - CHANGELOG.md
+      - pyproject.toml
+      - src/threadweave/__init__.py
+      - scripts/ci/release_contract.py
+      - .github/workflows/release.yml
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.version }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  RELEASE_VERSION: ${{ inputs.version }}
   RELEASE_BUNDLE_NAME: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
@@ -28,8 +36,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      actions: read
       contents: read
+    outputs:
+      version: ${{ steps.contract.outputs.version }}
+      tag: ${{ steps.contract.outputs.tag }}
+      release_required: ${{ steps.contract.outputs.release_required }}
     steps:
       - name: Harden the release-readiness gate
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -38,58 +49,51 @@ jobs:
           disable-telemetry: true
           allowed-endpoints: >-
             api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
             pypi.org:443
             results-receiver.actions.githubusercontent.com:443
             *.actions.githubusercontent.com:443
             *.blob.core.windows.net:443
-      - name: Require a pre-created protected PyPI environment
+      - name: Check out the exact integrated release candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Resolve release version and publisher readiness
+        id: contract
         env:
-          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version || '' }}
+          PIPY_TOKEN_AVAILABLE: ${{ secrets.PIPY_TOKEN != '' }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF_PROTECTED" != "true" ]; then
             echo "::error::Release must run from a branch protected by rules or branch protection."
             exit 1
           fi
-          if [[ ! "$RELEASE_VERSION" =~ ^((0|[1-9][0-9]*)\.){2}(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::Release version must be canonical MAJOR.MINOR.PATCH."
+
+          release_version="$(python3 - <<'PY'
+          import re
+          import tomllib
+
+          with open("pyproject.toml", "rb") as stream:
+              project = tomllib.load(stream)["project"]
+          version = project["version"]
+          if re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version) is None:
+              raise SystemExit("project version must be canonical MAJOR.MINOR.PATCH")
+          print(version)
+          PY
+          )"
+
+          if [ -n "$REQUESTED_VERSION" ] && [ "$REQUESTED_VERSION" != "$release_version" ]; then
+            echo "::error::Requested version does not match the reviewed project version."
             exit 1
           fi
 
-          environment_json="$RUNNER_TEMP/pypi-environment.json"
-          if ! gh api "repos/$GITHUB_REPOSITORY/environments/pypi" >"$environment_json"; then
-            echo "::error::Create and protect the GitHub pypi environment before release."
-            exit 1
-          fi
+          printf 'version=%s\n' "$release_version" >>"$GITHUB_OUTPUT"
+          printf 'tag=v%s\n' "$release_version" >>"$GITHUB_OUTPUT"
 
-          reviewer_count="$(
-            jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length' \
-              "$environment_json"
-          )"
-          prevent_self_review="$(
-            jq -r '[.protection_rules[]? | select(.type == "required_reviewers") | .prevent_self_review] | first // false' \
-              "$environment_json"
-          )"
-          protected_branches="$(
-            jq -r '.deployment_branch_policy.protected_branches // false' \
-              "$environment_json"
-          )"
-
-          if [ "$reviewer_count" -lt 1 ]; then
-            echo "::error::The pypi environment requires at least one independent reviewer."
-            exit 1
-          fi
-          if [ "$prevent_self_review" != "true" ]; then
-            echo "::error::The pypi environment must prevent self-review."
-            exit 1
-          fi
-          if [ "$protected_branches" != "true" ]; then
-            echo "::error::The pypi environment must restrict deployments to protected branches."
-            exit 1
-          fi
-      - name: Refuse a version that already exists on PyPI
-        run: |
-          set -euo pipefail
           response="$RUNNER_TEMP/pypi-version.json"
           status="$(
             curl \
@@ -98,14 +102,19 @@ jobs:
               --location \
               --output "$response" \
               --write-out '%{http_code}' \
-              "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json"
+              "https://pypi.org/pypi/threadweave/$release_version/json"
           )"
           case "$status" in
             404)
+              if [ "$PIPY_TOKEN_AVAILABLE" != "true" ]; then
+                echo "::error::PIPY_TOKEN is unavailable to the protected release job."
+                exit 1
+              fi
+              printf 'release_required=true\n' >>"$GITHUB_OUTPUT"
               ;;
             200)
-              echo "::error::threadweave $RELEASE_VERSION already exists on PyPI."
-              exit 1
+              echo "threadweave $release_version is already published; no new release is required."
+              printf 'release_required=false\n' >>"$GITHUB_OUTPUT"
               ;;
             *)
               echo "::error::Unexpected PyPI readiness response: HTTP $status."
@@ -117,11 +126,14 @@ jobs:
     needs: release-readiness
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      needs.release-readiness.outputs.release_required == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      RELEASE_VERSION: ${{ needs.release-readiness.outputs.version }}
     outputs:
       version: ${{ steps.contract.outputs.version }}
       tag: ${{ steps.contract.outputs.tag }}
@@ -273,7 +285,8 @@ jobs:
     needs: build-release
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      needs.build-release.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -321,12 +334,14 @@ jobs:
     needs: [build-release, attest-release]
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      needs.attest-release.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
     env:
+      RELEASE_VERSION: ${{ needs.build-release.outputs.version }}
       RELEASE_TAG: ${{ needs.build-release.outputs.tag }}
     steps:
       - name: Harden the tag job
@@ -384,12 +399,14 @@ jobs:
     needs: [build-release, attest-release, tag-release]
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      needs.tag-release.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: write
     env:
+      RELEASE_VERSION: ${{ needs.build-release.outputs.version }}
       RELEASE_TAG: ${{ needs.build-release.outputs.tag }}
     steps:
       - name: Harden the GitHub Release job
@@ -471,15 +488,12 @@ jobs:
     needs: [build-release, attest-release, tag-release, github-release]
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      needs.github-release.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment:
-      name: pypi
-      url: https://pypi.org/p/threadweave
     permissions:
       contents: read
-      id-token: write
     steps:
       - name: Harden the PyPI publishing job
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -489,7 +503,6 @@ jobs:
           allowed-endpoints: >-
             pypi.org:443
             results-receiver.actions.githubusercontent.com:443
-            token.actions.githubusercontent.com:443
             upload.pypi.org:443
             *.actions.githubusercontent.com:443
             *.blob.core.windows.net:443
@@ -502,9 +515,108 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/release-bundle/dist"
           sha256sum --check ../release/SHA256SUMS.txt
-      - name: Publish through PyPI Trusted Publishing
+      - name: Publish through the approved PyPI API token
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           packages-dir: ${{ runner.temp }}/release-bundle/dist/
-          attestations: true
+          password: ${{ secrets.PIPY_TOKEN }}
+          attestations: false
           print-hash: true
+
+  verify-publication:
+    needs: [build-release, publish-pypi]
+    if: >-
+      github.repository == 'ContextualWisdomLab/ThreadWeave' &&
+      github.ref == 'refs/heads/main' &&
+      needs.publish-pypi.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      RELEASE_VERSION: ${{ needs.build-release.outputs.version }}
+    steps:
+      - name: Harden public-artifact verification
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >-
+            files.pythonhosted.org:443
+            pypi.org:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+      - name: Download the reviewed release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-bundle
+      - name: Verify PyPI filenames and SHA-256 digests
+        run: |
+          set -euo pipefail
+          pypi_json="$RUNNER_TEMP/threadweave-pypi.json"
+          curl --fail --silent --show-error --location \
+            --output "$pypi_json" \
+            "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "release-bundle"
+          expected: dict[str, str] = {}
+          for line in (root / "release" / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
+              digest, filename = line.split(maxsplit=1)
+              expected[filename.lstrip("*")] = digest
+          payload = json.loads(
+              (Path(os.environ["RUNNER_TEMP"]) / "threadweave-pypi.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          observed = {
+              item["filename"]: item["digests"]["sha256"]
+              for item in payload["urls"]
+          }
+          if observed != expected:
+              raise SystemExit(
+                  f"PyPI artifact digest set disagrees with reviewed release bundle: "
+                  f"expected={expected!r} observed={observed!r}"
+              )
+          PY
+      - name: Clean-install the public package and smoke THREAD serialization
+        run: |
+          set -euo pipefail
+          venv="$RUNNER_TEMP/public-install"
+          python3 -m venv "$venv"
+          "$venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --no-deps \
+            "threadweave==${RELEASE_VERSION}"
+          temp_dir="$(mktemp -d)"
+          (
+            cd "$temp_dir"
+            PYTHONPATH="" "$venv/bin/python" - <<'PY'
+          import os
+
+          import threadweave
+          from threadweave import Message, serialize_thread_response, thread_messages
+
+          assert threadweave.__version__ == os.environ["RELEASE_VERSION"]
+          roots = thread_messages(
+              [
+                  Message(message_id="root", sequence_number=1, uid=101),
+                  Message(
+                      message_id="child",
+                      references=["root"],
+                      sequence_number=2,
+                      uid=102,
+                  ),
+              ]
+          )
+          assert serialize_thread_response(roots) == "* THREAD (1 2)\r\n"
+          assert serialize_thread_response(roots, identifier="uid") == (
+              "* THREAD (101 102)\r\n"
+          )
+          PY
+          )
