@@ -92,10 +92,6 @@ jobs:
             exit 1
           fi
 
-          printf 'version=%s\n' "$release_version" >>"$GITHUB_OUTPUT"
-          printf 'tag=v%s\n' "$release_version" >>"$GITHUB_OUTPUT"
-          printf 'publisher_available=%s\n' "$PIPY_TOKEN_AVAILABLE" >>"$GITHUB_OUTPUT"
-
           response="$RUNNER_TEMP/pypi-version.json"
           status="$(
             curl \
@@ -108,20 +104,27 @@ jobs:
           )"
           case "$status" in
             404)
-              printf 'public_version_exists=false\n' >>"$GITHUB_OUTPUT"
+              public_version_exists=false
               if [ "$PIPY_TOKEN_AVAILABLE" != "true" ]; then
                 echo "::error::PIPY_TOKEN is unavailable for a new PyPI release."
                 exit 1
               fi
               ;;
             200)
-              printf 'public_version_exists=true\n' >>"$GITHUB_OUTPUT"
+              public_version_exists=true
               ;;
             *)
               echo "::error::Unexpected PyPI readiness response: HTTP $status."
               exit 1
               ;;
           esac
+
+          {
+            printf 'version=%s\n' "$release_version"
+            printf 'tag=v%s\n' "$release_version"
+            printf 'publisher_available=%s\n' "$PIPY_TOKEN_AVAILABLE"
+            printf 'public_version_exists=%s\n' "$public_version_exists"
+          } >>"$GITHUB_OUTPUT"
 
   build-release:
     needs: release-readiness
