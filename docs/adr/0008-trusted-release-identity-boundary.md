@@ -10,58 +10,69 @@ ThreadWeave publishes immutable Python distributions from an exact protected-mai
 
 That assumption no longer matches the accepted organization credential boundary. ContextualWisdomLab already maintains an approved organization GitHub Actions secret named exactly `PIPY_TOKEN`, and `fast-mlsirm` has an established reviewed pattern that passes that token only to a pinned PyPA publisher action. GitHub organization secrets are explicitly designed to make one centrally managed secret available to selected repositories; a workflow receives a secret only when it explicitly references it. PyPI and the PyPA publishing action continue to support API-token authentication as well as Trusted Publishing.
 
-The architectural requirement is therefore not “OIDC only.” The requirement is that one approved publisher identity be selected before irreversible release work, that its credential surface be isolated from build/test/release evidence, and that the public artifact be verified after publication.
+The architectural requirement is therefore not “OIDC only.” The requirement is that one approved publisher identity be selected before irreversible release work, that its credential surface be isolated from build/test/release evidence, that release authority be tied to the exact reviewed integration and required checks, and that the public artifact be verified after publication.
 
 ## Decision
 
-The release workflow SHALL begin with a credential-minimal `release-readiness` job that executes before build, attestation, tag creation, GitHub Release creation, or PyPI publication.
+The release workflow SHALL begin only after the repository's ordinary `ci` workflow has completed successfully for `main`, or through an explicit manual recovery invocation on the exact current protected-main head. A raw `push` SHALL NOT directly authorize publication.
 
-The readiness job SHALL:
+The credential-minimal `release-readiness` job SHALL execute before build, attestation, tag creation, GitHub Release creation, or PyPI publication and SHALL:
 
-1. run only for the canonical repository and protected `main` release invocation;
-2. derive one canonical `MAJOR.MINOR.PATCH` version from reviewed package metadata;
-3. require any manual recovery version to equal that reviewed version;
-4. query the public PyPI project API before new release side effects;
-5. no-op when that exact version is already public rather than attempting to overwrite an immutable version;
-6. when a new version is required, prove only the **availability** of the selected publisher credential without materializing its value into shell, logs, outputs, artifacts, caches, SBOM/provenance, or release receipts;
-7. fail closed on a missing publisher, malformed metadata, unprotected ref, or unexpected PyPI response.
+1. bind one immutable source SHA from the completed `ci` run or the explicit manual protected-main recovery invocation;
+2. verify that source SHA is still the exact current protected `main` tip; stale automatic completions are successful no-ops and a stale manual recovery fails closed;
+3. require terminal-success `ci` and `SAST Semgrep` push runs for that integrated source SHA;
+4. resolve the merged pull request that produced the source SHA and require its exact head to have terminal-success `ci`, `SAST Semgrep`, and `Security Scan` pull-request runs;
+5. derive one canonical `MAJOR.MINOR.PATCH` version from reviewed package metadata and require any manual recovery version to equal it;
+6. query the public PyPI project API without treating HTTP 200 as proof of a complete release;
+7. make an automatic invocation a successful no-op when that reviewed version is already public, while preserving `workflow_dispatch` as the explicit exact-main recovery/verification path;
+8. prove only the **availability** of the selected publisher credential without materializing its value into shell, logs, outputs, artifacts, caches, SBOM/provenance, or release receipts;
+9. fail closed on missing required release authority, malformed metadata, unavailable publisher for missing files, or unexpected GitHub/PyPI responses.
+
+After the exact wheel and sdist are rebuilt, a separate credential-free publication-planning job SHALL compare every already-public PyPI filename and SHA-256 against the reviewed `SHA256SUMS.txt` **before** attestation/tag/GitHub Release side effects. Unexpected files or digest mismatches fail immediately. A complete matching public set requires no registry upload. A matching partial set may recover only by publishing the reviewed missing distributions; already-public filenames are not resent and `skip-existing` is not used.
 
 ### Approved publisher mode: organization PyPI API token
 
 The current release path uses the organization secret `PIPY_TOKEN`. Only the isolated `publish-pypi` job may pass `${{ secrets.PIPY_TOKEN }}` to the fully SHA-pinned `pypa/gh-action-pypi-publish` action as its `password` input. The action's PyPI API-token username default (`__token__`) is sufficient, so the existing organization `PIPY_USERNAME` secret is deliberately not materialized.
 
-The build, release-readiness, attestation, tag, GitHub Release, and public-verification jobs MUST NOT receive the token value. Readiness may evaluate `secrets.PIPY_TOKEN != ''` to one boolean availability fact, but the value itself must never cross the publisher boundary.
+The release-readiness, build, publication-planning, attestation, tag, GitHub Release, and public-verification jobs MUST NOT receive the token value. Readiness may evaluate `secrets.PIPY_TOKEN != ''` to one boolean availability fact, but the value itself must never cross the publisher boundary.
+
+The API-token publisher does not require an otherwise unconfigured `pypi` GitHub Environment merely to recreate the former OIDC prerequisite. Deployment safety is provided by protected-main integration plus the exact release-authority checks above and by isolating the credential to the final pinned publisher action. A future repository policy may add an environment as a separately accepted deployment-control decision, but doing so is not implicit in API-token authentication.
 
 ### Optional publisher mode: PyPI Trusted Publishing
 
 Trusted Publishing remains an accepted and preferred credential-minimization option once the account-side OIDC relationship is configured. A future migration may give the isolated publisher `id-token: write` and remove the password input. It must be a reviewed publisher-mode change; the workflow must not silently fall back between API-token and OIDC modes after an authentication or publication failure.
 
-A repository environment may still be used as an independent deployment-approval control, but an unconfigured `pypi` environment is no longer a mandatory release prerequisite merely to prove OIDC identity when the approved organization API-token mode is selected.
-
 ### Automatic release entry point
 
-Protected-main pushes affecting `CHANGELOG.md`, package version metadata, the release contract, or the release workflow may invoke readiness automatically. `workflow_dispatch` remains a recovery entry point. Both paths converge on the same exact-head contract and do not create separate release engines.
+The automatic release entry point is `workflow_run` completion of the repository `ci` workflow for `main`, not a raw push. The completed run supplies the candidate source SHA, which readiness independently verifies against live protected `main` and the required exact integrated/source-PR evidence before release work may begin.
+
+If the reviewed version is already public, ordinary automatic invocations stop successfully before build. `workflow_dispatch` remains an idempotent recovery/verification entry point for the exact current protected-main release identity, including a matching partial publication. Both paths converge on one release contract and do not create separate release engines.
 
 ## Security invariants
 
 Using `PIPY_TOKEN` through the reviewed publisher is an approved authentication path, not a bypass. The following remain prohibited:
 
 - printing, echoing, serializing, fingerprinting into evidence, or otherwise exposing the token;
-- passing the token to build, test, model, attestation, tag, GitHub Release, or public-verification jobs;
+- passing the token to readiness, build, test, model, publication-planning, attestation, tag, GitHub Release, or public-verification jobs;
+- publishing before exact integrated and source-PR release authority reaches terminal success;
 - manual workstation uploads used to escape a failed automated control;
 - unreviewed publisher code or mutable third-party action references;
 - `skip-existing`, release-tag rewrite, artifact replacement, self-approval, fabricated checks, or weakened branch/security/review gates;
 - silently switching credential modes after an authentication failure.
 
-The publisher still receives the exact wheel and sdist whose SHA-256 values were generated by the reviewed build. Post-publication verification MUST compare PyPI's published filename/digest set with those reviewed hashes and perform a clean install plus representative protocol smoke before release completion.
+The publisher receives only reviewed missing distributions whose SHA-256 values were generated by the exact authorized build. Post-publication verification MUST compare PyPI's complete published filename/digest set with those reviewed hashes and perform a clean install plus representative protocol smoke before release completion.
+
+Public verification may retry bounded registry propagation only when PyPI is absent or exposes a matching incomplete subset. Unexpected filenames or immutable digest mismatches fail immediately and are never retried into acceptance.
 
 ## Consequences
 
 - The external absence of a PyPI Trusted Publisher no longer blocks ThreadWeave while the approved `PIPY_TOKEN` is available.
 - Credential exposure is narrower than a generic username/password workflow because only `PIPY_TOKEN` is needed and only the publisher job materializes it.
 - OIDC can be adopted later without changing package/release semantics.
-- A missing token for a new public version fails before build/tag/GitHub Release side effects.
-- A version already present on PyPI becomes a successful no-op for ordinary protected-main release triggers, preserving public-version immutability.
+- A missing token for required missing distributions fails before attestation/tag/GitHub Release side effects.
+- Raw protected-main pushes cannot race publication against required checks; automatic release begins from completed main CI and revalidates the complete accepted evidence boundary.
+- A version already present on PyPI becomes a successful no-op for ordinary automatic release invocations, preserving public-version immutability and avoiding repeated tag failures.
+- Manual recovery can rebuild and verify an existing/partial publication without resending already-public files.
 - Public-artifact digest and clean-install evidence become part of release completion rather than an out-of-band manual step.
 - Issue #17 remains the acceptance record for the first public `0.2.0` release, now tracking approved publisher execution rather than external OIDC setup.
 
@@ -79,6 +90,14 @@ Rejected for the current PyPA API-token path because the publisher supports the 
 
 Rejected because every job would inherit publication authority. The token belongs only to the pinned publisher action input in the isolated registry job.
 
+### Trigger publication directly on protected-main push
+
+Rejected because required integrated/review evidence can still be running after the push event. Starting from completed main CI and independently rechecking the exact evidence prevents irreversible release work from outrunning required gates.
+
+### Treat any existing PyPI version as complete
+
+Rejected because PyPI can expose one distribution while another upload failed or is still propagating. Existing public files must be compared to the rebuilt reviewed bundle, and only matching missing files may be recovered.
+
 ### Manually upload after workflow failure
 
 Rejected because it breaks reproducible provenance and creates an artifact whose publication path does not match the reviewed release workflow.
@@ -91,15 +110,18 @@ Rejected because authentication ambiguity after side effects makes incident reco
 
 Repository tests must prove that:
 
-- the readiness job precedes `build-release` and gates all release work;
-- protected-main pushes and manual recovery converge on one workflow;
+- the automatic trigger is completed main `ci`, not raw `push`, and manual recovery remains explicit;
+- readiness binds one source SHA, rejects/stops stale authority appropriately, and precedes all release work;
+- exact integrated `ci`/`SAST Semgrep` plus associated merged-PR head `ci`/`SAST Semgrep`/`Security Scan` must be terminal-success before release work;
+- automatic already-public versions are successful no-ops while manual exact-main recovery may rebuild/verify an existing or partial publication;
 - readiness sees only token availability, not token bytes;
 - the token value appears exactly once in workflow source, as the pinned publisher action password input;
 - `PIPY_USERNAME` is not materialized;
 - only the attestation job holds `id-token: write` while API-token publication is selected;
 - Harden Runner endpoint sets remain exact per job;
-- public version existence is checked before release work;
-- post-publication PyPI filename/SHA-256 equality and clean-install protocol smoke are required.
+- an existing public artifact set is compared to the rebuilt reviewed bundle before immutable release side effects, and only matching missing files are selected for upload;
+- public verification retries only bounded absence/matching-incomplete propagation and fails immediately on unexpected files or digest mismatch;
+- post-publication complete PyPI filename/SHA-256 equality and clean-install protocol smoke are required.
 
 Public release completion still requires issue #17 acceptance: exact protected-head CI/security/coverage/package evidence, SLSA/SPDX evidence, immutable tag/GitHub Release identity, public PyPI wheel and sdist, digest equality, and clean post-publication install/THREAD smoke.
 
