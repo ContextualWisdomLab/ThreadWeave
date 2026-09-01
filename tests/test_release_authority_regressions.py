@@ -54,6 +54,34 @@ def test_release_authority_checks_integrated_ci_sast_and_source_pr_security() ->
     assert "associated merged pull request" in readiness
 
 
+def test_release_runs_are_serialized_across_source_shas() -> None:
+    """Two consecutive main commits must never publish the same version concurrently."""
+
+    workflow = _workflow()
+    concurrency = workflow.split("concurrency:\n", 1)[1].split("\nenv:\n", 1)[0]
+    assert "group: release-${{ github.repository }}" in concurrency
+    assert "head_sha" not in concurrency
+    assert "github.sha" not in concurrency
+    assert "cancel-in-progress: false" in concurrency
+
+
+def test_tag_revalidates_main_before_first_immutable_side_effect() -> None:
+    """A superseded candidate exits unless its matching release tag already exists."""
+
+    workflow = _workflow()
+    tag = _job(workflow, "tag-release", "github-release")
+    assert "actions: read" not in tag
+    assert "current_main_sha" in tag
+    assert '"repos/$GITHUB_REPOSITORY/branches/main"' in tag
+    assert 'if [ "$current_main_sha" != "$SOURCE_SHA" ] && [ -z "$tag_object" ]; then' in tag
+    assert "release_authorized=false" in tag
+    assert "release_authorized=true" in tag
+    assert "release_authorized: ${{ steps.tag.outputs.release_authorized }}" in tag
+    assert "Existing release tag is not an annotated tag for this exact release source" in tag
+    github_release = _job(workflow, "github-release", "publish-pypi")
+    assert "needs.tag-release.outputs.release_authorized == 'true'" in github_release
+
+
 def test_stale_or_already_public_automatic_runs_are_successful_noops() -> None:
     """Automatic recovery must not rebuild an old or already released version."""
 
