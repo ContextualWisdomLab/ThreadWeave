@@ -193,8 +193,8 @@ def test_automatic_existing_version_noops_while_manual_recovery_can_verify() -> 
     readiness = _job_block(workflow, "release-readiness", "build-release")
     assert 'if [ "$GITHUB_EVENT_NAME" = "workflow_run" ] && [ "$public_version_exists" = "true" ]; then' in readiness
     assert "run_release=false" in readiness
-    assert 'if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then' in readiness
-    assert "run_release=true" in readiness
+    assert readiness.count("run_release=true") == 1
+    assert 'if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then' not in readiness
     publish = _job_block(workflow, "publish-pypi", "verify-publication")
     assert "needs.publication-plan.outputs.publication_required == 'true'" in publish
     verify = _job_block(workflow, "verify-publication", None)
