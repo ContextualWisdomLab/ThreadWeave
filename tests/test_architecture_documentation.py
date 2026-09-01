@@ -220,18 +220,16 @@ def test_incident_runbook_requires_root_cause_and_exact_evidence_identity() -> N
     assert "leaves public `sequence_number`/UID metadata unset" in runbook
 
 
-def test_release_gate_requires_trusted_publication_and_post_publish_smoke() -> None:
+def test_release_gate_requires_approved_publication_and_post_publish_smoke() -> None:
     """A merge alone must never be represented as a completed public release."""
 
     release = _read("docs/RELEASE_PROVENANCE.md")
     agent_context = _read("CLAUDE.md")
     assert "A merge is not a release" in release
-    assert "Trusted Publishing" in release
-    assert (
-        "Do not introduce a long-lived PyPI token or manual artifact upload to bypass "
-        "failed OIDC/Trusted Publishing"
-    ) in release
-    assert "post-publication clean-install smoke" in release
+    assert "PIPY_TOKEN" in release
+    assert "Trusted Publishing remains" in release
+    assert "post-publication clean-install smoke result" in release
+    assert "must never appear in shell commands, logs" in release
     assert "Apache-2.0" in release
     assert (
         "`COPILOT_GITHUB_TOKEN` is not a development-model credential and must not "
@@ -260,8 +258,8 @@ def test_autonomy_and_evidence_identity_adrs_are_accepted_and_indexed() -> None:
     assert "live protected-base tip SHA" in evidence
 
 
-def test_trusted_release_identity_adr_is_accepted_and_indexed() -> None:
-    """Persist the non-bypass Trusted Publishing boundary as an architecture decision."""
+def test_release_publisher_identity_adr_is_accepted_and_indexed() -> None:
+    """Persist the fail-closed approved-publisher boundary as an architecture decision."""
 
     index = _read("docs/adr/README.md")
     decision = _read("docs/adr/0008-trusted-release-identity-boundary.md")
@@ -270,11 +268,12 @@ def test_trusted_release_identity_adr_is_accepted_and_indexed() -> None:
 
     assert "0008-trusted-release-identity-boundary.md" in index
     assert "**Status:** Accepted" in decision
-    assert "pre-created" in decision
-    assert "prevent self-review" in decision
-    assert "protected branches" in decision
-    assert "long-lived PyPI token" in decision
-    assert "manual upload" in decision
+    assert "**Amended:** 2026-09-01" in decision
+    assert "PIPY_TOKEN" in decision
+    assert "PIPY_USERNAME" in decision
+    assert "boolean availability fact" in decision
+    assert "manual workstation uploads" in decision
+    assert "Trusted Publishing remains" in decision
     assert "release-readiness" in release
     assert "ADR-0008" in traceability
 
@@ -299,18 +298,12 @@ def test_lineage_evidence_consumer_boundary_adr_is_proposed_and_indexed() -> Non
     assert "RFC 8474" in decision
     assert "ADR-0009" in traceability
 
-    # Lock the branched dependency ordering at RELATION level: two separate
-    # edges must be stated explicitly, not a single sequential chain.
-    #   Edge A: naruon#1437 -> naruon#1350 -> ThreadWeave PR #20
-    #   Edge B: naruon#1437 -> LineageWeave#338
     flat_decision = " ".join(decision.split())
     assert (
         "`naruon#1437` depends on `naruon#1350`, which depends on ThreadWeave PR #20"
         in flat_decision
     )
     assert "`naruon#1437` also depends on `LineageWeave#338`" in flat_decision
-    # The separate-branch wording ("also depends") must exist so a reader cannot
-    # misread the two relations as one transitive chain through naruon#1350.
     assert "also depends" in decision
 
 
@@ -332,9 +325,6 @@ def test_gap_baseline_tracks_lineageweave_cross_repository_chain() -> None:
     assert "Not applicable to this repository" in gap_baseline
     assert "Storybook" in gap_baseline
 
-    # Relation-level lock of the branched chain as recorded in the baseline
-    # (mirrors ADR-0009's two-edge statement; no sequential-chain reading).
-    # Whitespace-normalized so markdown line wrapping cannot hide a relation.
     flat = " ".join(gap_baseline.split())
     assert (
         "`naruon#1437` depends on `naruon#1350`, which depends on ThreadWeave PR #20"
