@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [0.2.0] - 2026-09-01
+
+- Replace the previously OIDC-only PyPI prerequisite with the approved
+  organization `PIPY_TOKEN` publisher path. The pinned PyPA action receives the
+  token only in its isolated publication job; build, attestation, tag, GitHub
+  Release, release-receipt, cache, and shell steps never receive the secret.
+  Trusted Publishing remains an optional future credential-minimization path,
+  not a prerequisite for this release.
+- Make release execution changelog/version-driven on protected `main`: a push
+  affecting release authority resolves the canonical version from reviewed
+  package metadata, no-ops when that version is already public, and otherwise
+  requires publisher availability before build or immutable release side
+  effects. Preserve manual dispatch as an idempotent recovery path.
+- Add post-publication verification that compares the PyPI wheel/sdist SHA-256
+  digests with the reviewed release bundle before a clean public install and
+  `THREAD`/`UID THREAD` smoke test can mark release completion.
 - Keep the root README a customer/operator guide for standalone
   `pip install threadweave` and host composition through
   `from threadweave import thread_messages`, and move the hourly autonomous
@@ -17,7 +33,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`naruon#1437` → `naruon#1350` → this repository's PR #20 stable-identity
   contract → `LineageWeave#338`), and record ADR-0009 documenting that
   ThreadWeave stays unaware of LineageWeave — naruon owns the projection.
-
 - Add a read-only GitHub Actions registry lifecycle audit
   (`scripts/ci/actions_registry_audit.py`) that classifies every live
   workflow identity as backed by protected-main source, a current open-PR
@@ -33,14 +48,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tests/test_actions_registry_audit.py` provides exact 100%
   statement/branch coverage of the detector itself in `ci.yml`'s existing
   PR-time gate. See ADR-0010.
-
-## [0.2.0] - 2026-08-10
-
-- Add a fail-closed release-readiness gate that requires a pre-created `pypi`
-  environment with required reviewers, self-review prevention, protected-branch
-  deployment policy, and an unpublished target version before build,
-  attestation, tag, or GitHub Release side effects can begin; record the Trusted
-  Publishing boundary in ADR-0008.
 - Extend the canonical architecture graph with a reconstruction-oriented
   documentation fitness audit, data-governance/privacy boundary, incident/RCA
   runbook, release/provenance/licensing gate, work-conserving autonomous
