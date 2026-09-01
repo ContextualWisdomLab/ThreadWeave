@@ -18,14 +18,17 @@ def _readiness_block() -> str:
     )[0]
 
 
-def test_release_readiness_requires_protected_ref_and_semver_without_leading_zero() -> None:
-    """Reject unprotected refs and non-canonical numeric version identifiers."""
+def test_release_readiness_requires_protected_ref_and_canonical_semver() -> None:
+    """Reject unprotected refs and non-canonical numeric project versions."""
 
     readiness = _readiness_block()
     assert "GITHUB_REF_PROTECTED" in readiness
     assert 'if [ "$GITHUB_REF_PROTECTED" != "true" ]; then' in readiness
+    assert "import re" in readiness
     assert (
-        '^((0|[1-9][0-9]*)\\.){2}(0|[1-9][0-9]*)$'
+        're.fullmatch(r"(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.'
+        '(?:0|[1-9][0-9]*)", version)'
         in readiness
     )
-    assert "Release version must be canonical MAJOR.MINOR.PATCH." in readiness
+    assert "project version must be canonical MAJOR.MINOR.PATCH" in readiness
+    assert 'if [ -n "$REQUESTED_VERSION" ] && [ "$REQUESTED_VERSION" != "$release_version" ]; then' in readiness
