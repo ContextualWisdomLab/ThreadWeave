@@ -13,10 +13,11 @@ Separate these authorities:
 2. deterministic CI proves tests, coverage, package integrity, and static gates;
 3. independent reviewers/security gates review the exact head;
 4. protected-branch policy permits integration;
-5. the `release-readiness` gate resolves the reviewed package version, confirms protected-main authority, verifies the target is not already public, and proves an approved publisher mode is available before irreversible release work;
-6. the release workflow builds from the integrated protected head and produces one immutable release evidence bundle;
-7. the isolated registry publisher receives only the credential needed for its selected publisher mode;
-8. post-publication verification proves the public artifact corresponds byte-for-byte to the reviewed release bundle and remains installable.
+5. the `release-readiness` gate resolves the reviewed package version, confirms protected-main authority, records whether the target version is already public, and reduces approved publisher availability to a boolean without materializing credential bytes;
+6. the release workflow rebuilds the exact wheel/sdist evidence from the integrated protected head;
+7. the `publication-plan` compares every already-public PyPI filename/SHA-256 with that reviewed bundle, fails closed on unexpected or mismatched files, and identifies only missing distributions before attestation/tag/GitHub Release side effects;
+8. the isolated registry publisher receives only the credential needed for its selected publisher mode and, when recovery is needed, uploads only those reviewed missing distributions;
+9. post-publication verification proves the complete public artifact set corresponds byte-for-byte to the reviewed release bundle and remains installable.
 
 The development model must never approve, merge, tag, or publish its own output.
 
@@ -35,24 +36,24 @@ Before release:
 - wheel and source distribution are freshly built from that head;
 - `py.typed`, license files, metadata, and package contents are verified;
 - the wheel is hash-installed and smoke-tested outside the source tree;
+- any already-public files for the same version exactly match the rebuilt filename/SHA-256 evidence before immutable GitHub release side effects proceed;
 - SBOM/provenance/attestation steps configured by the release workflow pass;
 - tag and GitHub Release identities match the package version and protected commit.
 
 ## Changelog-driven readiness preflight
 
-ADR-0008 requires release authority to fail closed before build, attestation, tag creation, or GitHub Release creation when a new public version is required but no approved registry publisher is available.
+ADR-0008 requires release authority to fail closed before new irreversible release side effects when approved publication authority cannot complete the reviewed artifact set.
 
 The preflight must verify:
 
 - execution is bound to exact protected `main` in `ContextualWisdomLab/ThreadWeave`;
 - the reviewed `[project].version` is one canonical `MAJOR.MINOR.PATCH` value;
 - a manual recovery version, when supplied, equals the reviewed project version;
-- PyPI does not already contain that version before a new release begins;
-- the approved organization secret `PIPY_TOKEN` is available when the API-token publisher mode is selected;
-- secret presence is represented only as a boolean readiness fact outside the publisher job;
+- the public PyPI version state is observable without treating HTTP 200 as proof of complete publication;
+- the approved organization secret `PIPY_TOKEN` is represented only as a boolean availability fact outside the publisher job;
 - missing publisher authority or unexpected PyPI responses fail closed.
 
-A protected-main push affecting `CHANGELOG.md`, package version metadata, the release contract, or the release workflow may start this preflight automatically. If the reviewed version already exists on PyPI, the workflow records a no-op rather than attempting to overwrite an immutable public version. `workflow_dispatch` remains an idempotent recovery entry point; it is not a second release authority.
+A protected-main push affecting `CHANGELOG.md`, package version metadata, the release contract, or the release workflow may start this preflight automatically. If the reviewed version already exists on PyPI, the workflow still rebuilds the reviewed distributions and compares the public filename/SHA-256 set. A complete matching publication skips registry upload but continues idempotent GitHub evidence checks and public verification. A partial matching publication prepares only the missing reviewed files for upload. Any unexpected or hash-mismatched public file fails closed. `workflow_dispatch` remains an idempotent recovery entry point; it is not a second release authority.
 
 ## Approved PyPI publisher modes
 
@@ -62,7 +63,7 @@ ThreadWeave recognizes two registry-authentication modes:
 
 The currently approved production path uses the organization GitHub Secret named exactly `PIPY_TOKEN`. The pinned `pypa/gh-action-pypi-publish` action receives it only as its `password` input, relying on the action's PyPI API-token username default (`__token__`). `PIPY_USERNAME` exists at the organization level but is not materialized because this publisher does not require it.
 
-The token value must never appear in shell commands, logs, workflow outputs, cache keys, artifacts, SBOM/provenance payloads, release notes, or release receipts. Build, test, attestation, tag, GitHub Release, and post-publication verification jobs must not receive the token.
+The token value must never appear in shell commands, logs, workflow outputs, cache keys, artifacts, SBOM/provenance payloads, release notes, or release receipts. Build, test, publication planning, attestation, tag, GitHub Release, and post-publication verification jobs must not receive the token.
 
 ### Trusted Publishing
 
@@ -89,14 +90,15 @@ Never infer artifact identity from a mutable branch name.
 
 ## Public-artifact verification
 
-After publication, the workflow must fetch the public PyPI metadata for the exact version and compare the wheel/sdist filename and SHA-256 set against the reviewed `SHA256SUMS.txt`. Only then may it create a clean environment, install `threadweave==<version>` from PyPI, and reproduce representative `THREAD` and `UID THREAD` serialization behavior. A successful upload without this public-artifact proof is not release completion.
+The workflow fetches the public PyPI metadata for the exact version and compares the complete wheel/sdist filename and SHA-256 set against the reviewed `SHA256SUMS.txt`. This comparison occurs both before publication side effects when public files already exist and after any required upload. Only a complete exact match may proceed to a clean environment that installs `threadweave==<version>` from PyPI and reproduces representative `THREAD` and `UID THREAD` serialization behavior. A successful upload without this public-artifact proof is not release completion.
 
 ## Rollback and re-release
 
 - Prefer a new patch release for corrected published artifacts; do not silently replace immutable public artifacts.
 - Preserve the last known-good public version and its evidence.
-- A readiness failure must create no tag/GitHub Release side effects.
+- A readiness/planning failure must create no new attestation/tag/GitHub Release side effects.
 - A later failure after attestation/tag/release must use the workflow's idempotent verification/recovery path rather than deleting or rewriting immutable evidence.
+- If PyPI contains a correct subset of the reviewed files, recovery may publish only the missing reviewed files after revalidating existing hashes; never resend already-public filenames and never use `skip-existing` to hide mismatches.
 - If PyPI publication succeeds but a later public-artifact verification step fails, investigate the public artifact and retry verification; never republish the same immutable filename/version.
 - A runtime rollback normally means selecting the last known-good package version because protected-main ThreadWeave owns no persistence.
 - If a future snapshot schema becomes public, snapshot compatibility and recovery become part of the release gate before publication.
@@ -115,4 +117,4 @@ Release notes must disclose compatibility-significant fail-closed changes even w
 
 ## Completion rule
 
-A release is complete only after the public artifact is discoverable, its hashes/provenance correspond to the intended protected head, a clean environment can install it, representative `THREAD`/`UID THREAD` smoke behavior passes, and the release-blocker record is reconciled. After that event, immediately refetch open PRs/issues and continue the product loop.
+A release is complete only after the public artifact set is complete and discoverable, its hashes/provenance correspond to the intended protected head, a clean environment can install it, representative `THREAD`/`UID THREAD` smoke behavior passes, and the release-blocker record is reconciled. After that event, immediately refetch open PRs/issues and continue the product loop.
