@@ -14,13 +14,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Release, release-receipt, cache, and shell steps never receive the secret.
   Trusted Publishing remains an optional future credential-minimization path,
   not a prerequisite for this release.
-- Make release execution changelog/version-driven on protected `main`: a push
-  affecting release authority resolves the canonical version from reviewed
-  package metadata, no-ops when that version is already public, and otherwise
-  requires publisher availability before build or immutable release side
-  effects. Preserve manual dispatch as an idempotent recovery path.
-- Add post-publication verification that compares the PyPI wheel/sdist SHA-256
-  digests with the reviewed release bundle before a clean public install and
+- Make release execution changelog/version-driven from exact protected `main`
+  only after the repository `ci` workflow completes successfully. The release
+  authority revalidates the integrated source SHA, integrated CI/SAST evidence,
+  and the merged source PR's CI/SAST/Security evidence before build or immutable
+  release side effects. Stale or already-public automatic invocations are
+  successful no-ops, while manual dispatch remains an exact-main idempotent
+  recovery and verification path.
+- Add fail-closed partial-publication recovery: rebuild the reviewed wheel/sdist,
+  compare every already-public PyPI filename and SHA-256 before attestation/tag
+  side effects, upload only matching missing distributions without
+  `skip-existing`, and retry only bounded normal registry propagation.
+- Add post-publication verification that compares the complete PyPI wheel/sdist
+  SHA-256 set with the reviewed release bundle before a clean public install and
   `THREAD`/`UID THREAD` smoke test can mark release completion.
 - Keep the root README a customer/operator guide for standalone
   `pip install threadweave` and host composition through
