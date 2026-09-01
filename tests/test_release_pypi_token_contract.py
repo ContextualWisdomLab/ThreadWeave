@@ -54,10 +54,17 @@ def test_token_secret_is_never_materialized_in_shell_or_release_evidence() -> No
     """No shell, cache, output, or receipt receives the publisher secret value."""
 
     workflow = _workflow()
-    assert workflow.count("${{ secrets.PIPY_TOKEN }}") == 1
-    assert workflow.count("secrets.PIPY_TOKEN") == 2
+    secret_lines = {
+        line.strip()
+        for line in workflow.splitlines()
+        if "secrets" in line.casefold()
+    }
+    assert secret_lines == {
+        "PIPY_TOKEN_AVAILABLE: ${{ secrets.PIPY_TOKEN != '' }}",
+        "password: ${{ secrets.PIPY_TOKEN }}",
+    }
     for block in workflow.split("run: |")[1:]:
         shell = block.split("\n      - name:", 1)[0]
-        assert "secrets.PIPY_TOKEN" not in shell
+        assert "secrets" not in shell.casefold()
     before_publish = workflow.split("  publish-pypi:\n", 1)[0]
     assert "${{ secrets.PIPY_TOKEN }}" not in before_publish
