@@ -179,8 +179,8 @@ def test_partial_publication_is_planned_before_attestation_or_release_side_effec
     assert "unexpected public artifact" in plan
     assert "public artifact digest mismatch" in plan
     assert "missing_filenames" in plan
-    assert "publication_required=true" in plan
-    assert "publication_required=false" in plan
+    assert "publication_required=" in plan
+    assert "'true' if missing else 'false'" in plan
     assert "publisher_available" in plan
     assert "publication-missing-${{ github.run_id }}-${{ github.run_attempt }}" in plan
     assert "if-no-files-found: error" in plan
@@ -315,8 +315,8 @@ def test_publication_is_verified_with_bounded_registry_retry_and_clean_install()
     assert "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json" in verify
     assert "for attempt in $(seq 1 12); do" in verify
     assert "sleep 10" in verify
-    assert "exit 10" in verify
-    assert "exit 20" in verify
+    assert "raise SystemExit(10)" in verify
+    assert "raise SystemExit(20)" in verify
     assert "PyPI artifact set did not converge" in verify
     assert "python3 -m venv" in verify
     assert 'threadweave==${RELEASE_VERSION}' in verify
