@@ -118,8 +118,8 @@ def test_public_registry_verification_retries_only_matching_incomplete_sets() ->
     verify = _job(_workflow(), "verify-publication", None)
     assert "for attempt in $(seq 1 12); do" in verify
     assert "sleep 10" in verify
-    assert "exit 10" in verify
-    assert "exit 20" in verify
+    assert "raise SystemExit(10)" in verify
+    assert "raise SystemExit(20)" in verify
     assert "PyPI artifact set did not converge" in verify
     assert "public artifact digest mismatch" in verify
     assert "unexpected public artifact" in verify
