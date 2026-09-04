@@ -36,8 +36,8 @@ def test_hourly_pr_maintenance_uses_central_cwl_workflows():
     assert "issues: write" not in workflow
 
 
-def test_product_development_brokers_nim_outside_the_model_process():
-    """The model gets a placeholder key while a loopback broker owns the secret."""
+def test_product_development_uses_the_contextual_orchestrator_free_pool():
+    """Provider credentials stay in the gateway while the agent uses one logical pool."""
     workflow = _workflow("hourly-product-development.yml")
     develop = workflow.split("  develop-product-gap:\n", 1)[1].split(
         "  reverify-product-gap:\n", 1
@@ -48,29 +48,36 @@ def test_product_development_brokers_nim_outside_the_model_process():
     )[1].split(
         "      - name: Check out the protected default branch without persisted credentials", 1
     )[0]
-    broker = develop.split(
-        "      - name: Start the loopback-only NIM credential broker", 1
-    )[1].split("      - name: Run the NVIDIA NIM development agent", 1)[0]
+    gateway = develop.split(
+        "      - name: Start the contextual-orchestrator gateway", 1
+    )[1].split("      - name: Run the orchestrated development agent", 1)[0]
     capture = develop.split("      - name: Capture the bounded credential-free patch", 1)[
         1
     ].split("      - name: Upload the bounded proposal", 1)[0]
-    secret_binding = "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}"
-
     assert 'cron: "41 * * * *"' in workflow
     assert "cancel-in-progress: false" in workflow
-    assert workflow.count(secret_binding) == 1
-    assert secret_binding not in job_header
     assert "NIM_UPSTREAM_API_KEY" not in job_header
     assert "secrets.NVIDIA_NIM_API_KEY" not in gate
     assert "NIM_UPSTREAM_API_KEY" not in gate
-    assert "if: steps.gate.outputs.develop == 'true'" in broker
-    assert secret_binding in broker
-    assert "python scripts/ci/nim_proxy.py" in broker
-    assert "secret_fingerprint_guard.py fingerprint" in broker
-    assert 'forbidden_fingerprint_file="${RUNNER_TEMP}/threadweave-secret-fingerprint.json"' in broker
+    for secret_name in (
+        "BYTEZ_API_KEY",
+        "NVIDIA_NIM_API_KEY",
+        "NVIDIA_NIM_API_KEY_SUB",
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+    ):
+        binding = f"{secret_name}: ${{{{ secrets.{secret_name} }}}}"
+        assert workflow.count(binding) == 1
+        assert binding not in job_header
+    assert "if: steps.gate.outputs.develop == 'true'" in gateway
+    assert "ContextualWisdomLab/contextual-orchestrator.git" in gateway
+    assert "CONTEXTUAL_ORCHESTRATOR_PIN_SHA" in gateway
+    assert "scripts.ci.serve_seeded_gateway" in gateway
+    assert "secret_fingerprint_guard.py fingerprint" in gateway
+    assert 'fingerprint_dir="${RUNNER_TEMP}/threadweave-secret-fingerprints"' in gateway
     assert "set -euo pipefail" in capture
     assert "secret_fingerprint_guard.py scan" in capture
-    assert '--fingerprint-file "$forbidden_fingerprint_file"' in capture
+    assert '--fingerprint-file "$fingerprint_file"' in capture
     assert "continue-on-error: true" not in capture
     assert develop.index("secret_fingerprint_guard.py scan") < develop.index(
         "actions/upload-artifact@"
@@ -79,9 +86,10 @@ def test_product_development_brokers_nim_outside_the_model_process():
         "scripts/ci/hourly_product_guard.py apply"
     )
     assert "THREADWEAVE_FORBIDDEN_SECRET" not in workflow
+    assert workflow.count("contextual_orchestrator_gateway/orchestrator/free") == 2
     assert '"baseURL": "http://127.0.0.1:8765/v1"' in workflow
-    assert "NVIDIA_API_KEY=threadweave-local-broker" in workflow
-    assert "NVIDIA_API_KEY=\"$NIM_UPSTREAM_API_KEY\"" not in workflow
+    assert "nvidia-nim/nvidia/" not in workflow
+    assert "NVIDIA_API_KEY=threadweave-local-broker" not in workflow
     assert "sudo -u '#65532' -g '#65532' env -i" in workflow
     assert "sudo pkill -KILL -u 65532" in workflow
     assert "git archive HEAD | tar -x" in workflow
@@ -115,7 +123,10 @@ def test_model_job_blocks_undeclared_network_egress():
     workflow = _workflow("hourly-product-development.yml")
     workflow_lines = {line.strip() for line in workflow.splitlines()}
     required_endpoints = {
+        "api.bytez.com:443",
+        "api.openai.com:443",
         "integrate.api.nvidia.com:443",
+        "openrouter.ai:443",
         "registry.npmjs.org:443",
         "*.blob.core.windows.net:443",
     }

@@ -23,12 +23,11 @@ env:
   DEFAULT_BRANCH: main
   OPENCODE_VERSION: "1.17.13"
   OPENCODE_SHA256: 157afa289d1a8d9372de0ce19ac726119b937a1f6b201808d46f06e4e59bb348
+  CONTEXTUAL_ORCHESTRATOR_PIN_SHA: "2e414d15ba58f28597751b625a8a2f00fc9fadcf"
   OPENCODE_MODEL_CANDIDATES: >-
-    nvidia-nim/nvidia/llama-3.3-nemotron-super-49b-v1.5
-    nvidia-nim/nvidia/nemotron-3-super-120b-a12b
-    nvidia-nim/deepseek-ai/deepseek-v4-pro
-  NIM_PROXY_HOST: "127.0.0.1"
-  NIM_PROXY_PORT: "8765"
+    contextual_orchestrator_gateway/orchestrator/free
+  CONTEXTUAL_ORCHESTRATOR_HOST: "127.0.0.1"
+  CONTEXTUAL_ORCHESTRATOR_PORT: "8765"
 
 jobs:
   develop-product-gap:
@@ -50,12 +49,15 @@ jobs:
           disable-telemetry: true
           allowed-endpoints: >-
             api.github.com:443
+            api.bytez.com:443
+            api.openai.com:443
             cafe.github.com:443
             codeload.github.com:443
             files.pythonhosted.org:443
             github.com:443
             integrate.api.nvidia.com:443
             objects.githubusercontent.com:443
+            openrouter.ai:443
             pypi.org:443
             registry.npmjs.org:443
             release-assets.githubusercontent.com:443
@@ -216,34 +218,69 @@ jobs:
           test evidence, standards sources, compatibility, and residual risk.
           PROMPT
 
-      - name: Start the loopback-only NIM credential broker
+      - name: Start the contextual-orchestrator gateway
         if: steps.gate.outputs.develop == 'true'
+        id: gateway
         shell: bash
         env:
-          NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+          BYTEZ_API_KEY: ${{ secrets.BYTEZ_API_KEY }}
+          NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+          NVIDIA_NIM_API_KEY_SUB: ${{ secrets.NVIDIA_NIM_API_KEY_SUB }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
           umask 077
-          if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then
-            echo "::error::NVIDIA_NIM_API_KEY is required only for the selected model-backed path."
+          fingerprint_dir="${RUNNER_TEMP}/threadweave-secret-fingerprints"
+          mkdir -m 0700 "$fingerprint_dir"
+          provider_count=0
+          for secret_name in BYTEZ_API_KEY NVIDIA_NIM_API_KEY NVIDIA_NIM_API_KEY_SUB OPENROUTER_API_KEY OPENAI_API_KEY; do
+            secret_value="${!secret_name:-}"
+            if [ -z "$secret_value" ]; then
+              continue
+            fi
+            provider_count=$((provider_count + 1))
+            NIM_UPSTREAM_API_KEY="$secret_value" \
+              python scripts/ci/secret_fingerprint_guard.py fingerprint \
+                --output-file "${fingerprint_dir}/${secret_name}.json"
+          done
+          if [ "$provider_count" -eq 0 ]; then
+            echo "::error::No contextual-orchestrator provider credential is configured."
             exit 1
           fi
-          forbidden_fingerprint_file="${RUNNER_TEMP}/threadweave-secret-fingerprint.json"
-          python scripts/ci/secret_fingerprint_guard.py fingerprint \
-            --output-file "$forbidden_fingerprint_file"
 
-          proxy_log="${RUNNER_TEMP}/threadweave-nim-proxy.log"
-          proxy_pid="${RUNNER_TEMP}/threadweave-nim-proxy.pid"
-          python scripts/ci/nim_proxy.py \
-            --host "$NIM_PROXY_HOST" \
-            --port "$NIM_PROXY_PORT" \
-            >"$proxy_log" 2>&1 &
-          printf '%s\n' "$!" >"$proxy_pid"
+          gateway_source="${RUNNER_TEMP}/contextual-orchestrator-gateway"
+          gateway_venv="${RUNNER_TEMP}/contextual-orchestrator-venv"
+          git clone --quiet --filter=blob:none --no-checkout \
+            https://github.com/ContextualWisdomLab/contextual-orchestrator.git \
+            "$gateway_source"
+          git -C "$gateway_source" -c advice.detachedHead=false checkout --quiet \
+            "$CONTEXTUAL_ORCHESTRATOR_PIN_SHA"
+          test "$(git -C "$gateway_source" rev-parse HEAD)" = \
+            "$CONTEXTUAL_ORCHESTRATOR_PIN_SHA"
+          python -m venv "$gateway_venv"
+          "$gateway_venv/bin/python" -m pip install --quiet \
+            --require-hashes --no-deps -r "$gateway_source/requirements.lock"
+
+          gateway_token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          echo "::add-mask::$gateway_token"
+          printf '%s' "$gateway_token" >"${RUNNER_TEMP}/threadweave-gateway.token"
+          cd "$gateway_source"
+          CONTEXTUAL_ORCHESTRATOR_TOKEN="$gateway_token" \
+            nohup "$gateway_venv/bin/python" -m scripts.ci.serve_seeded_gateway \
+            --serve \
+            --agents examples/agents.mock.json \
+            --auto-discover-model-agents \
+            --auth-token-key CONTEXTUAL_ORCHESTRATOR_TOKEN \
+            --host "$CONTEXTUAL_ORCHESTRATOR_HOST" \
+            --port "$CONTEXTUAL_ORCHESTRATOR_PORT" \
+            >"${RUNNER_TEMP}/threadweave-gateway.log" 2>&1 &
+          printf '%s\n' "$!" >"${RUNNER_TEMP}/threadweave-gateway.pid"
 
           ready=false
           for _attempt in $(seq 1 30); do
             if curl -fsS \
-              "http://${NIM_PROXY_HOST}:${NIM_PROXY_PORT}/healthz" \
+              "http://${CONTEXTUAL_ORCHESTRATOR_HOST}:${CONTEXTUAL_ORCHESTRATOR_PORT}/healthz" \
               >/dev/null; then
               ready=true
               break
@@ -251,19 +288,28 @@ jobs:
             sleep 1
           done
           if [ "$ready" != "true" ]; then
-            cat "$proxy_log" >&2
-            echo "::error::The loopback NIM credential broker did not become ready."
+            tail -n 100 "${RUNNER_TEMP}/threadweave-gateway.log" >&2
+            echo "::error::The contextual-orchestrator gateway did not become ready."
             exit 1
           fi
+          models="$(curl -fsS \
+            -H "Authorization: Bearer ${gateway_token}" \
+            "http://${CONTEXTUAL_ORCHESTRATOR_HOST}:${CONTEXTUAL_ORCHESTRATOR_PORT}/v1/models")"
+          if ! jq -e '.data | any(.id == "orchestrator/free")' >/dev/null <<<"$models"; then
+            echo "::error::The gateway has no enabled orchestrator/free route."
+            exit 1
+          fi
+          echo "ready=true" >>"$GITHUB_OUTPUT"
 
-      - name: Run the NVIDIA NIM development agent in a disposable workspace
-        if: steps.gate.outputs.develop == 'true'
+      - name: Run the orchestrated development agent in a disposable workspace
+        if: steps.gateway.outputs.ready == 'true'
         id: agent
         shell: bash
         run: |
           set -euo pipefail
           trap 'sudo pkill -KILL -u 65532 >/dev/null 2>&1 || true' EXIT
           prompt="$(cat "${RUNNER_TEMP}/threadweave-agent-prompt.md")"
+          gateway_token="$(cat "${RUNNER_TEMP}/threadweave-gateway.token")"
           successful_workspace=""
           agent_venv="${RUNNER_TEMP}/threadweave-agent-venv"
 
@@ -275,10 +321,10 @@ jobs:
             install -d -m 0750 "$agent_workspace" "$agent_home" "$agent_home/tmp"
             git archive HEAD | tar -x -C "$agent_workspace"
 
-            cat >"${agent_workspace}/opencode.json" <<'CONFIG'
+            cat >"${agent_workspace}/opencode.json" <<CONFIG
           {
-            "$schema": "https://opencode.ai/config.json",
-            "enabled_providers": ["nvidia-nim"],
+            "\$schema": "https://opencode.ai/config.json",
+            "model": "contextual_orchestrator_gateway/orchestrator/free",
             "lsp": false,
             "mcp": {},
             "permission": {
@@ -295,30 +341,16 @@ jobs:
               "external_directory": "deny"
             },
             "provider": {
-              "nvidia-nim": {
+              "contextual_orchestrator_gateway": {
                 "npm": "@ai-sdk/openai-compatible",
-                "name": "NVIDIA NIM through local broker",
+                "name": "Contextual Orchestrator Gateway",
                 "options": {
                   "baseURL": "http://127.0.0.1:8765/v1",
-                  "apiKey": "{env:NVIDIA_API_KEY}",
+                  "apiKey": "$gateway_token",
                   "timeout": false
                 },
                 "models": {
-                  "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
-                    "name": "NVIDIA Llama 3.3 Nemotron Super 49B v1.5",
-                    "tool_call": true,
-                    "limit": {"context": 131072, "output": 8192}
-                  },
-                  "nvidia/nemotron-3-super-120b-a12b": {
-                    "name": "NVIDIA Nemotron 3 Super 120B",
-                    "tool_call": true,
-                    "limit": {"context": 131072, "output": 8192}
-                  },
-                  "deepseek-ai/deepseek-v4-pro": {
-                    "name": "DeepSeek V4 Pro (NIM)",
-                    "tool_call": true,
-                    "limit": {"context": 131072, "output": 8192}
-                  }
+                  "orchestrator/free": {"name": "Fail-closed free orchestration"}
                 }
               }
             }
@@ -336,7 +368,6 @@ jobs:
                 PIP_NO_INDEX=1 \
                 LANG=C.UTF-8 \
                 LC_ALL=C.UTF-8 \
-                NVIDIA_API_KEY=threadweave-local-broker \
                 OPENCODE_DISABLE_AUTOUPDATE=1 \
                 /bin/bash -c \
                   'ulimit -u 256; ulimit -n 1024; cd "$1"; exec opencode run "$2" --model "$3"' \
@@ -353,24 +384,24 @@ jobs:
           done
 
           if [ -z "$successful_workspace" ]; then
-            echo "::error::Every NVIDIA NIM model candidate failed."
+            echo "::error::The contextual-orchestrator model route failed."
             exit 1
           fi
           sudo chown -R "$(id -u):$(id -g)" "$successful_workspace"
           rm -f "$successful_workspace/opencode.json"
           echo "workspace=$successful_workspace" >>"$GITHUB_OUTPUT"
 
-      - name: Stop the credential broker and all model descendants
+      - name: Stop the gateway and all model descendants
         if: always() && steps.gate.outputs.develop == 'true'
         shell: bash
         run: |
           set -euo pipefail
           sudo pkill -KILL -u 65532 >/dev/null 2>&1 || true
-          proxy_pid_file="${RUNNER_TEMP}/threadweave-nim-proxy.pid"
-          if [ -s "$proxy_pid_file" ]; then
-            proxy_pid="$(cat "$proxy_pid_file")"
-            kill "$proxy_pid" >/dev/null 2>&1 || true
-            wait "$proxy_pid" >/dev/null 2>&1 || true
+          gateway_pid_file="${RUNNER_TEMP}/threadweave-gateway.pid"
+          if [ -s "$gateway_pid_file" ]; then
+            gateway_pid="$(cat "$gateway_pid_file")"
+            kill "$gateway_pid" >/dev/null 2>&1 || true
+            wait "$gateway_pid" >/dev/null 2>&1 || true
           fi
 
       - name: Capture the bounded credential-free patch
@@ -380,7 +411,7 @@ jobs:
         run: |
           set -euo pipefail
           artifact_dir="${RUNNER_TEMP}/hourly-product-change"
-          forbidden_fingerprint_file="${RUNNER_TEMP}/threadweave-secret-fingerprint.json"
+          fingerprint_dir="${RUNNER_TEMP}/threadweave-secret-fingerprints"
           mkdir -p "$artifact_dir"
           python scripts/ci/hourly_product_guard.py capture \
             --workspace "${{ steps.agent.outputs.workspace }}" \
@@ -390,13 +421,21 @@ jobs:
             --stat-file "$artifact_dir/threadweave.stat" \
             --proposal-file "$artifact_dir/proposal.json"
           if [ -f "$artifact_dir/threadweave.patch" ]; then
-            python scripts/ci/secret_fingerprint_guard.py scan \
-              --fingerprint-file "$forbidden_fingerprint_file" \
-              --file "$artifact_dir/threadweave.patch" \
-              --file "$artifact_dir/threadweave.stat" \
-              --file "$artifact_dir/proposal.json"
+            shopt -s nullglob
+            fingerprint_files=("$fingerprint_dir"/*.json)
+            if [ "${#fingerprint_files[@]}" -eq 0 ]; then
+              echo "::error::Provider credential fingerprints are missing."
+              exit 1
+            fi
+            for fingerprint_file in "${fingerprint_files[@]}"; do
+              python scripts/ci/secret_fingerprint_guard.py scan \
+                --fingerprint-file "$fingerprint_file" \
+                --file "$artifact_dir/threadweave.patch" \
+                --file "$artifact_dir/threadweave.stat" \
+                --file "$artifact_dir/proposal.json"
+            done
           fi
-          rm -f "$forbidden_fingerprint_file"
+          rm -rf "$fingerprint_dir"
 
       - name: Upload the bounded proposal for credential-free reverification
         if: steps.package.outputs.changed == 'true'

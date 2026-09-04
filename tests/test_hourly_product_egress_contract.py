@@ -11,13 +11,16 @@ WORKFLOW = (
 
 EXPECTED_ENDPOINTS = {
     "develop-product-gap": {
+        "api.bytez.com:443",
         "api.github.com:443",
+        "api.openai.com:443",
         "cafe.github.com:443",
         "codeload.github.com:443",
         "files.pythonhosted.org:443",
         "github.com:443",
         "integrate.api.nvidia.com:443",
         "objects.githubusercontent.com:443",
+        "openrouter.ai:443",
         "pypi.org:443",
         "registry.npmjs.org:443",
         "release-assets.githubusercontent.com:443",
@@ -188,24 +191,30 @@ def test_reverification_and_publication_keep_github_api_checks_in_named_jobs():
         assert "NIM_UPSTREAM_API_KEY" not in job, job_name
 
 
-def test_model_secret_is_materialized_only_after_deterministic_gate_selects_model_path():
-    """Only the broker may receive the raw model secret after a model path is chosen."""
+def test_model_secrets_are_materialized_only_in_the_gateway_step():
+    """Only the gateway receives provider secrets after deterministic admission."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
     develop = _job_block(workflow, "develop-product-gap", "reverify-product-gap")
     gate = _develop_gate(workflow)
 
     assert "secrets.NVIDIA_NIM_API_KEY" not in gate
     assert "NIM_UPSTREAM_API_KEY" not in gate
-    assert develop.count("NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}") == 1
-
-    broker = develop.split(
-        "      - name: Start the loopback-only NIM credential broker", 1
-    )[1].split("      - name: Run the NVIDIA NIM development agent", 1)[0]
-    assert "if: steps.gate.outputs.develop == 'true'" in broker
-    assert "NIM_UPSTREAM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}" in broker
-    assert 'if [ -z "${NIM_UPSTREAM_API_KEY:-}" ]; then' in broker
-    assert "secret_fingerprint_guard.py fingerprint" in broker
-    assert "exit 1" in broker
+    gateway = develop.split(
+        "      - name: Start the contextual-orchestrator gateway", 1
+    )[1].split("      - name: Run the orchestrated development agent", 1)[0]
+    for secret_name in (
+        "BYTEZ_API_KEY",
+        "NVIDIA_NIM_API_KEY",
+        "NVIDIA_NIM_API_KEY_SUB",
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+    ):
+        binding = f"{secret_name}: ${{{{ secrets.{secret_name} }}}}"
+        assert develop.count(binding) == 1
+        assert binding in gateway
+    assert "provider_count" in gateway
+    assert "secret_fingerprint_guard.py fingerprint" in gateway
+    assert "exit 1" in gateway
 
 
 def test_model_request_has_no_client_side_timeout():
@@ -216,8 +225,8 @@ def test_model_request_has_no_client_side_timeout():
         develop.split("    timeout-minutes: ", 1)[1].splitlines()[0].strip()
     )
     agent = develop.split(
-        "      - name: Run the NVIDIA NIM development agent", 1
-    )[1].split("      - name: Stop the credential broker", 1)[0]
+        "      - name: Run the orchestrated development agent", 1
+    )[1].split("      - name: Stop the gateway", 1)[0]
 
     assert job_timeout_minutes >= 180
     assert '"timeout": false' in agent

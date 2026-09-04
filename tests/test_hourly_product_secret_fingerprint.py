@@ -27,22 +27,22 @@ def _fingerprints(secret: bytes) -> dict[str, object]:
     return guard.build_fingerprint(secret)
 
 
-def test_post_model_capture_step_receives_fingerprints_not_the_raw_nim_secret():
-    """Packaging must preserve leak detection without rematerializing the API key."""
+def test_post_model_capture_receives_fingerprints_not_raw_provider_secrets():
+    """Packaging preserves leak detection without rematerializing provider keys."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
     capture = workflow.split("      - name: Capture the bounded credential-free patch", 1)[1].split(
         "      - name: Upload the bounded proposal for credential-free reverification", 1
     )[0]
-    broker = workflow.split("      - name: Start the loopback-only NIM credential broker", 1)[
+    gateway = workflow.split("      - name: Start the contextual-orchestrator gateway", 1)[
         1
-    ].split("      - name: Run the NVIDIA NIM development agent", 1)[0]
+    ].split("      - name: Run the orchestrated development agent", 1)[0]
 
     assert "THREADWEAVE_FORBIDDEN_SECRET" not in capture
     assert "secrets.NVIDIA_NIM_API_KEY" not in capture
     assert "secret_fingerprint_guard.py scan" in capture
-    assert "forbidden_fingerprint_file=" in broker
-    assert "secret_fingerprint_guard.py fingerprint" in broker
-    assert "secrets.NVIDIA_NIM_API_KEY" in broker
+    assert "fingerprint_dir=" in gateway
+    assert "secret_fingerprint_guard.py fingerprint" in gateway
+    assert "secrets.NVIDIA_NIM_API_KEY" in gateway
     assert "Require the NVIDIA credential for model-backed development" not in workflow
 
 
