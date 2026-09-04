@@ -29,3 +29,15 @@ def test_ci_covers_secret_guard_in_focused_boundary_suite() -> None:
         f",{SECRET_GUARD_SOURCE}" in focused_report
     )
     assert "--fail-under=100" in focused_report
+
+
+def test_ci_cancels_only_superseded_heads_for_the_same_pull_request() -> None:
+    """PR runs share one group while non-PR runs remain isolated."""
+
+    workflow = _workflow("ci.yml")
+
+    assert (
+        "group: ${{ github.workflow }}-${{ github.repository }}-"
+        "${{ github.event.pull_request.number || github.run_id }}" in workflow
+    )
+    assert "cancel-in-progress: true" in workflow
