@@ -72,6 +72,8 @@ point. Missing credentials, an open PR, a moved base, a changed patch digest,
 failed independent verification, or an unavailable safe proposal stops the
 review/development cycle without mutation.
 
-The autonomous patch guard and NIM credential broker require **100%** statement
-and branch coverage. `COPILOT_GITHUB_TOKEN` is not a development-model credential
-and must not be introduced into this path.
+The autonomous patch guard and provider-secret fingerprint guard require
+**100%** statement and branch coverage. Model selection and provider fallback
+belong to the exact-pinned contextual-orchestrator gateway; this repository does
+not maintain another provider proxy. `COPILOT_GITHUB_TOKEN` is not a
+development-model credential and must not be introduced into this path.

@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Route hourly model work through the exact-pinned contextual-orchestrator
+  `orchestrator/free` pool, remove the duplicate repository-local NIM proxy,
+  and disable OpenCode's request timeout while retaining the three-hour outer
+  job budget and credential-fingerprint leak checks.
 - Keep the root README a customer/operator guide for standalone
   `pip install threadweave` and host composition through
   `from threadweave import thread_messages`, and move the hourly autonomous

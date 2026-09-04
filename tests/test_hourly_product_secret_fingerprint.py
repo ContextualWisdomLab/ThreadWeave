@@ -27,22 +27,22 @@ def _fingerprints(secret: bytes) -> dict[str, object]:
     return guard.build_fingerprint(secret)
 
 
-def test_post_model_capture_step_receives_fingerprints_not_the_raw_nim_secret():
-    """Packaging must preserve leak detection without rematerializing the API key."""
+def test_post_model_capture_receives_fingerprints_not_raw_provider_secrets():
+    """Packaging preserves leak detection without rematerializing provider keys."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
     capture = workflow.split("      - name: Capture the bounded credential-free patch", 1)[1].split(
         "      - name: Upload the bounded proposal for credential-free reverification", 1
     )[0]
-    broker = workflow.split("      - name: Start the loopback-only NIM credential broker", 1)[
+    gateway = workflow.split("      - name: Start the contextual-orchestrator gateway", 1)[
         1
-    ].split("      - name: Run the NVIDIA NIM development agent", 1)[0]
+    ].split("      - name: Run the orchestrated development agent", 1)[0]
 
     assert "THREADWEAVE_FORBIDDEN_SECRET" not in capture
     assert "secrets.NVIDIA_NIM_API_KEY" not in capture
     assert "secret_fingerprint_guard.py scan" in capture
-    assert "forbidden_fingerprint_file=" in broker
-    assert "secret_fingerprint_guard.py fingerprint" in broker
-    assert "secrets.NVIDIA_NIM_API_KEY" in broker
+    assert "fingerprint_dir=" in gateway
+    assert "secret_fingerprint_guard.py fingerprint" in gateway
+    assert "secrets.NVIDIA_NIM_API_KEY" in gateway
     assert "Require the NVIDIA credential for model-backed development" not in workflow
 
 
@@ -231,14 +231,14 @@ def test_command_handlers_and_main_cover_success_and_failure(
     fingerprint = tmp_path / "fingerprint.json"
     artifact = tmp_path / "artifact.txt"
     artifact.write_text("safe", encoding="utf-8")
-    monkeypatch.setenv("NIM_UPSTREAM_API_KEY", "synthetic-secret")
+    monkeypatch.setenv("PROVIDER_API_KEY", "synthetic-secret")
 
     assert guard.main(["fingerprint", "--output-file", str(fingerprint)]) == 0
     assert guard.main(
         ["scan", "--fingerprint-file", str(fingerprint), "--file", str(artifact)]
     ) == 0
 
-    monkeypatch.delenv("NIM_UPSTREAM_API_KEY")
+    monkeypatch.delenv("PROVIDER_API_KEY")
     assert guard.main(["fingerprint", "--output-file", str(tmp_path / "empty.json")]) == 2
     assert "unavailable" in capsys.readouterr().err
 
@@ -251,7 +251,7 @@ def test_command_handlers_and_main_cover_success_and_failure(
 def test_module_main_entrypoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The executable module exits successfully for a valid fingerprint command."""
     output = tmp_path / "entrypoint.json"
-    monkeypatch.setenv("NIM_UPSTREAM_API_KEY", "entrypoint-secret")
+    monkeypatch.setenv("PROVIDER_API_KEY", "entrypoint-secret")
     monkeypatch.setattr(
         sys,
         "argv",

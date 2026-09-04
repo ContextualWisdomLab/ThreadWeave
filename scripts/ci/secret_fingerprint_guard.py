@@ -1,7 +1,7 @@
 """Fingerprint-only leak guard for autonomous product artifacts.
 
-The trusted credential step may derive one-way fingerprints while it holds the
-NVIDIA credential. Post-model packaging receives only those fingerprints and
+The trusted gateway step may derive one-way fingerprints while it holds a
+provider credential. Post-model packaging receives only those fingerprints and
 uses a rolling-hash prefilter plus salted scrypt confirmation to reject the raw
 key and its common encoded forms without rematerializing the credential.
 """
@@ -61,7 +61,7 @@ def scrypt_confirmation(payload: bytes, salt: bytes) -> bytes:
 def build_fingerprint(secret: bytes) -> dict[str, object]:
     """Build fingerprint-only records for raw and common encoded secret forms."""
     if not secret:
-        raise FingerprintError("NVIDIA credential is unavailable")
+        raise FingerprintError("provider credential is unavailable")
     variants = {
         secret,
         base64.b64encode(secret),
@@ -183,7 +183,7 @@ def reject_protected_material(
 
 def _fingerprint_command(args: argparse.Namespace) -> int:
     """Create fingerprint evidence while the selected credential path is authorized."""
-    secret = os.environ.get("NIM_UPSTREAM_API_KEY", "").encode("utf-8")
+    secret = os.environ.get("PROVIDER_API_KEY", "").encode("utf-8")
     write_fingerprint(args.output_file, secret)
     return 0
 
