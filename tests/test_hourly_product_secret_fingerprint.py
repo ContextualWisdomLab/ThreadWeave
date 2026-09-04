@@ -231,14 +231,14 @@ def test_command_handlers_and_main_cover_success_and_failure(
     fingerprint = tmp_path / "fingerprint.json"
     artifact = tmp_path / "artifact.txt"
     artifact.write_text("safe", encoding="utf-8")
-    monkeypatch.setenv("NIM_UPSTREAM_API_KEY", "synthetic-secret")
+    monkeypatch.setenv("PROVIDER_API_KEY", "synthetic-secret")
 
     assert guard.main(["fingerprint", "--output-file", str(fingerprint)]) == 0
     assert guard.main(
         ["scan", "--fingerprint-file", str(fingerprint), "--file", str(artifact)]
     ) == 0
 
-    monkeypatch.delenv("NIM_UPSTREAM_API_KEY")
+    monkeypatch.delenv("PROVIDER_API_KEY")
     assert guard.main(["fingerprint", "--output-file", str(tmp_path / "empty.json")]) == 2
     assert "unavailable" in capsys.readouterr().err
 
@@ -251,7 +251,7 @@ def test_command_handlers_and_main_cover_success_and_failure(
 def test_module_main_entrypoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The executable module exits successfully for a valid fingerprint command."""
     output = tmp_path / "entrypoint.json"
-    monkeypatch.setenv("NIM_UPSTREAM_API_KEY", "entrypoint-secret")
+    monkeypatch.setenv("PROVIDER_API_KEY", "entrypoint-secret")
     monkeypatch.setattr(
         sys,
         "argv",

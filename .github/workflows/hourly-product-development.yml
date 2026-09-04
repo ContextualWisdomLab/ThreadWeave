@@ -240,7 +240,7 @@ jobs:
               continue
             fi
             provider_count=$((provider_count + 1))
-            NIM_UPSTREAM_API_KEY="$secret_value" \
+            PROVIDER_API_KEY="$secret_value" \
               python scripts/ci/secret_fingerprint_guard.py fingerprint \
                 --output-file "${fingerprint_dir}/${secret_name}.json"
           done
