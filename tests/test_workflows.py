@@ -209,10 +209,10 @@ def test_ci_cancels_stale_runs_per_pull_request_or_protected_ref():
 
     assert "concurrency:" in workflow
     assert (
-        "group: ci-${{ github.workflow }}-${{ "
-        "github.event.pull_request.number || github.ref }}"
+        "group: ${{ github.workflow }}-${{ github.repository }}-${{ "
+        "github.event.pull_request.number || github.run_id }}"
     ) in workflow
-    assert "cancel-in-progress: true" in workflow
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
 
 
 def test_publication_uses_external_automation_token_without_write_token_permissions():
@@ -266,15 +266,13 @@ def test_product_workflow_keeps_hash_requirement_inside_the_yaml_block():
     assert "\n    --hash=sha256:%s\\n' \\\n" not in workflow
 
 
-def test_product_workflow_documents_intentional_nested_shell_expansion():
-    """ShellCheck must not flag positional parameters expanded by the inner shell."""
+def test_product_workflow_disables_the_opencode_request_timeout():
+    """The client must not terminate long model work before the outer job budget."""
     workflow = _workflow("hourly-product-development.yml")
-    expected = (
-        "            # shellcheck disable=SC2016\n"
-        '            if timeout --kill-after=30s "${OPENCODE_RUN_TIMEOUT_SECONDS}s"'
-    )
 
-    assert expected in workflow
+    assert '"timeout": false' in workflow
+    assert "OPENCODE_RUN_TIMEOUT_SECONDS" not in workflow
+    assert "timeout --kill-after" not in workflow
 
 
 def test_ci_lints_every_workflow_with_a_pinned_actionlint_release():

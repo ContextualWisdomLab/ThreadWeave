@@ -27,7 +27,6 @@ env:
     nvidia-nim/nvidia/llama-3.3-nemotron-super-49b-v1.5
     nvidia-nim/nvidia/nemotron-3-super-120b-a12b
     nvidia-nim/deepseek-ai/deepseek-v4-pro
-  OPENCODE_RUN_TIMEOUT_SECONDS: "2100"
   NIM_PROXY_HOST: "127.0.0.1"
   NIM_PROXY_PORT: "8765"
 
@@ -301,7 +300,8 @@ jobs:
                 "name": "NVIDIA NIM through local broker",
                 "options": {
                   "baseURL": "http://127.0.0.1:8765/v1",
-                  "apiKey": "{env:NVIDIA_API_KEY}"
+                  "apiKey": "{env:NVIDIA_API_KEY}",
+                  "timeout": false
                 },
                 "models": {
                   "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
@@ -327,9 +327,7 @@ jobs:
 
             sudo chown -R 65532:65532 "$agent_workspace" "$agent_home"
             echo "::group::opencode $model"
-            # shellcheck disable=SC2016
-            if timeout --kill-after=30s "${OPENCODE_RUN_TIMEOUT_SECONDS}s" \
-              sudo -u '#65532' -g '#65532' env -i \
+            if sudo -u '#65532' -g '#65532' env -i \
                 PATH="${agent_venv}/bin:/usr/local/bin:/usr/bin:/bin" \
                 HOME="$agent_home" \
                 TMPDIR="$agent_home/tmp" \

@@ -208,31 +208,18 @@ def test_model_secret_is_materialized_only_after_deterministic_gate_selects_mode
     assert "exit 1" in broker
 
 
-def test_model_fallback_budget_fits_outer_job_timeout():
-    """Every sequential model fallback plus orchestration reserve must be schedulable."""
+def test_model_request_has_no_client_side_timeout():
+    """Long model work is bounded only by the three-hour outer job budget."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
     develop = _job_block(workflow, "develop-product-gap", "reverify-product-gap")
     job_timeout_minutes = int(
         develop.split("    timeout-minutes: ", 1)[1].splitlines()[0].strip()
     )
-    model_timeout_seconds = int(
-        workflow.split('  OPENCODE_RUN_TIMEOUT_SECONDS: "', 1)[1].split('"', 1)[0]
-    )
-    candidates = [
-        line.strip()
-        for line in workflow.split("  OPENCODE_MODEL_CANDIDATES: >-\n", 1)[1]
-        .split("  OPENCODE_RUN_TIMEOUT_SECONDS:", 1)[0]
-        .splitlines()
-        if line.strip()
-    ]
-    orchestration_reserve_seconds = 30 * 60
-    required_seconds = (
-        len(candidates) * model_timeout_seconds + orchestration_reserve_seconds
-    )
+    agent = develop.split(
+        "      - name: Run the NVIDIA NIM development agent", 1
+    )[1].split("      - name: Stop the credential broker", 1)[0]
 
-    assert len(candidates) > 1
-    assert job_timeout_minutes * 60 >= required_seconds, (
-        f"job timeout {job_timeout_minutes * 60}s cannot cover {len(candidates)} "
-        f"sequential model attempts at {model_timeout_seconds}s plus "
-        f"{orchestration_reserve_seconds}s orchestration reserve"
-    )
+    assert job_timeout_minutes >= 180
+    assert '"timeout": false' in agent
+    assert "OPENCODE_RUN_TIMEOUT_SECONDS" not in workflow
+    assert "timeout --kill-after" not in agent

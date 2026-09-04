@@ -31,7 +31,7 @@ on:
 
 concurrency:
   group: actions-registry-audit-${{ github.repository }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read

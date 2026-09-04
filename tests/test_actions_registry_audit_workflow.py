@@ -44,6 +44,14 @@ def test_does_not_trigger_on_pull_request() -> None:
     assert "push:" in trigger_block
 
 
+def test_non_pr_audit_runs_are_serialized_without_cancellation() -> None:
+    """A new heartbeat must not terminate an in-flight audit."""
+
+    workflow = _workflow()
+    assert "group: actions-registry-audit-${{ github.repository }}" in workflow
+    assert "cancel-in-progress: false" in workflow
+
+
 def test_runs_on_push_to_main_only_for_the_detector_source() -> None:
     """Only changes to the detector itself should re-trigger a live audit on push."""
 

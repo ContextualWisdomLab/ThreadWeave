@@ -40,4 +40,4 @@ def test_ci_cancels_only_superseded_heads_for_the_same_pull_request() -> None:
         "group: ${{ github.workflow }}-${{ github.repository }}-"
         "${{ github.event.pull_request.number || github.run_id }}" in workflow
     )
-    assert "cancel-in-progress: true" in workflow
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
