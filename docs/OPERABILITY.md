@@ -1,7 +1,7 @@
 # ThreadWeave Operability, Integration, and Recovery Guide
 
 **Status:** Accepted for library operation and repository delivery.  
-**Last reviewed:** 2026-08-16
+**Last reviewed:** 2026-09-01
 
 ThreadWeave is a library, not an always-on service. Operability therefore means predictable resource behavior, integration observability, deterministic failures, reproducible packaging, and a safe release/rollback path. Host services own service SLOs, persistence, tenancy, distributed coordination, backups, and incident response for mailbox data.
 
@@ -37,7 +37,9 @@ Relevant workload dimensions include message count, normalized reference count, 
 | resource pressure | unusually large/deep mailbox | apply host request budget; benchmark/partition at host boundary; do not weaken correctness |
 | package regression | failing RFC/parity/coverage test | stop rollout and revert package version |
 | automation/security failure | cancelled/failed required CI/security gate | no merge/release; RCA exact failing boundary |
-| dependency/release failure | lock/artifact/trusted-publish failure | preserve previous release; fix release pipeline before republishing |
+| publisher unavailable | new public version required but approved publisher credential is unavailable | fail before new build/tag/GitHub Release side effects; restore publisher authority without exposing credentials |
+| registry authentication failure | isolated PyPI publisher rejects the approved credential after immutable GitHub evidence exists | preserve tag/release, repair publisher authority, and retry the same exact release head idempotently; never rewrite evidence |
+| public-artifact mismatch | PyPI filename/SHA-256 set differs from reviewed bundle | stop completion, preserve immutable evidence, investigate registry/pipeline identity; never republish the same version/files |
 
 ## Observability guidance for hosts
 
@@ -55,6 +57,8 @@ Do not log raw message bodies or complete headers merely to observe ThreadWeave.
 - incremental expected/new version and affected-count if that feature is adopted.
 
 Subjects and Message-IDs can be PII and should be logged only under an explicit purpose and retention policy.
+
+Publisher credentials are never observability data. Logs and release receipts may record the selected publisher mode name, exact source/tag/release identity, artifact hashes, workflow/run identity, and public verification result, but never `PIPY_TOKEN` or any credential-derived representation.
 
 ## Performance acceptance
 
@@ -84,25 +88,31 @@ Because current ThreadWeave owns no persistence, runtime rollback is normally a 
 
 If incremental snapshots become public, rollback must consider snapshot schema compatibility. A host should retain the last known-good snapshot/version or reconstruct state from canonical messages when safe; snapshot migration must never overwrite the only durable copy without rollback evidence.
 
+PyPI versions/files and immutable release identities are not rollback scratch space. A defective published release should be superseded by a new reviewed patch version (and yanked where appropriate), never replaced in place.
+
 ## Release procedure
 
 A release requires:
 
-- exact protected-head version and CHANGELOG alignment;
+- exact protected-head version and CHANGELOG alignment with no material final-release notes stranded under `Unreleased`;
 - required CI/SAST/security/review gates passing;
 - reproducible/reviewed CI dependency lock;
 - fresh wheel/sdist build;
 - package metadata and `py.typed` checks;
 - outside-source wheel installation/smoke;
-- artifact hashes/provenance as configured;
-- trusted publishing environment readiness;
-- post-publication package lookup/install smoke when publishing succeeds.
+- artifact hashes plus configured SLSA/SPDX provenance;
+- approved publisher availability before new irreversible release work;
+- isolated PyPI publication using the selected publisher mode;
+- public PyPI filename/SHA-256 equality with the reviewed release bundle;
+- post-publication clean install and representative `THREAD`/`UID THREAD` smoke.
 
-Do not mark a release complete merely because a PR merged. Account/environment/trusted-publishing state is an operational gate.
+The current publisher mode is the organization GitHub Secret `PIPY_TOKEN`, passed only to the pinned PyPA publishing action. `PIPY_USERNAME` is not required and is not materialized. PyPI Trusted Publishing remains an optional future publisher mode, not a release prerequisite.
+
+Do not mark a release complete merely because a PR merged, a tag exists, or a GitHub Release exists. The public package and its verified artifact identity are the buyer-visible completion boundary.
 
 ## Incident RCA
 
-For every deterministic failure, identify the first failing layer: adapter/header parsing, canonical graph, subject/collation, date ordering, IMAP projection, host metadata, packaging, workflow, reviewer/security gate, or release environment. Fix the owning layer and add a regression there. Avoid compensating in downstream presentation for an upstream graph defect.
+For every deterministic failure, identify the first failing layer: adapter/header parsing, canonical graph, subject/collation, date ordering, IMAP projection, host metadata, packaging, workflow, reviewer/security gate, release readiness, registry publisher, or public-artifact verification. Fix the owning layer and add a regression there. Avoid compensating in downstream presentation for an upstream graph defect.
 
 ## Disaster recovery boundary
 
@@ -110,8 +120,4 @@ ThreadWeave has no database backup to restore. The host's source mailbox data is
 
 ## Repository automation
 
-Hourly PR maintenance, exact-head verification, writer-boundary, NIM broker, and
-token-setup procedure live in
-[`docs/operations/hourly-autonomous-maintenance.md`](operations/hourly-autonomous-maintenance.md).
-That playbook is not a runtime operating dependency for `pip install threadweave`
-or host composition through `from threadweave import thread_messages`.
+Hourly PR maintenance, exact-head verification, writer-boundary, NIM broker, and token-setup procedure live in [`docs/operations/hourly-autonomous-maintenance.md`](operations/hourly-autonomous-maintenance.md). That playbook is not a runtime operating dependency for `pip install threadweave` or host composition through `from threadweave import thread_messages`.

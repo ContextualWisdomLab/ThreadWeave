@@ -1,97 +1,88 @@
 # ThreadWeave Product/Technical Gap Baseline
 
-**Status:** Living document — reconcile on every PR merge, release, or cross-repository dependency change
-**Last reviewed:** 2026-08-23
+**Status:** Living document — reconcile on every PR merge, release, or cross-repository dependency change  
+**Last reviewed:** 2026-09-01
 
-Read this first if you are deciding what to work on next in ThreadWeave. It lists every open PR/issue with its exact blocking dependency, and the one confirmed cross-repository gap (LineageWeave/naruon) so work lands where it actually unblocks something instead of duplicating effort already tracked elsewhere.
+Read this first when deciding what to work on next in ThreadWeave. It records the current release gate, active product work, merged operational evidence, and the one confirmed cross-repository dependency chain so work lands in the correct bounded context instead of duplicating another repository's responsibility.
 
 ## How to use this document
 
-1. Before opening a new PR, check whether the gap you found is already listed below with an owner and blocking dependency.
-2. Before merging a PR, update the row it closes so the next contributor does not re-investigate solved gaps.
-3. If a gap spans more than one ContextualWisdomLab repository, record both sides here and in the counterpart repository's own gap baseline, and link the exact issue/PR numbers — do not restate the other repository's authority boundary from memory.
+1. Refetch protected `main`, open PRs/issues, and exact current-head checks before acting on a row.
+2. Before opening a new PR, verify that the gap is not already owned here or by another CWL bounded context.
+3. Before merging a PR, update the row it changes so the next contributor does not re-investigate solved work.
+4. For cross-repository gaps, record exact dependency edges and owners; do not copy implementation across repositories merely to avoid waiting on a dependency.
 
-## Open PR inventory (2026-08-23)
+## Current release lane
 
-| PR | Title | State | Blocking dependency | Next action |
-|---|---|---|---|---|
-| [#20](https://github.com/ContextualWisdomLab/ThreadWeave/pull/20) | `feat: add incremental mailbox threading with stable identity handoff` | Draft, `CONFLICTING` | Issue #17 (external PyPI Trusted Publisher) must close first; the PR body forbids merging before that | Do not rebase/merge yet. Once #17 closes: refresh onto released main, resolve conflicts, rerun full Python 3.10–3.14 + coverage + mailbox-scale parity evidence, get independent review. |
-| [#32](https://github.com/ContextualWisdomLab/ThreadWeave/pull/32) | `fix(operations): audit orphaned Actions workflow identities` | Open (marked ready for review), all required checks green, no unresolved review threads | Production module (`scripts/ci/actions_registry_audit.py`) is fully implemented and has been through several review rounds (CodeRabbit/Devin/github-code-quality) with every finding fixed or explicitly addressed: identity/path validation, complete verified pagination, protected-main/PR-head tree reads, the seven-way finite classification model, atomic schema-v1 evidence, a strict `GitHubJsonClient`, and `.github/workflows/actions-registry-audit.yml` at exactly `actions: read`/`contents: read`/`pull-requests: read`. 100% statement/branch/docstring coverage. Will be recorded as **ADR-0010** once PR #32 merges; the ADR file is not yet on this branch. | Historically blocked by two org-level conditions, both now cleared on protected `.github` main: `.github#624` (provider outage) and the strix provider-routing defect fixed via `.github` PR #1322 (superseding #1213). No repository-side action remains; merge gates now evaluate normally. |
-| [#34](https://github.com/ContextualWisdomLab/ThreadWeave/pull/34) | `docs: add product/technical gap baseline and LineageWeave consumer boundary ADR` | Open, all required checks green, no unresolved review threads (this document's own PR) | Same dual blocker as #32 (`.github#624` + strix routing fixed by `.github` PR #1322 superseding #1213) — both cleared; this PR is merging through normal gates. |
-
-### Correction to the "`#624` blocks everything" reading (2026-08-23)
-
-`.github#624` is real but is no longer the whole story, and treating it as the
-single blocker sends the next contributor to the wrong repository. Two further,
-independently-reproduced root causes now sit between these PRs and a merge:
-
-1. **`strix` provider-routing defect (org-wide, in `.github` `main`).**
-   `STRIX_FALLBACK_MODELS` ends in the hyphenated `openai-direct/gpt-5.6-luna`
-   alias — a spelling protected main's own trusted
-   `scripts/ci/strix_required_workflow_smoke.sh` pins verbatim, so the value
-   cannot be changed. `scripts/ci/strix_quick_gate.sh` recognized only the
-   underscored `openai_direct/` form, so once NVIDIA NIM rate-limited the
-   primary and first fallback model, the third fallback reached LiteLLM as a
-   literal unrecognized provider string and the scan died with
-   `litellm.BadRequestError: LLM Provider NOT provided`. Reproduced three times
-   deterministically; the same signature is failing LineageWeave's own required
-   `strix` check. Fix in flight as `.github#1213`.
-2. **`pull_request_target` self-reference trap.** `strix.yml` resolves its
-   trusted source via `job.workflow_sha`, which on `pull_request_target`
-   resolves to the **base branch** commit. Every `.github` PR's own `strix`
-   check therefore fetches `strix_quick_gate.sh` from protected `main`,
-   regardless of the PR branch's contents. A PR that fixes that file cannot
-   verify its own fix; only a merge to `main` can. This is why the standalone
-   fix attempt (`.github#1256`) was correctly closed as superseded rather than
-   iterated on.
-
-**What this means for ThreadWeave (2026-08-25 update):** no repository-side action was ever required for PR #32 or PR #34. Both org-level blockers have now cleared — provider access is restored past `.github#624`, and the strix provider-routing defect is fixed on protected `.github` main by PR #1322 (which supersedes #1213). Both PRs proceed through their normal merge gates.
-
-## Open issue inventory (2026-08-23)
-
-| Issue | Title | Blocking dependency | Next action |
+| Item | Current state | Blocking dependency | Next action |
 |---|---|---|---|
-| [#17](https://github.com/ContextualWisdomLab/ThreadWeave/issues/17) | Release operations: complete PyPI Trusted Publishing for 0.2.0 | Repository-owned prerequisite (PR #30) is merged. Remaining blockers are both external and cannot be closed by a source change alone: (a) create a GitHub `pypi` deployment environment with protected-branch-only deployment and an independent required reviewer; (b) configure a PyPI Trusted Publisher on the `threadweave` PyPI project for `ContextualWisdomLab/ThreadWeave`, workflow `release.yml`, environment `pypi`. As of 2026-08-23, `GET /repos/ContextualWisdomLab/ThreadWeave/environments` returns `total_count: 0` and PyPI's public `threadweave` project JSON exposes only `0.1.0`. | A repository admin creates the `pypi` environment and an account owner configures the PyPI Trusted Publisher; do not manually upload a distribution or add a long-lived PyPI token as a substitute (explicit non-bypass rule in the issue). |
-| [#31](https://github.com/ContextualWisdomLab/ThreadWeave/issues/31) | `[Fleet incident] Disable orphaned PR 20 repair and hourly-diagnostics workflow identities` | PR #32's real implementation (see above) is the repository-owned detector this issue needs before an authorized operator can safely disable orphan workflow identities | Unblocked with PR #32: both org-level blockers (`.github#624`; strix routing, fixed by `.github` PR #1322 superseding #1213) are cleared, so the detector can be operated against live workflow identities. |
-| [#22](https://github.com/ContextualWisdomLab/ThreadWeave/issues/22) | `[Incident] Hourly Product Development blocks its own GitHub API egress` | Criterion 5 only: needs the PR queue genuinely drained and release policy (issue #17) to permit product development before the bounded OpenCode/NVIDIA path can produce its proof run | Re-check after #17 and the PR queue above both close. The queue (#32, #34) isn't stuck on scheduling — it's the same `.github#624` review-dispatch outage. |
+| [PR #35](https://github.com/ContextualWisdomLab/ThreadWeave/pull/35) | Active release-authority repair for `0.2.0`; changes the OIDC-only publisher to the approved organization `PIPY_TOKEN` path, makes protected-main release changelog/version-driven, and adds public PyPI digest + clean-install verification | Exact PR-head CI/SAST/Security/review/merge gates only. External PyPI Trusted Publisher setup is no longer required for the approved API-token mode. | Resolve valid current-head findings, require terminal-success exact-head checks, merge through protected `main`, then observe the automatic release workflow. Close #17 only after PyPI wheel/sdist digest equality and clean-install `THREAD`/`UID THREAD` smoke succeed. |
+| [Issue #17](https://github.com/ContextualWisdomLab/ThreadWeave/issues/17) | Release acceptance record for public `0.2.0`; policy corrected 2026-09-01 to accept organization GitHub Secret `PIPY_TOKEN` | PR #35 must integrate and the resulting exact protected-main release workflow must publish and verify the public artifact | Do not manually upload or rewrite release evidence. Use the reviewed publisher job and close only after public-artifact proof. |
 
-## Cross-repository gap: LineageWeave evidence consumption (naruon#1437)
+The organization also has `PIPY_USERNAME`, but ThreadWeave deliberately does not materialize it: the pinned PyPA action's API-token mode uses the conventional `__token__` username. Secret values are never evidence and must not appear in logs, outputs, artifacts, provenance, caches, or release receipts.
 
-**Finding:** ThreadWeave has no production-integration PR or issue that mentions LineageWeave — the two products do not connect directly, and ADR-0009 (Proposed) records that they should not connect directly if accepted. The actual dependency chain runs through naruon, ThreadWeave's host:
+## Active product work
+
+| PR / issue | State | Blocking dependency | Next action |
+|---|---|---|---|
+| [PR #20](https://github.com/ContextualWisdomLab/ThreadWeave/pull/20) | Draft incremental mailbox threading with stable identity handoff; **IMPLEMENTED-ON-ACTIVE-PR**, not protected-main behavior | Issue #17 must close through verified `0.2.0` publication first; the branch must then be refreshed onto released protected main and revalidated | After #17 closes, reconcile conflicts without force-push shortcuts, rerun Python 3.10–3.14, exact coverage/docstrings, randomized batch parity and mailbox-scale evidence, obtain current-head independent review, then merge normally. |
+| [Issue #22](https://github.com/ContextualWisdomLab/ThreadWeave/issues/22) | Hourly product-development incident has only its final bounded model-path proof remaining | Genuine release/PR queue state must permit the proof; do not manufacture an empty queue | Re-evaluate after #17 and the truthful PR queue permit model-backed development. |
+| [Issue #31](https://github.com/ContextualWisdomLab/ThreadWeave/issues/31) | Orphaned GitHub Actions workflow-identity cleanup | The repository-owned detector from merged PR #32 is available; mutation of GitHub control-plane identities remains an authorized operator action | Use the merged detector evidence to disable only confirmed orphan identities; preserve supported CI/hourly/release/security workflows. |
+
+## Recently integrated operational foundations
+
+The following are no longer open implementation PRs, but they remain important release and operability evidence:
+
+- **PR #32** merged the read-only Actions registry lifecycle detector and its exact classification/pagination/drift checks. It is the repository-owned evidence source for issue #31; it does not itself gain workflow-disable authority.
+- **PR #34** merged this product/technical gap baseline and ADR-0009's LineageWeave consumer-boundary documentation.
+- **PR #30** integrated the original fail-before-side-effects release preflight. PR #35 supersedes its OIDC-only publisher assumption while preserving the core invariant that an unavailable publisher must be detected before new release side effects.
+- `.github` provider/reviewer incidents that had historically blocked #32/#34 are not current ThreadWeave release blockers and must not be reintroduced into the current release diagnosis without fresh live evidence.
+
+## Release-readiness truth table
+
+| Condition | Release behavior |
+|---|---|
+| protected `main`; reviewed version absent from PyPI; `PIPY_TOKEN` available; current release gates pass; no material `Unreleased` notes; no conflicting tag/release evidence | build → attest → immutable tag → GitHub Release → PyPI publish → public digest/install verification |
+| reviewed version already exists on PyPI | no new publication; preserve immutable public version and treat the automatic trigger as a no-op |
+| new version required but approved publisher unavailable | fail before build/tag/GitHub Release side effects |
+| changelog has material `Unreleased` notes for the requested final version | fail closed until notes are moved into the dated release section |
+| tag/release exists but points to or contains different evidence | fail closed; never rewrite or clobber |
+| PyPI upload succeeds but verification fails | preserve immutable public artifacts, investigate, and retry verification; never republish the same filename/version |
+
+## Cross-repository gap: LineageWeave evidence consumption (`naruon#1437`)
+
+**ThreadWeave has no production-integration PR or issue that mentions LineageWeave** as a direct runtime dependency. ADR-0009 (Proposed) records that this separation is intentional. The actual dependency graph runs through naruon, which owns host-level projection and integration:
 
 ```text
-ContextualWisdomLab/naruon#1437 (Consume LineageWeave for email lineage and
-  project intelligence, without duplicating authority)
-  → depends on naruon#1350 (canonical email identity, dedupe, thread graph)
-    → depends on a stable, replay-safe thread identity that survives
-      incremental mailbox changes
-      → this is exactly ThreadWeave PR #20 / ADR-0004's
-        IncrementalThreadIndex + RFC 8474 EMAILID/THREADID contract
-  → also depends on ContextualWisdomLab/LineageWeave#338 (publish the
-    provider-side evidence-bounded lineage contract)
+ContextualWisdomLab/naruon#1437
+  → depends on naruon#1350
+    → depends on ThreadWeave PR #20 stable/replay-safe incremental identity
+  → also depends on ContextualWisdomLab/LineageWeave#338
 ```
 
-Relation-level statement (authoritative, mirrors ADR-0009): `naruon#1437`
-depends on `naruon#1350`, which depends on ThreadWeave PR #20;
-`naruon#1437` also depends on `LineageWeave#338` as a separate branch —
-not as a transitive step through `naruon#1350`.
+Relation-level statement: `naruon#1437` depends on `naruon#1350`, which depends on ThreadWeave PR #20; `naruon#1437` also depends on `LineageWeave#338` as a separate branch, not as a transitive step through `naruon#1350`.
 
-**What this means for ThreadWeave:** nothing changes in ThreadWeave's own scope or runtime surface. ADR-0009 (Proposed) records that boundary explicitly so a future contributor does not add a LineageWeave adapter, HTTP call, or runtime dependency here if the ADR is accepted. The one concrete piece of leverage ThreadWeave contributes to this chain is finishing PR #20 through its existing, already-documented acceptance path (ADR-0004) — that PR is blocked by both its current `CONFLICTING` merge state and issue #17's release gate, not by anything LineageWeave- or naruon-specific.
+ThreadWeave therefore must not add a LineageWeave HTTP adapter, database coupling, or runtime dependency merely to shorten the chain. The reusable responsibility here is the standards-grounded thread identity/state contract; naruon owns the anti-corruption/projection boundary to LineageWeave.
 
-**What this means for naruon and LineageWeave:** naruon#1437 and LineageWeave#338 are tracked and owned in their own repositories; this document does not restate their acceptance criteria. See naruon#1437 for the full consumer design (admission policy, bounded evidence projection, async durable execution, result projection, consumer-facing surface) and LineageWeave#338 for the provider-side contract.
+## Host-visible product gaps
 
-## Host-visible product gaps (independent of the LineageWeave chain)
-
-| Gap | Why a host would notice | Current maturity |
+| Gap | Why a host notices | Current maturity |
 |---|---|---|
-| Incremental mailbox threading (large-mailbox performance) | A host with a large, actively-changing mailbox must currently rebuild the full thread forest on every arrival/expunge/correction; PR #20 removes that cost but is not yet mergeable | proposed/active-PR (ADR-0004), blocked on issue #17 |
-| Published 0.2.0 release | `pip install threadweave` still installs 0.1.0; Python 3.14 support, the documentation graph, and the release-readiness preflight (PR #30) are already on protected main but not yet publicly released | blocked on issue #17 external account-side configuration |
-| Orphaned Actions workflow identities | Does not affect library consumers directly, but leaves 27 live workflow identities against 4 supported sources in the organization's automation surface, which is a governance/audit gap for a repository claiming SOC 2/CSAP-aligned practice | PR #32 GREEN implementation complete (to be recorded as ADR-0010 after merge); pending CI/review/merge |
+| Public `0.2.0` package | `pip install threadweave` still resolves the older public version until the new protected-main release completes | release candidate on PR #35; public verification pending |
+| Incremental mailbox threading | Large changing mailboxes otherwise rebuild the full forest after bounded changes | proposed/active-PR via PR #20; gated behind verified `0.2.0` release |
+| Stable RFC 8474 identity handoff | Hosts need replay-safe identity across incremental changes and migrations | active-PR via PR #20; not protected-main/released behavior |
+| Orphaned Actions registry records | Governance/control-plane inventory can expose historical active workflow identities after source deletion | detector integrated through PR #32; issue #31 owns authorized cleanup |
+
+## DDD and ownership fitness
+
+ThreadWeave remains a transport-neutral, zero-runtime-dependency threading library. Its domain owns message-reference threading, subject/date ordering policies, protocol projection, and the proposed incremental thread-state aggregate. It does not own mailbox persistence, tenant/auth state, UI, LineageWeave integration, registry-account management, or generic organization release governance.
+
+Generic fleet changelog/tag/GitHub Release governance belongs to `ContextualWisdomLab/.github` under `.github#1552`. ThreadWeave owns its Python package build and PyPI publisher adapter until that product-specific boundary is replaced by an accepted canonical publishing abstraction. Do not duplicate a new generic fleet release engine here.
 
 ## Not applicable to this repository
 
-ThreadWeave is a headless, zero-runtime-dependency Python library (see `ARCHITECTURE.md` and `docs/PRD.md`) with no frontend, UI component, or user-facing surface of its own. Storybook, Figma, design tokens, and UI/UX accessibility/interaction/animation audits do not apply here; those belong to host products (e.g., naruon) that render ThreadWeave's output. This document intentionally omits a UI-inventory section rather than fabricating one.
+ThreadWeave is a headless Python library with no frontend, UI component, or user-facing visual surface of its own. **Storybook**, Figma, design tokens, and UI/UX accessibility/interaction/animation audits are **Not applicable to this repository**; those belong to host products that render ThreadWeave output.
 
 ## Change rule
 
-Update this document in the same PR that opens, closes, or re-blocks any row above, and whenever a counterpart repository (naruon, LineageWeave) changes the cross-repository chain's status. Do not let this document drift from `docs/TRACEABILITY.md` and `docs/adr/README.md`; when they disagree, the ADR/traceability maturity label is authoritative and this document must be corrected to match.
+Update this document in the same PR that opens, closes, releases, re-blocks, or transfers ownership of any row above. Keep it consistent with `docs/TRACEABILITY.md`, `docs/adr/README.md`, and the live issue/PR state. A queued or stale result is not release evidence; a conversation-only policy is not durable until it is captured in the owning code/ADR/workflow.

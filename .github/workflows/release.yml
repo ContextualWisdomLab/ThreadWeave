@@ -4,32 +4,48 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Canonical three-part release version without a leading v
-        required: true
+        description: Optional recovery version; must match reviewed project metadata
+        required: false
         type: string
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.version }}
+  group: release-${{ github.repository }}
   cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  RELEASE_VERSION: ${{ inputs.version }}
   RELEASE_BUNDLE_NAME: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   release-readiness:
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.conclusion == 'success'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
+      pull-requests: read
+    env:
+      SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+    outputs:
+      version: ${{ steps.contract.outputs.version }}
+      tag: ${{ steps.contract.outputs.tag }}
+      publisher_available: ${{ steps.contract.outputs.publisher_available }}
+      public_version_exists: ${{ steps.contract.outputs.public_version_exists }}
+      run_release: ${{ steps.contract.outputs.run_release }}
+      source_sha: ${{ steps.contract.outputs.source_sha }}
     steps:
       - name: Harden the release-readiness gate
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -38,58 +54,72 @@ jobs:
           disable-telemetry: true
           allowed-endpoints: >-
             api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
             pypi.org:443
             results-receiver.actions.githubusercontent.com:443
             *.actions.githubusercontent.com:443
             *.blob.core.windows.net:443
-      - name: Require a pre-created protected PyPI environment
+      - name: Check out the exact integrated release candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Resolve exact release authority, version, and publisher readiness
+        id: contract
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version || '' }}
+          PIPY_TOKEN_AVAILABLE: ${{ secrets.PIPY_TOKEN != '' }}
         run: |
           set -euo pipefail
+
+          emit_noop() {
+            {
+              printf 'source_sha=%s\n' "$SOURCE_SHA"
+              printf 'run_release=false\n'
+              printf 'publisher_available=%s\n' "$PIPY_TOKEN_AVAILABLE"
+              printf 'public_version_exists=false\n'
+            } >>"$GITHUB_OUTPUT"
+          }
+
           if [ "$GITHUB_REF_PROTECTED" != "true" ]; then
-            echo "::error::Release must run from a branch protected by rules or branch protection."
-            exit 1
-          fi
-          if [[ ! "$RELEASE_VERSION" =~ ^((0|[1-9][0-9]*)\.){2}(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::Release version must be canonical MAJOR.MINOR.PATCH."
+            echo "::error::Release authority must execute from protected main."
             exit 1
           fi
 
-          environment_json="$RUNNER_TEMP/pypi-environment.json"
-          if ! gh api "repos/$GITHUB_REPOSITORY/environments/pypi" >"$environment_json"; then
-            echo "::error::Create and protect the GitHub pypi environment before release."
+          current_main_sha="$(
+            gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha'
+          )"
+          if [ "$SOURCE_SHA" != "$current_main_sha" ]; then
+            if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
+              echo "Stale completed CI head $SOURCE_SHA; current main is $current_main_sha. No release work is required."
+              emit_noop
+              exit 0
+            fi
+            echo "::error::Manual release recovery must target the current protected main head."
             exit 1
           fi
 
-          reviewer_count="$(
-            jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length' \
-              "$environment_json"
-          )"
-          prevent_self_review="$(
-            jq -r '[.protection_rules[]? | select(.type == "required_reviewers") | .prevent_self_review] | first // false' \
-              "$environment_json"
-          )"
-          protected_branches="$(
-            jq -r '.deployment_branch_policy.protected_branches // false' \
-              "$environment_json"
+          release_version="$(python3 - <<'PY'
+          import re
+          import tomllib
+
+          with open("pyproject.toml", "rb") as stream:
+              project = tomllib.load(stream)["project"]
+          version = project["version"]
+          if re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version) is None:
+              raise SystemExit("project version must be canonical MAJOR.MINOR.PATCH")
+          print(version)
+          PY
           )"
 
-          if [ "$reviewer_count" -lt 1 ]; then
-            echo "::error::The pypi environment requires at least one independent reviewer."
+          if [ -n "$REQUESTED_VERSION" ] && [ "$REQUESTED_VERSION" != "$release_version" ]; then
+            echo "::error::Requested version does not match the reviewed project version."
             exit 1
           fi
-          if [ "$prevent_self_review" != "true" ]; then
-            echo "::error::The pypi environment must prevent self-review."
-            exit 1
-          fi
-          if [ "$protected_branches" != "true" ]; then
-            echo "::error::The pypi environment must restrict deployments to protected branches."
-            exit 1
-          fi
-      - name: Refuse a version that already exists on PyPI
-        run: |
-          set -euo pipefail
+
           response="$RUNNER_TEMP/pypi-version.json"
           status="$(
             curl \
@@ -98,14 +128,14 @@ jobs:
               --location \
               --output "$response" \
               --write-out '%{http_code}' \
-              "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json"
+              "https://pypi.org/pypi/threadweave/$release_version/json"
           )"
           case "$status" in
             404)
+              public_version_exists=false
               ;;
             200)
-              echo "::error::threadweave $RELEASE_VERSION already exists on PyPI."
-              exit 1
+              public_version_exists=true
               ;;
             *)
               echo "::error::Unexpected PyPI readiness response: HTTP $status."
@@ -113,15 +143,136 @@ jobs:
               ;;
           esac
 
+          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ] && [ "$public_version_exists" = "true" ]; then
+            echo "threadweave $release_version is already public; automatic main-CI completion is a successful no-op."
+            {
+              printf 'version=%s\n' "$release_version"
+              printf 'tag=v%s\n' "$release_version"
+              printf 'source_sha=%s\n' "$SOURCE_SHA"
+              printf 'publisher_available=%s\n' "$PIPY_TOKEN_AVAILABLE"
+              printf 'public_version_exists=true\n'
+              printf 'run_release=false\n'
+            } >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          run_release=true
+
+          require_workflow_success() {
+            workflow_name="$1"
+            event_name="$2"
+            head_sha="$3"
+            pull_request_number="${4:-}"
+            for attempt in $(seq 1 40); do
+              runs="$(
+                gh api \
+                  "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$head_sha&event=$event_name&per_page=100"
+              )"
+              if [ -n "$pull_request_number" ]; then
+                state="$(
+                  jq -r \
+                    --arg workflow "$workflow_name" \
+                    --argjson pr "$pull_request_number" '
+                      [.workflow_runs[]
+                       | select(
+                           .name == $workflow and
+                           any(.pull_requests[]?; .number == $pr)
+                         )]
+                      | sort_by(.created_at)
+                      | last
+                      | if . == null then "missing:"
+                        else (.status + ":" + (.conclusion // "")) end
+                    ' <<<"$runs"
+                )"
+              else
+                state="$(
+                  jq -r --arg workflow "$workflow_name" '
+                    [.workflow_runs[] | select(.name == $workflow)]
+                    | sort_by(.created_at)
+                    | last
+                    | if . == null then "missing:"
+                      else (.status + ":" + (.conclusion // "")) end
+                  ' <<<"$runs"
+                )"
+              fi
+              case "$state" in
+                completed:success)
+                  return 0
+                  ;;
+                completed:*)
+                  echo "::error::$workflow_name on $head_sha completed without success: $state"
+                  return 1
+                  ;;
+                *)
+                  if [ "$attempt" -eq 40 ]; then
+                    echo "::error::$workflow_name on $head_sha did not reach terminal success. Last state: $state"
+                    return 1
+                  fi
+                  sleep 15
+                  ;;
+              esac
+            done
+          }
+
+          require_workflow_success "ci" "push" "$SOURCE_SHA"
+          require_workflow_success "SAST Semgrep" "push" "$SOURCE_SHA"
+
+          associated_prs="$(
+            gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls"
+          )"
+          source_pr_number="$(
+            jq -r --arg source "$SOURCE_SHA" '
+              [.[] | select(.merge_commit_sha == $source and .base.ref == "main")]
+              | first
+              | .number // empty
+            ' <<<"$associated_prs"
+          )"
+          if [ -z "$source_pr_number" ]; then
+            echo "::error::No associated merged pull request proves review authority for $SOURCE_SHA."
+            exit 1
+          fi
+          source_pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$source_pr_number")"
+          source_pr_head="$(jq -r '.head.sha' <<<"$source_pr")"
+          merged="$(jq -r '.merged' <<<"$source_pr")"
+          merge_commit_sha="$(jq -r '.merge_commit_sha' <<<"$source_pr")"
+          base_ref="$(jq -r '.base.ref' <<<"$source_pr")"
+          if [ "$merged" != "true" ] || [ "$merge_commit_sha" != "$SOURCE_SHA" ] || [ "$base_ref" != "main" ]; then
+            echo "::error::The associated merged pull request does not authorize this exact protected-main SHA."
+            exit 1
+          fi
+
+          require_workflow_success "ci" "pull_request" "$source_pr_head" "$source_pr_number"
+          require_workflow_success "SAST Semgrep" "pull_request" "$source_pr_head" "$source_pr_number"
+          require_workflow_success "Security Scan" "pull_request" "$source_pr_head" "$source_pr_number"
+
+          if [ "$public_version_exists" = "false" ] && [ "$PIPY_TOKEN_AVAILABLE" != "true" ]; then
+            echo "::error::PIPY_TOKEN is unavailable for a new PyPI release."
+            exit 1
+          fi
+
+          {
+            printf 'version=%s\n' "$release_version"
+            printf 'tag=v%s\n' "$release_version"
+            printf 'source_sha=%s\n' "$SOURCE_SHA"
+            printf 'publisher_available=%s\n' "$PIPY_TOKEN_AVAILABLE"
+            printf 'public_version_exists=%s\n' "$public_version_exists"
+            printf 'run_release=%s\n' "$run_release"
+          } >>"$GITHUB_OUTPUT"
+
   build-release:
     needs: release-readiness
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      needs.release-readiness.result == 'success' &&
+      needs.release-readiness.outputs.run_release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      RELEASE_VERSION: ${{ needs.release-readiness.outputs.version }}
     outputs:
       version: ${{ steps.contract.outputs.version }}
       tag: ${{ steps.contract.outputs.tag }}
@@ -145,7 +296,7 @@ jobs:
       - name: Check out the reviewed release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-readiness.outputs.source_sha }}
           fetch-depth: 1
           persist-credentials: false
       - name: Set up Python
@@ -269,11 +420,136 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  attest-release:
-    needs: build-release
+  publication-plan:
+    needs: [release-readiness, build-release]
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      needs.build-release.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      RELEASE_VERSION: ${{ needs.build-release.outputs.version }}
+      PUBLISHER_AVAILABLE: ${{ needs.release-readiness.outputs.publisher_available }}
+    outputs:
+      publication_required: ${{ steps.plan.outputs.publication_required }}
+      missing_filenames: ${{ steps.plan.outputs.missing_filenames }}
+    steps:
+      - name: Harden the publication planner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >-
+            pypi.org:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+      - name: Download the reviewed release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-bundle
+      - name: Compare public artifacts and prepare only missing distributions
+        id: plan
+        run: |
+          set -euo pipefail
+          response="$RUNNER_TEMP/pypi-version.json"
+          status="$(
+            curl \
+              --silent \
+              --show-error \
+              --location \
+              --output "$response" \
+              --write-out '%{http_code}' \
+              "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json"
+          )"
+          PYPI_STATUS="$status" python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+
+          runner = Path(os.environ["RUNNER_TEMP"])
+          bundle = runner / "release-bundle"
+          manifest = bundle / "release" / "SHA256SUMS.txt"
+          expected: dict[str, str] = {}
+          for line in manifest.read_text(encoding="utf-8").splitlines():
+              digest, filename = line.split(maxsplit=1)
+              name = filename.lstrip("* ")
+              if name in expected:
+                  raise SystemExit(f"duplicate expected artifact: {name}")
+              expected[name] = digest
+
+          status = os.environ["PYPI_STATUS"]
+          if status == "404":
+              observed: dict[str, str] = {}
+          elif status == "200":
+              payload = json.loads((runner / "pypi-version.json").read_text(encoding="utf-8"))
+              observed = {}
+              for item in payload.get("urls", []):
+                  name = item["filename"]
+                  if name in observed:
+                      raise SystemExit(f"duplicate public artifact: {name}")
+                  observed[name] = item["digests"]["sha256"]
+          else:
+              raise SystemExit(f"unexpected PyPI planning response: HTTP {status}")
+
+          unexpected = sorted(set(observed) - set(expected))
+          if unexpected:
+              raise SystemExit(f"unexpected public artifact: {unexpected!r}")
+          for name, digest in observed.items():
+              if digest != expected[name]:
+                  raise SystemExit(
+                      f"public artifact digest mismatch for {name}: "
+                      f"expected {expected[name]}, observed {digest}"
+                  )
+
+          missing = sorted(set(expected) - set(observed))
+          if missing and os.environ["PUBLISHER_AVAILABLE"] != "true":
+              raise SystemExit(
+                  "approved PyPI publisher is unavailable while distributions are missing"
+              )
+
+          publish_dir = runner / "publication-missing"
+          if publish_dir.exists():
+              shutil.rmtree(publish_dir)
+          if missing:
+              publish_dir.mkdir()
+              for name in missing:
+                  source = bundle / "dist" / name
+                  if not source.is_file():
+                      raise SystemExit(f"reviewed artifact is missing from bundle: {name}")
+                  digest = hashlib.sha256(source.read_bytes()).hexdigest()
+                  if digest != expected[name]:
+                      raise SystemExit(f"reviewed artifact digest mismatch before plan: {name}")
+                  shutil.copyfile(source, publish_dir / name)
+
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as stream:
+              stream.write(f"publication_required={'true' if missing else 'false'}\n")
+              stream.write(
+                  "missing_filenames="
+                  + json.dumps(missing, separators=(",", ":"))
+                  + "\n"
+              )
+          PY
+      - name: Upload only missing PyPI distributions
+        if: steps.plan.outputs.publication_required == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: publication-missing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/publication-missing/
+          if-no-files-found: error
+          retention-days: 7
+
+  attest-release:
+    needs: [build-release, publication-plan]
+    if: >-
+      github.repository == 'ContextualWisdomLab/ThreadWeave' &&
+      needs.publication-plan.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -318,16 +594,19 @@ jobs:
           sbom-path: ${{ runner.temp }}/release-bundle/release/threadweave-${{ needs.build-release.outputs.version }}.spdx.json
 
   tag-release:
-    needs: [build-release, attest-release]
+    needs: [release-readiness, build-release, publication-plan, attest-release]
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      needs.publication-plan.result == 'success' &&
+      needs.attest-release.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
     env:
+      RELEASE_VERSION: ${{ needs.build-release.outputs.version }}
       RELEASE_TAG: ${{ needs.build-release.outputs.tag }}
+      SOURCE_SHA: ${{ needs.release-readiness.outputs.source_sha }}
     steps:
       - name: Harden the tag job
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -343,7 +622,7 @@ jobs:
       - name: Check out the reviewed release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release-readiness.outputs.source_sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Download the reviewed release bundle
@@ -351,7 +630,7 @@ jobs:
         with:
           name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/release-bundle
-      - name: Verify the tag target and create it idempotently
+      - name: Create or verify the exact authorized release tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -365,15 +644,15 @@ jobs:
               awk '{print $1}'
           )"
           if [ -n "$tag_object" ]; then
-            if [ -z "$peeled_commit" ] || [ "$peeled_commit" != "$GITHUB_SHA" ]; then
-              echo "::error::Existing release tag is not an annotated tag for this commit."
+            if [ -z "$peeled_commit" ] || [ "$peeled_commit" != "$SOURCE_SHA" ]; then
+              echo "::error::Existing release tag is not an annotated tag for this exact release source."
               exit 1
             fi
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$RELEASE_TAG" "$GITHUB_SHA" -m "ThreadWeave $RELEASE_VERSION"
+          git tag -a "$RELEASE_TAG" "$SOURCE_SHA" -m "ThreadWeave $RELEASE_VERSION"
           basic="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           GIT_CONFIG_COUNT=1 \
           GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
@@ -381,15 +660,17 @@ jobs:
             git push origin "$RELEASE_TAG"
 
   github-release:
-    needs: [build-release, attest-release, tag-release]
+    needs: [build-release, publication-plan, attest-release, tag-release]
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      needs.publication-plan.result == 'success' &&
+      needs.tag-release.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: write
     env:
+      RELEASE_VERSION: ${{ needs.build-release.outputs.version }}
       RELEASE_TAG: ${{ needs.build-release.outputs.tag }}
     steps:
       - name: Harden the GitHub Release job
@@ -468,18 +749,15 @@ jobs:
             --latest
 
   publish-pypi:
-    needs: [build-release, attest-release, tag-release, github-release]
+    needs: [build-release, publication-plan, attest-release, tag-release, github-release]
     if: >-
       github.repository == 'ContextualWisdomLab/ThreadWeave' &&
-      github.ref == 'refs/heads/main'
+      needs.github-release.result == 'success' &&
+      needs.publication-plan.outputs.publication_required == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment:
-      name: pypi
-      url: https://pypi.org/p/threadweave
     permissions:
       contents: read
-      id-token: write
     steps:
       - name: Harden the PyPI publishing job
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -489,7 +767,6 @@ jobs:
           allowed-endpoints: >-
             pypi.org:443
             results-receiver.actions.githubusercontent.com:443
-            token.actions.githubusercontent.com:443
             upload.pypi.org:443
             *.actions.githubusercontent.com:443
             *.blob.core.windows.net:443
@@ -498,13 +775,198 @@ jobs:
         with:
           name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/release-bundle
-      - name: Verify distributions immediately before publication
+      - name: Download only missing distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: publication-missing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/publication-missing
+      - name: Verify missing distributions immediately before publication
         run: |
-          cd "$RUNNER_TEMP/release-bundle/dist"
-          sha256sum --check ../release/SHA256SUMS.txt
-      - name: Publish through PyPI Trusted Publishing
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          runner = Path(os.environ["RUNNER_TEMP"])
+          bundle = runner / "release-bundle"
+          publish_dir = runner / "publication-missing"
+          expected: dict[str, str] = {}
+          for line in (bundle / "release" / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
+              digest, filename = line.split(maxsplit=1)
+              expected[filename.lstrip("* ")] = digest
+          files = sorted(path for path in publish_dir.iterdir() if path.is_file())
+          if not files:
+              raise SystemExit("publication plan required upload but supplied no distributions")
+          for path in files:
+              if path.name not in expected:
+                  raise SystemExit(f"unreviewed publication artifact: {path.name}")
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if digest != expected[path.name]:
+                  raise SystemExit(f"publication artifact digest mismatch: {path.name}")
+          PY
+      - name: Publish only missing distributions through the approved PyPI API token
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
-          packages-dir: ${{ runner.temp }}/release-bundle/dist/
-          attestations: true
+          packages-dir: ${{ runner.temp }}/publication-missing/
+          password: ${{ secrets.PIPY_TOKEN }}
+          attestations: false
           print-hash: true
+
+  verify-publication:
+    needs: [build-release, publication-plan, github-release, publish-pypi]
+    if: >-
+      always() &&
+      github.repository == 'ContextualWisdomLab/ThreadWeave' &&
+      needs.build-release.result == 'success' &&
+      needs.publication-plan.result == 'success' &&
+      needs.github-release.result == 'success' &&
+      (needs.publish-pypi.result == 'success' ||
+       needs.publish-pypi.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      RELEASE_VERSION: ${{ needs.build-release.outputs.version }}
+    steps:
+      - name: Harden public-artifact verification
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          allowed-endpoints: >-
+            files.pythonhosted.org:443
+            pypi.org:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+      - name: Download the reviewed release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-bundle
+      - name: Verify PyPI filenames and SHA-256 digests with propagation retry
+        run: |
+          set -euo pipefail
+          pypi_json="$RUNNER_TEMP/threadweave-pypi.json"
+          verified=false
+          for attempt in $(seq 1 12); do
+            status="$(
+              curl \
+                --silent \
+                --show-error \
+                --location \
+                --output "$pypi_json" \
+                --write-out '%{http_code}' \
+                "https://pypi.org/pypi/threadweave/$RELEASE_VERSION/json" || true
+            )"
+            if [ "$status" != "200" ]; then
+              if [ "$attempt" -eq 12 ]; then
+                echo "::error::PyPI artifact set did not converge: last HTTP status $status"
+                exit 1
+              fi
+              sleep 10
+              continue
+            fi
+
+            set +e
+            python3 - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "release-bundle"
+          expected: dict[str, str] = {}
+          for line in (root / "release" / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
+              digest, filename = line.split(maxsplit=1)
+              expected[filename.lstrip("* ")] = digest
+          payload = json.loads(
+              (Path(os.environ["RUNNER_TEMP"]) / "threadweave-pypi.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          observed = {
+              item["filename"]: item["digests"]["sha256"]
+              for item in payload["urls"]
+          }
+          unexpected = sorted(set(observed) - set(expected))
+          if unexpected:
+              print(f"unexpected public artifact: {unexpected!r}", file=sys.stderr)
+              raise SystemExit(20)
+          for name, digest in observed.items():
+              if digest != expected[name]:
+                  print(
+                      f"public artifact digest mismatch for {name}: "
+                      f"expected {expected[name]}, observed {digest}",
+                      file=sys.stderr,
+                  )
+                  raise SystemExit(20)
+          if set(observed) != set(expected):
+              raise SystemExit(10)
+          PY
+            validation_status="$?"
+            set -e
+
+            case "$validation_status" in
+              0)
+                verified=true
+                break
+                ;;
+              10)
+                if [ "$attempt" -eq 12 ]; then
+                  echo "::error::PyPI artifact set did not converge to the reviewed complete set."
+                  exit 1
+                fi
+                sleep 10
+                ;;
+              20)
+                exit 1
+                ;;
+              *)
+                echo "::error::Unexpected public-artifact verification status: $validation_status"
+                exit 1
+                ;;
+            esac
+          done
+          if [ "$verified" != "true" ]; then
+            echo "::error::PyPI artifact set did not converge."
+            exit 1
+          fi
+      - name: Clean-install the public package and smoke THREAD serialization
+        run: |
+          set -euo pipefail
+          venv="$RUNNER_TEMP/public-install"
+          python3 -m venv "$venv"
+          "$venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --no-deps \
+            "threadweave==${RELEASE_VERSION}"
+          temp_dir="$(mktemp -d)"
+          (
+            cd "$temp_dir"
+            PYTHONPATH="" "$venv/bin/python" - <<'PY'
+          import os
+
+          import threadweave
+          from threadweave import Message, serialize_thread_response, thread_messages
+
+          assert threadweave.__version__ == os.environ["RELEASE_VERSION"]
+          roots = thread_messages(
+              [
+                  Message(message_id="root", sequence_number=1, uid=101),
+                  Message(
+                      message_id="child",
+                      references=["root"],
+                      sequence_number=2,
+                      uid=102,
+                  ),
+              ]
+          )
+          assert serialize_thread_response(roots) == "* THREAD (1 2)\r\n"
+          assert serialize_thread_response(roots, identifier="uid") == (
+              "* THREAD (101 102)\r\n"
+          )
+          PY
+          )
