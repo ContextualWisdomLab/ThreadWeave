@@ -79,19 +79,27 @@ def test_validate_worktree_diff_handles_empty_mode_and_binary_summaries(
         guard, "_changed_paths", lambda *_args, **_kwargs: (["README.md"], [])
     )
 
-    def mode_run(args, **_kwargs):
-        text = " mode change 100644 => 100755 README.md\n" if "--summary" in args else b""
-        return subprocess.CompletedProcess(args, 0, stdout=text, stderr="")
+    def mode_command_run(command_arguments, **_kwargs):
+        text = (
+            " mode change 100644 => 100755 README.md\n"
+            if "--summary" in command_arguments
+            else b""
+        )
+        return subprocess.CompletedProcess(command_arguments, 0, stdout=text, stderr="")
 
-    monkeypatch.setattr(guard, "_run", mode_run)
+    monkeypatch.setattr(guard, "_run_command", mode_command_run)
     with pytest.raises(guard.BoundaryError, match="change file modes"):
         guard.validate_worktree_diff(workspace=workspace, git=git, env=env)
 
-    def binary_run(args, **_kwargs):
-        stdout: str | bytes = "" if "--summary" in args else b"-\t1\tREADME.md\0"
-        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+    def binary_command_run(command_arguments, **_kwargs):
+        stdout: str | bytes = (
+            "" if "--summary" in command_arguments else b"-\t1\tREADME.md\0"
+        )
+        return subprocess.CompletedProcess(
+            command_arguments, 0, stdout=stdout, stderr=""
+        )
 
-    monkeypatch.setattr(guard, "_run", binary_run)
+    monkeypatch.setattr(guard, "_run_command", binary_command_run)
     with pytest.raises(guard.BoundaryError, match="binary diff"):
         guard.validate_worktree_diff(workspace=workspace, git=git, env=env)
 
@@ -156,14 +164,16 @@ def test_capture_rejects_invalid_base_moved_baseline_and_git_error(
         _capture(tmp_path, baseline, workspace, base_file)
 
     base_file.write_text(source_sha + "\n")
-    original_run = guard._run
+    original_command_runner = guard._run_command
 
-    def bad_quiet(args, **kwargs):
-        if "--quiet" in args:
-            return subprocess.CompletedProcess(args, 2, stdout=b"", stderr=b"bad")
-        return original_run(args, **kwargs)
+    def failing_quiet_command(command_arguments, **kwargs):
+        if "--quiet" in command_arguments:
+            return subprocess.CompletedProcess(
+                command_arguments, 2, stdout=b"", stderr=b"bad"
+            )
+        return original_command_runner(command_arguments, **kwargs)
 
-    monkeypatch.setattr(guard, "_run", bad_quiet)
+    monkeypatch.setattr(guard, "_run_command", failing_quiet_command)
     with pytest.raises(guard.BoundaryError, match="could not determine"):
         _capture(tmp_path, baseline, workspace, base_file)
 
