@@ -1,7 +1,7 @@
 # ThreadWeave Product/Technical Gap Baseline
 
 **Status:** Living document — reconcile on every PR merge, release, or cross-repository dependency change
-**Last reviewed:** 2026-08-23
+**Last reviewed:** 2026-09-07
 
 Read this first if you are deciding what to work on next in ThreadWeave. It lists every open PR/issue with its exact blocking dependency, and the one confirmed cross-repository gap (LineageWeave/naruon) so work lands where it actually unblocks something instead of duplicating effort already tracked elsewhere.
 
@@ -87,6 +87,7 @@ not as a transitive step through `naruon#1350`.
 | Incremental mailbox threading (large-mailbox performance) | A host with a large, actively-changing mailbox must currently rebuild the full thread forest on every arrival/expunge/correction; PR #20 removes that cost but is not yet mergeable | proposed/active-PR (ADR-0004), blocked on issue #17 |
 | Published 0.2.0 release | `pip install threadweave` still installs 0.1.0; Python 3.14 support, the documentation graph, and the release-readiness preflight (PR #30) are already on protected main but not yet publicly released | blocked on issue #17 external account-side configuration |
 | Orphaned Actions workflow identities | Does not affect library consumers directly, but leaves 27 live workflow identities against 4 supported sources in the organization's automation surface, which is a governance/audit gap for a repository claiming SOC 2/CSAP-aligned practice | PR #32 GREEN implementation complete (to be recorded as ADR-0010 after merge); pending CI/review/merge |
+| CI protected-ref runner cancellation | `main` push runs currently key concurrency by `github.run_id`, so `cancel-in-progress: true` cannot cancel an older run for the same protected ref. This wastes runner capacity and can leave stale protected-main verification running beside the newest push. The existing workflow regression already fails against protected `main`. | repair in `fix/ci-protected-ref-concurrency`; restore the stable protected-ref key, then require exact-head Python 3.10–3.14/full-suite/workflow-lint/security evidence before merge |
 
 ## Not applicable to this repository
 
