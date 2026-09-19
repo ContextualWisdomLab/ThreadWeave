@@ -31,13 +31,15 @@ def test_ci_covers_secret_guard_in_focused_boundary_suite() -> None:
     assert "--fail-under=100" in focused_report
 
 
-def test_ci_cancels_only_superseded_heads_for_the_same_pull_request() -> None:
-    """PR runs share one group while non-PR runs remain isolated."""
+def test_ci_cancels_stale_runs_per_pull_request_or_protected_ref() -> None:
+    """PR and protected-ref runs must use stable concurrency identities."""
 
     workflow = _workflow("ci.yml")
+    concurrency = workflow.split("concurrency:\n", 1)[1].split("\nenv:\n", 1)[0]
 
     assert (
-        "group: ${{ github.workflow }}-${{ github.repository }}-"
-        "${{ github.event.pull_request.number || github.run_id }}" in workflow
+        "group: ci-${{ github.workflow }}-"
+        "${{ github.event.pull_request.number || github.ref }}" in concurrency
     )
-    assert "cancel-in-progress: true" in workflow
+    assert "github.run_id" not in concurrency
+    assert "cancel-in-progress: true" in concurrency
