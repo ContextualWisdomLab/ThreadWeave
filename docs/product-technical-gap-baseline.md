@@ -1,5 +1,20 @@
 # ThreadWeave Product/Technical Gap Baseline
 
+## 2026-09-20 exact-head CI concurrency RCA
+
+- PR #37 head `1a07886d377d40d4400fcdccb2f8e4a91945fbc5` inherited protected
+  `main@0fda6e60c2c80ec7b2aa2d58dac6b944dec6a6d0`. CI run `33897642988`
+  failed identically on Python 3.10–3.14: each job reported 431 passed and one stale workflow
+  assertion failure at `tests/test_workflows.py:211`.
+- Protected-main PR #42 intentionally changed CI concurrency to share one group per repository and
+  pull-request number while isolating non-PR runs by `github.run_id`, and added the current
+  contract in `tests/test_ci_autonomous_coverage_contract.py`. The older assertion in
+  `tests/test_workflows.py` still required the superseded `github.ref` expression.
+- The causal repair deletes only that obsolete duplicate. It does not change workflow behavior,
+  cancellation policy, coverage thresholds, or release gates. Fresh hosted checks on the repair
+  PR and then a normal main adoption remain authoritative before dependent PR #37 is revalidated.
+
+
 **Status:** Living document — reconcile on every PR merge, release, or cross-repository dependency change
 **Last reviewed:** 2026-08-23
 
