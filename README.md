@@ -227,7 +227,7 @@ a pinned uv compiler generates the universal `requirements/ci.lock` with
 transitive SHA-256 hashes for Python 3.10-3.14. CI regenerates the lock and
 requires a byte-for-byte match before installing it with pip hash-checking mode.
 Builds run without isolation because the reviewed Hatchling backend is already
-installed from that lock. See [`docs/supply-chain.md`](https://github.com/ContextualWisdomLab/ThreadWeave/blob/main/docs/supply-chain.md) for
+installed from that lock. See [`docs/supply-chain.md`](https://github.com/ContextualWisdomLab/ThreadWeave/blob/0fda6e60c2c80ec7b2aa2d58dac6b944dec6a6d0/docs/supply-chain.md) for
 the refresh procedure, reviewer checklist, and rollback contract.
 
 ## Architecture and standards boundary
@@ -237,12 +237,12 @@ The package remains useful both as a standalone dependency and as a module in
 are transport-neutral. IMAP `THREAD` response serialization is a separate
 presentation layer rather than protocol state embedded in the core model.
 
-See the [documentation home](https://github.com/ContextualWisdomLab/ThreadWeave/blob/main/docs/index.md) and [`docs/research`](https://github.com/ContextualWisdomLab/ThreadWeave/tree/main/docs/research) for JWZ, RFC 5322, RFC 2047,
+See the [documentation home](https://github.com/ContextualWisdomLab/ThreadWeave/blob/0fda6e60c2c80ec7b2aa2d58dac6b944dec6a6d0/docs/index.md) and [`docs/research`](https://github.com/ContextualWisdomLab/ThreadWeave/tree/0fda6e60c2c80ec7b2aa2d58dac6b944dec6a6d0/docs/research) for JWZ, RFC 5322, RFC 2047,
 RFC 5051, RFC 5256, RFC 6532, RFC 9051, Unicode-version boundaries, and PEP 561.
 
 Hourly autonomous maintenance is documented in
-[`docs/operations/hourly-autonomous-maintenance.md`](https://github.com/ContextualWisdomLab/ThreadWeave/blob/main/docs/operations/hourly-autonomous-maintenance.md).
+[`docs/operations/hourly-autonomous-maintenance.md`](https://github.com/ContextualWisdomLab/ThreadWeave/blob/0fda6e60c2c80ec7b2aa2d58dac6b944dec6a6d0/docs/operations/hourly-autonomous-maintenance.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](https://github.com/ContextualWisdomLab/ThreadWeave/blob/main/LICENSE).
+Apache-2.0. See [LICENSE](https://github.com/ContextualWisdomLab/ThreadWeave/blob/0fda6e60c2c80ec7b2aa2d58dac6b944dec6a6d0/LICENSE).
