@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Expand ADR-0001 through ADR-0008 with APA 7th References citing opened JWZ,
+  RFC 5322/2047/5051/5256/6532/8474/9051, PEP 561, and official GitHub/PyPI
+  catalog records, and keep the root README a customer/host guide with only a
+  maintainer pointer to
+  [`docs/operations/hourly-autonomous-maintenance.md`](docs/operations/hourly-autonomous-maintenance.md).
 - Keep the root README a customer/operator guide for standalone
   `pip install threadweave` and host composition through
   `from threadweave import thread_messages`, and move the hourly autonomous

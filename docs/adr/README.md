@@ -29,3 +29,11 @@ The status inside each ADR is authoritative. `Accepted` means the decision gover
 A change alters the canonical threading oracle, protocol/session boundary, persistence ownership, public identity semantics, durable snapshot schema, Unicode/collation contract, ordering policy defaults, runtime dependency/capability surface, autonomous/release authority boundary, work-conserving loop semantics, review/merge/release evidence identity, or trusted-publication identity/protection policy.
 
 Implementation PRs should cite the applicable ADRs and update PRD/TRD/UML/ERD/security/test/operability/traceability/documentation-audit records when those contracts move.
+
+## Citation practice
+
+ADR-0001 through ADR-0008 include APA 7th References. Each bibliographic entry
+uses a DOI or official catalog URL from an opened RFC Editor, Crossref, PEP,
+JWZ, GitHub Docs, or PyPI Docs record. [`docs/research/README.md`](../research/README.md)
+remains the product standards map. Do not treat Internet-Drafts as final
+standards or invent papers that were not opened.

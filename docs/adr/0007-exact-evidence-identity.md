@@ -7,6 +7,21 @@
 
 GitHub pull requests expose several related but non-identical commit identities: contributor head, PR base snapshot, current live protected-base tip, and synthetic merge commits. Workflow systems may test one while reviewers or branch protection reason about another. Treating them as interchangeable can promote stale or synthetic evidence into an incorrect merge/release decision.
 
+The Pulls REST catalog documents those identities as distinct fields of one
+pull-request object. `head.sha` is the contributor branch commit. `base.sha` is
+the base snapshot recorded on the pull request at that observation. GitHub also
+creates a test merge commit to decide whether the pull request can be merged
+automatically; that commit is not added to the head or base branch, and its SHA
+appears as `merge_commit_sha` only after mergeability is computed. While the
+background job is running, `mergeable` is `null` (GitHub, n.d.-a).
+
+Check-run evidence is similarly identity-bound. The Check Runs REST catalog
+describes runs evaluated for a specific commit (`head_sha`). Merge and update
+operations accept an `expected_head_sha` so a caller cannot apply a conclusion
+computed for a predecessor head (GitHub, n.d.-a, n.d.-b). A live protected-base
+tip must still be refetched independently; the pull-request `base.sha` is a
+snapshot, not a promise that the default branch has not moved.
+
 ## Decision
 
 ThreadWeave records and reasons about these identities separately:
@@ -56,3 +71,11 @@ PR bodies, audit records, and incident reports should not use a single ambiguous
 ## Verification
 
 Repository and central automation should maintain regression contracts for exact-head/live-base handling, and reviewers must treat ambiguous evidence as insufficient rather than guessing the intended identity.
+
+## References
+
+GitHub. (n.d.-a). *REST API endpoints for pull requests*. GitHub Docs.
+Retrieved September 25, 2026, from https://docs.github.com/en/rest/pulls/pulls
+
+GitHub. (n.d.-b). *REST API endpoints for check runs*. GitHub Docs. Retrieved
+September 25, 2026, from https://docs.github.com/en/rest/checks/runs

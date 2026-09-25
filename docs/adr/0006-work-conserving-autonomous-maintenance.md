@@ -9,6 +9,23 @@ ThreadWeave uses repository and organization automation to review, repair, verif
 
 GitHub review and Actions latency are normal asynchronous item states. They are not repository-wide reasons to stop. At the same time, autonomous work must not bypass branch protection, independent review, security checks, or external authority boundaries.
 
+The official GitHub catalogs already treat those states as item-local rather
+than repository-global:
+
+- The Pulls REST API computes mergeability in the background. `mergeable` may
+  be `true`, `false`, or `null` while that job runs; a `null` result is a
+  reason to refetch that pull request, not to halt every other repository
+  action (GitHub, n.d.-a).
+- The same response exposes `merge_commit_sha` as the synthetic test-merge
+  commit GitHub creates to evaluate mergeability. That commit is not added to
+  the head or base branch (GitHub, n.d.-a).
+- Check-run evidence is bound to the commit the check actually evaluated. A
+  queued, skipped, cancelled, or predecessor-head result is not current-head
+  success (GitHub, n.d.-b).
+
+Those identity rules are why a queued review or check blocks only the affected
+item. They do not relax ADR-0005's authority split.
+
 ## Decision
 
 ThreadWeave maintenance is **work-conserving**:
@@ -53,3 +70,11 @@ Scheduled model-backed product work uses an immutably pinned OpenCode Agent and 
 ## Verification
 
 Automation and documentation tests should assert the hourly cadence, exact repository ownership, NVIDIA/OpenCode credential boundary, current-head evidence rules, and no-early-stop/double-sweep semantics where these are encoded in repository workflows or agent guidance.
+
+## References
+
+GitHub. (n.d.-a). *REST API endpoints for pull requests*. GitHub Docs.
+Retrieved September 25, 2026, from https://docs.github.com/en/rest/pulls/pulls
+
+GitHub. (n.d.-b). *REST API endpoints for check runs*. GitHub Docs. Retrieved
+September 25, 2026, from https://docs.github.com/en/rest/checks/runs

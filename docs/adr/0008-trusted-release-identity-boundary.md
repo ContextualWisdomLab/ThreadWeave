@@ -11,6 +11,27 @@ Current GitHub deployment documentation requires the environment to be created b
 
 The PyPI Trusted Publisher account relationship itself is intentionally external to repository source and cannot be truthfully manufactured by a workflow. Repository code can, however, fail before irreversible release work unless the GitHub half of the trust relationship is already present with the reviewed protection policy and the requested version is not already published.
 
+The official catalogs confirm that those GitHub-side properties are observable
+before publication:
+
+- A job that names an environment is subject to that environment's protection
+  rules before it can proceed. Required reviewers, prevent-self-review, and
+  protected-branch deployment policy are first-class environment settings
+  (GitHub, n.d.-a, n.d.-b).
+- Anyone with read access can list or get environments through the REST API,
+  including `prevent_self_review`, reviewer lists, and
+  `deployment_branch_policy.protected_branches` (GitHub, n.d.-c). GitHub also
+  documents that referencing a missing environment from a workflow creates an
+  unprotected environment; readiness therefore requires the `pypi` environment
+  to be pre-created and configured, not implied by the first publish job
+  (GitHub, n.d.-b).
+- PyPI Trusted Publishing binds an owner, repository, workflow, and optional
+  environment, and exists to replace long-lived API tokens. The security model
+  treats the Trusted Publisher as equivalent to an API token and recommends a
+  dedicated environment with required reviewers (Python Packaging Authority,
+  n.d.-a, n.d.-b, n.d.-c). GitHub OIDC supplies the short-lived job identity
+  that PyPI exchanges for a publish credential (GitHub, n.d.-d).
+
 ## Decision
 
 The release workflow SHALL begin with a credential-minimal `release-readiness` job that executes before build, attestation, tag creation, GitHub Release creation, or PyPI publication.
@@ -71,16 +92,32 @@ Repository tests must prove the release workflow contains the readiness job befo
 
 Public release completion still requires issue #17 acceptance: exact protected-head CI/security/coverage/package evidence, successful environment approval and Trusted Publishing, SLSA/SPDX evidence, tag/GitHub Release identity, public PyPI wheel and sdist, and clean post-publication install/THREAD smoke.
 
-## References — APA 7th
+## References
 
-GitHub. (n.d.). *Deployments and environments*. GitHub Docs. Retrieved August 10, 2026, from https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
+GitHub. (n.d.-a). *Deployments and environments*. GitHub Docs. Retrieved
+September 25, 2026, from
+https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
 
-GitHub. (n.d.). *Managing environments for deployment*. GitHub Docs. Retrieved August 10, 2026, from https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments
+GitHub. (n.d.-b). *Managing environments for deployment*. GitHub Docs.
+Retrieved September 25, 2026, from
+https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments
 
-GitHub. (n.d.). *REST API endpoints for deployment environments*. GitHub Docs. Retrieved August 10, 2026, from https://docs.github.com/en/rest/deployments/environments
+GitHub. (n.d.-c). *REST API endpoints for deployment environments*. GitHub
+Docs. Retrieved September 25, 2026, from
+https://docs.github.com/en/rest/deployments/environments
 
-Python Packaging Authority. (n.d.). *Adding a Trusted Publisher to an existing PyPI project*. PyPI Docs. Retrieved August 10, 2026, from https://docs.pypi.org/trusted-publishers/adding-a-publisher/
+GitHub. (n.d.-d). *OpenID Connect*. GitHub Docs. Retrieved September 25, 2026,
+from
+https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect
 
-Python Packaging Authority. (n.d.). *Security model and considerations*. PyPI Docs. Retrieved August 10, 2026, from https://docs.pypi.org/trusted-publishers/security-model/
+Python Packaging Authority. (n.d.-a). *Adding a Trusted Publisher to an
+existing PyPI project*. PyPI Docs. Retrieved September 25, 2026, from
+https://docs.pypi.org/trusted-publishers/adding-a-publisher/
 
-Python Packaging Authority. (n.d.). *Publishing with a Trusted Publisher*. PyPI Docs. Retrieved August 10, 2026, from https://docs.pypi.org/trusted-publishers/using-a-publisher/
+Python Packaging Authority. (n.d.-b). *Security model and considerations*. PyPI
+Docs. Retrieved September 25, 2026, from
+https://docs.pypi.org/trusted-publishers/security-model/
+
+Python Packaging Authority. (n.d.-c). *Publishing with a Trusted Publisher*.
+PyPI Docs. Retrieved September 25, 2026, from
+https://docs.pypi.org/trusted-publishers/using-a-publisher/
