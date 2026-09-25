@@ -240,7 +240,7 @@ presentation layer rather than protocol state embedded in the core model.
 See the [documentation home](docs/index.md) and [`docs/research`](docs/research/README.md) for JWZ, RFC 5322, RFC 2047,
 RFC 5051, RFC 5256, RFC 6532, RFC 9051, Unicode-version boundaries, and PEP 561.
 
-Hourly autonomous maintenance is documented in
+Maintainer operating procedure is recorded in
 [`docs/operations/hourly-autonomous-maintenance.md`](docs/operations/hourly-autonomous-maintenance.md).
 
 ## License
