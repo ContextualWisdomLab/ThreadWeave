@@ -18,3 +18,9 @@ Reference threading remains authoritative. Subject fallback grouping is opt-in. 
 - Hosts that need public IMAP sequence-number serialization still supply and validate real mailbox identifiers at the presentation boundary; the ordering fallback does not create them.
 - Tests must cover explicit sequence numbers, omitted-sequence fallback, duplicate effective values, both option states, and prove reference relationships are not weakened by subject grouping.
 - Future default changes require a versioned compatibility decision and migration guidance.
+
+## References
+
+RFC 5256 is the Standards Track source for the sent-date normalization and ORDEREDSUBJECT/REFERENCES THREAD rules named in the Decision.
+
+Crispin, M., & Murchison, K. (2008). *Internet Message Access Protocol — SORT and THREAD extensions* (RFC 5256). RFC Editor. https://doi.org/10.17487/RFC5256
