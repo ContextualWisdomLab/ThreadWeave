@@ -20,7 +20,7 @@ Hosts remain responsible for authentication, tenancy, mailbox persistence, searc
 
 ## Start with
 
-- [Repository overview and examples](../README.md)
+- [Repository overview and examples](https://github.com/ContextualWisdomLab/ThreadWeave#readme)
 - [Research and standards](research/README.md)
 - [Supply-chain policy](supply-chain.md)
 - [Product/technical gap baseline](product-technical-gap-baseline.md)
