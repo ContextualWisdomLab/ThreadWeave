@@ -1,9 +1,34 @@
 # ThreadWeave Product/Technical Gap Baseline
 
 **Status:** Living document — reconcile on every PR merge, release, or cross-repository dependency change
-**Last reviewed:** 2026-08-23
+**Last reviewed:** 2026-09-30
 
 Read this first if you are deciding what to work on next in ThreadWeave. It lists every open PR/issue with its exact blocking dependency, and the one confirmed cross-repository gap (LineageWeave/naruon) so work lands where it actually unblocks something instead of duplicating effort already tracked elsewhere.
+
+## Current protected-default failure RCA (2026-09-30)
+
+Actions Registry Audit run `36718987140`, job `109898938685`, at protected
+`main@0fda6e60c2c80ec7b2aa2d58dac6b944dec6a6d0` classified 21 historical
+workflow identities as `orphan_disabled`, with zero `orphan_active`, zero
+`unresolved`, and no recommended disable IDs. The CLI nevertheless counted
+disabled terminal evidence as an error and exited 1. GitHub's workflow API
+documents disablement but no deletion operation for the retained registry
+identity, so that policy made the hourly audit permanently red after successful
+cleanup.
+
+The Proposed repair preserves all seven classifications and the complete report,
+returns success only when every orphan is already disabled and evidence is
+resolved, and keeps `orphan_active`, `unresolved`, or race-invalid observations
+fail-closed. It changes no workflow authority and grants no mutation permission.
+
+Exact-main local verification also found a stale duplicate assertion in
+`tests/test_workflows.py`: protected commit `0fda6e60c2c80ec7b2aa2d58dac6b944dec6a6d0`
+correctly changed CI concurrency to repository + pull-request/run identity and
+added its replacement regression in
+`tests/test_ci_autonomous_coverage_contract.py`, but did not remove the older
+test for the retired `ci-${{ github.workflow }}-...github.ref` contract. The
+Proposed repair removes only that duplicate; current concurrency behavior stays
+directly covered.
 
 ## How to use this document
 

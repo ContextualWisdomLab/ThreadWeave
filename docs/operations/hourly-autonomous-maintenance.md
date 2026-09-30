@@ -66,6 +66,9 @@ never `actions: write` — and reports which live registry identities are backed
 by protected-main source, a current open-PR head, disabled, GitHub-owned/dynamic,
 a confirmed orphan, or unresolved. It never disables a workflow itself; disabling
 a confirmed orphan remains a separate, authorized, out-of-band operator action.
+Source-removed identities already in `disabled_manually` remain in the report as
+terminal evidence and do not keep the heartbeat red; active orphans and
+unresolved evidence still fail closed.
 
 All three workflows expose a manual `dry_run` or `workflow_dispatch` entry
 point. Missing credentials, an open PR, a moved base, a changed patch digest,

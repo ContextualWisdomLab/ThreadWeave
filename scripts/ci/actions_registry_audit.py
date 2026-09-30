@@ -925,13 +925,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             to ``sys.argv[1:]``.
 
     Returns:
-        ``0`` if the audit completed and found no orphan/unresolved
-        records; ``1`` if it completed but found at least one
-        ``orphan_active``, ``orphan_disabled``, or ``unresolved`` record
-        (the report is still written so the evidence is available); ``2``
-        if the arguments were invalid or the audit itself failed to
-        complete (no report is written, since there is no evidence to
-        publish).
+        ``0`` if the audit completed and found no active orphan or unresolved
+        record; ``1`` if it completed but found at least one
+        ``orphan_active`` or ``unresolved`` record (the report is still written
+        so the evidence is available); ``2`` if the arguments were invalid or
+        the audit itself failed to complete (no report is written, since there
+        is no evidence to publish). ``orphan_disabled`` remains reported as
+        terminal lifecycle evidence but does not keep the audit red.
     """
     parser = argparse.ArgumentParser(prog="actions_registry_audit")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -959,14 +959,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"::error::failed to write the audit report: {error}", file=sys.stderr)
         return 2
 
-    unresolved_or_orphan = sum(
+    actionable_or_unresolved = sum(
         count
         for classification, count in report["summary"].items()
-        if classification in {"orphan_active", "orphan_disabled", "unresolved"}
+        if classification in {"orphan_active", "unresolved"}
     )
-    if unresolved_or_orphan:
+    if actionable_or_unresolved:
         print(
-            f"::warning::found {unresolved_or_orphan} orphan/unresolved workflow record(s); "
+            f"::warning::found {actionable_or_unresolved} "
+            "active-orphan/unresolved workflow record(s); "
             "see the written report",
             file=sys.stderr,
         )

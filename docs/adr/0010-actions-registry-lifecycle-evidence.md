@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-22
+**Amended:** 2026-09-30 — disabled orphan identities are terminal retained evidence
 **Implementation:** PR #32, `scripts/ci/actions_registry_audit.py`
 
 ## Context
@@ -26,6 +27,14 @@ Detection and mutation are also distinct risk surfaces: an auditor that can both
 - emits one deterministic, schema-versioned (`threadweave.actions-registry-audit/v1`) JSON report naming only `orphan_active` records as `recommended_disable_workflow_ids`;
 - never calls a disable, delete, or write endpoint.
 
+An `orphan_disabled` record is terminal lifecycle evidence, not an actionable
+failure. GitHub's documented workflow API exposes list, get, disable, dispatch,
+enable, and usage operations, but no workflow-identity deletion operation
+(GitHub, 2026b). Once exact source and every live PR caller are absent and the
+registry state is `disabled_manually`, the detector retains the record and
+returns success. It continues to fail for `orphan_active`, `unresolved`, and
+observation races.
+
 `.github/workflows/actions-registry-audit.yml` runs this detector with exactly `actions: read`, `contents: read`, and `pull-requests: read` — no `actions: write`, no `pull-requests: write`, and no long-lived or elevated credential. It runs on protected-main changes to the detector itself, on manual dispatch, and hourly at minute 53 (distinct from Hourly PR Maintenance's minute 11 and Hourly Product Development's minute 41, so the three heartbeats never contend for the same runner minute). It deliberately does **not** run on pull requests: the audit is meant to fail visibly whenever it finds a genuine live orphan, and while any confirmed orphan remains undisabled in the registry that would make it a permanently red check on every unrelated PR. `tests/test_actions_registry_audit.py`, exercised at exact 100% statement/branch coverage in `ci.yml` on every PR that touches the detector, is this repository's PR-time contract verification for the detector's own correctness. The workflow uploads its report as evidence even when the audit finds an orphan or fails, then fails the job visibly rather than swallowing the finding.
 
 Disabling a confirmed `orphan_active` workflow identity remains a separate, authorized, out-of-band operator action: re-read the exact live registry, re-run this audit against the current protected-main SHA, and disable only the identities that are still confirmed orphans at that moment, through the GitHub Actions lifecycle API with an explicit mutation credential this detector never holds.
@@ -33,6 +42,7 @@ Disabling a confirmed `orphan_active` workflow identity remains a separate, auth
 ## Consequences
 
 - Every registry record has an auditable, finite explanation instead of an unresolved discrepancy between the tree and the registry.
+- Historical disabled identities remain visible without making the hourly audit permanently red after the only documented lifecycle mutation has completed.
 - The detector can run unattended on an hourly heartbeat and on every relevant PR without expanding the organization's write-capable automation surface.
 - Disablement still requires a human or a separately authorized control-plane action to re-verify current state immediately before mutating — this ADR does not grant that authority to anything.
 - Coordinate with the central lifecycle tracking issue `ContextualWisdomLab/.github#945` and the AppGuardrail orphan-workflow detector issue `ContextualWisdomLab/appguardrail#929`; this ADR does not supersede either.

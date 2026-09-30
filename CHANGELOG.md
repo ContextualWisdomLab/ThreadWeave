@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Treat source-removed `orphan_disabled` GitHub Actions registry identities as
+  terminal lifecycle evidence instead of a permanent audit failure. The audit
+  still reports every disabled identity and still fails closed for active
+  orphans, unresolved evidence, or registry/source races.
+- Remove the stale duplicate CI-concurrency assertion that still required the
+  pre-#42 group key; the #42 regression remains the single executable contract
+  for repository-scoped pull-request isolation.
 - Keep the root README a customer/operator guide for standalone
   `pip install threadweave` and host composition through
   `from threadweave import thread_messages`, and move the hourly autonomous
