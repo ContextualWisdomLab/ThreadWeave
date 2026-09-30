@@ -995,6 +995,39 @@ class TestMain:
         report = json.loads(output.read_text(encoding="utf-8"))
         assert report["summary"]["orphan_active"] == 1
 
+    def test_main_accepts_disabled_orphans_as_terminal_registry_evidence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A source-removed, disabled workflow has no remaining lifecycle mutation."""
+        output = tmp_path / "report.json"
+        client = _base_stub_client(
+            workflow_records=[
+                _record(1, "CI", ".github/workflows/ci.yml", "active"),
+                _record(
+                    2,
+                    "retired repair",
+                    ".github/workflows/apply-retired-repair.yml",
+                    "disabled_manually",
+                ),
+            ]
+        )
+        monkeypatch.setattr(audit, "_build_client_from_env", lambda: client)
+
+        exit_code = audit.main(
+            [
+                "audit",
+                "--repository",
+                "ContextualWisdomLab/ThreadWeave",
+                "--output",
+                str(output),
+            ]
+        )
+
+        assert exit_code == 0
+        report = json.loads(output.read_text(encoding="utf-8"))
+        assert report["summary"]["orphan_disabled"] == 1
+        assert report["recommended_disable_workflow_ids"] == []
+
     def test_main_exits_nonzero_without_writing_report_on_audit_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

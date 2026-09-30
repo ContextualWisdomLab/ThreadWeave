@@ -91,7 +91,8 @@ Deleting a workflow's YAML from the tree does not disable its independent regist
 2. re-read the report's `recommended_disable_workflow_ids` — only `orphan_active` records, bound to the exact protected-main SHA and open-PR-head snapshot the audit observed;
 3. an authorized operator re-runs the full audit immediately before disabling (not just a spot check of individual IDs) and confirms each ID is still `orphan_active` in that fresh run — state can move between the original audit and the disable action, and a fresh full run also re-detects a new orphan, a re-added workflow, or a moved PR head that a narrower per-ID check would miss;
 4. disable only confirmed IDs through the GitHub Actions lifecycle API with an explicit mutation credential; the audit tool itself never holds write authority (ADR-0010);
-5. preserve every currently supported workflow (`ci`, `Hourly PR Maintenance`, `Hourly Product Development`, `Release ThreadWeave`, `Actions Registry Audit`, and current security workflows) and record before/after evidence.
+5. re-run the audit and require those identities to classify as `orphan_disabled`; this is terminal evidence because GitHub documents no workflow-identity deletion endpoint, so disabled records remain visible but no longer fail the audit;
+6. preserve every currently supported workflow (`ci`, `Hourly PR Maintenance`, `Hourly Product Development`, `Release ThreadWeave`, `Actions Registry Audit`, and current security workflows) and record before/after evidence.
 
 ### Release failure
 
