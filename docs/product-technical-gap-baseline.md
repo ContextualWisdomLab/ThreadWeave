@@ -1,7 +1,7 @@
 # ThreadWeave Product/Technical Gap Baseline
 
 **Status:** Living document — reconcile on every PR merge, release, or cross-repository dependency change
-**Last reviewed:** 2026-09-07
+**Last reviewed:** 2026-09-30
 
 Read this first if you are deciding what to work on next in ThreadWeave. It lists every open PR/issue with its exact blocking dependency, and the one confirmed cross-repository gap (LineageWeave/naruon) so work lands where it actually unblocks something instead of duplicating effort already tracked elsewhere.
 
@@ -11,49 +11,38 @@ Read this first if you are deciding what to work on next in ThreadWeave. It list
 2. Before merging a PR, update the row it closes so the next contributor does not re-investigate solved gaps.
 3. If a gap spans more than one ContextualWisdomLab repository, record both sides here and in the counterpart repository's own gap baseline, and link the exact issue/PR numbers — do not restate the other repository's authority boundary from memory.
 
-## Open PR inventory (2026-08-23)
+## Open PR inventory (2026-09-30)
 
 | PR | Title | State | Blocking dependency | Next action |
 |---|---|---|---|---|
-| [#20](https://github.com/ContextualWisdomLab/ThreadWeave/pull/20) | `feat: add incremental mailbox threading with stable identity handoff` | Draft, `CONFLICTING` | Issue #17 (external PyPI Trusted Publisher) must close first; the PR body forbids merging before that | Do not rebase/merge yet. Once #17 closes: refresh onto released main, resolve conflicts, rerun full Python 3.10–3.14 + coverage + mailbox-scale parity evidence, get independent review. |
-| [#32](https://github.com/ContextualWisdomLab/ThreadWeave/pull/32) | `fix(operations): audit orphaned Actions workflow identities` | Open (marked ready for review), all required checks green, no unresolved review threads | Production module (`scripts/ci/actions_registry_audit.py`) is fully implemented and has been through several review rounds (CodeRabbit/Devin/github-code-quality) with every finding fixed or explicitly addressed: identity/path validation, complete verified pagination, protected-main/PR-head tree reads, the seven-way finite classification model, atomic schema-v1 evidence, a strict `GitHubJsonClient`, and `.github/workflows/actions-registry-audit.yml` at exactly `actions: read`/`contents: read`/`pull-requests: read`. 100% statement/branch/docstring coverage. Will be recorded as **ADR-0010** once PR #32 merges; the ADR file is not yet on this branch. | Historically blocked by two org-level conditions, both now cleared on protected `.github` main: `.github#624` (provider outage) and the strix provider-routing defect fixed via `.github` PR #1322 (superseding #1213). No repository-side action remains; merge gates now evaluate normally. |
-| [#34](https://github.com/ContextualWisdomLab/ThreadWeave/pull/34) | `docs: add product/technical gap baseline and LineageWeave consumer boundary ADR` | Open, all required checks green, no unresolved review threads (this document's own PR) | Same dual blocker as #32 (`.github#624` + strix routing fixed by `.github` PR #1322 superseding #1213) — both cleared; this PR is merging through normal gates. |
+| [#44](https://github.com/ContextualWisdomLab/ThreadWeave/pull/44) | `fix(ci): restore protected-ref concurrency cancellation` | Draft; current `fix/ci-protected-ref-concurrency` head; mergeable | Canonical foundation. At head `afa5378ec807fc69d6a394215b428e7f6367f120`, CI, SAST, and Security were terminal-success. CodeQL run `36735357962` dispatched successfully but both language jobs failed at the terminal-verdict wake/publication boundary; the owner incident is `.github#1929`. | Keep Draft. Local isolated verification on 2026-09-30: Ruff, compileall, doctests, 432 tests, 637/637 statements and 260/260 branches, wheel/sdist build, and `pip check`. Require authenticated current-head CodeQL success and independent approval before Ready/merge. |
+| [#35](https://github.com/ContextualWisdomLab/ThreadWeave/pull/35) | `fix(release): use approved PyPI token publisher` | Draft; exact head `35ed8f556e1372e123ea81a99316177ffcb06fc6`; mergeable | Issue #17 implementation owner. Its current CI/Security failures inherit the protected-main concurrency defect repaired by #44; CodeQL also has no terminal exact-head verdict. | Keep alive. After #44 integrates, non-force refresh, rerun the complete release/security/package contract, and obtain current-head review before normal merge. |
+| [#45](https://github.com/ContextualWisdomLab/ThreadWeave/pull/45) | `docs: make README links registry-safe` | Draft; exact head `f1d0b9999540797cd341a2aa77b75d6694c32cb6`; base `fix/ci-protected-ref-concurrency` | Correctly stacked on #44. CI and SAST passed; dependency-review and CodeQL terminal evidence remain missing. | Preserve the stack. Revalidate only after #44 integrates or the branch deliberately incorporates its final head. |
+| [#37](https://github.com/ContextualWisdomLab/ThreadWeave/pull/37) | `docs: make Pages repository navigation durable` | Draft; exact head `714530ee834d0504d3c79879fac845c48d2cb3e8`; base `fix/ci-protected-ref-concurrency` | Correctly stacked on #44. CI and SAST passed; dependency-review and CodeQL terminal evidence remain missing. | Preserve the stack and require fresh exact-head gates after #44. No Pages publication claim is made here. |
+| [#48](https://github.com/ContextualWisdomLab/ThreadWeave/pull/48) | `docs(adr): verified APA 7th citations for ADR-0001–0008` | Draft; exact head `0da789d7cbd8e00dfb596f026e20c5b118d9270a`; mergeable | Its five Python jobs fail only because protected `main` lacks #44's concurrency repair. It completely contains #47's valid RFC 5256 citation requirement, but successor carryover is not complete until normal integration. | Keep Draft; after #44, reconcile README/ADR-0008 overlap with #35/#45, rerun checks, and retain #47 until the carryover is verified on protected main. |
+| [#47](https://github.com/ContextualWisdomLab/ThreadWeave/pull/47) | `docs(adr): cite RFC 5256 for ADR 0003` | Draft; exact head `eb742e6128cf6196aff3d9e9c08968648456916a`; mergeable | Valid delta is proposed for complete successor carryover by #48. Current CI RED is the protected-main defect repaired by #44, not citation content. | Do not close early. Preserve until #48 carries every locator/citation requirement through normal integration; otherwise repair this branch after #44. |
+| [#39](https://github.com/ContextualWisdomLab/ThreadWeave/pull/39) | `refactor(naming): use semantic command helper name` | Draft; exact head `65f4225fe3d97473b61f08d37e432cb2c0197a3b`; mergeable | The 431-pass/1-fail matrix is caused by protected-main concurrency, not the rename; #44 is the prerequisite. | Keep alive. Non-force refresh after #44, then rerun exact-head checks and review. |
+| [#43](https://github.com/ContextualWisdomLab/ThreadWeave/pull/43) | `fix(actions): route hourly development through orchestrator free` | Draft; exact head `fe8a9acb2df10ee3a73ac361461c63ee4ef3d01a`; mergeable | Owns issue #38, but remains architecturally incomplete while the leaf workflow owns provider-secret inventory and contextual-orchestrator source/bootstrap instead of a released owner contract. | Keep Draft and fail closed. Complete the immutable contextual-orchestrator release and central reusable caller contract before a thin consumer update; do not copy owner source or use direct-provider fallback. |
+| [#46](https://github.com/ContextualWisdomLab/ThreadWeave/pull/46) | `test(ci): remove superseded concurrency assertion` | Draft; exact head `b88de2c8e07a2c2f794710cc475342f30efa1738`; mergeable | Deleting the assertion would weaken #44's repaired contract. #44 carries the valid RCA and GREEN requirement with the correct workflow fix. | Do not merge or close early. Once #44 integrates normally, verify complete successor carryover and only then retire #46 with recorded evidence. |
+| [#20](https://github.com/ContextualWisdomLab/ThreadWeave/pull/20) | `feat: add incremental mailbox threading with stable identity handoff` | Draft; exact head `9a62efa8412f8800372bbbd078d6aec2f3afc7b8`; `CONFLICTING` | Issue #17 and the verified 0.2.0 release must close first. | Do not rebase or merge yet. After release: non-force refresh onto released main, resolve conflicts, rerun Python 3.10–3.14, 100% coverage, randomized parity, and 100,000-message evidence, then obtain current-head review. |
 
-### Correction to the "`#624` blocks everything" reading (2026-08-23)
+### Canonical dependency graph
 
-`.github#624` is real but is no longer the whole story, and treating it as the
-single blocker sends the next contributor to the wrong repository. Two further,
-independently-reproduced root causes now sit between these PRs and a merge:
+The shortest safe integration path is `#44 → #35 → issue #17 release proof → #20`.
+PRs #45 and #37 are already stacked on #44. PRs #39, #47, and #48 remain
+alive behind the same foundation and must be refreshed without force-push after
+it lands. PR #46 is not a competing writer: its valid requirement is carried by
+#44, while its assertion deletion is deliberately rejected.
 
-1. **`strix` provider-routing defect (org-wide, in `.github` `main`).**
-   `STRIX_FALLBACK_MODELS` ends in the hyphenated `openai-direct/gpt-5.6-luna`
-   alias — a spelling protected main's own trusted
-   `scripts/ci/strix_required_workflow_smoke.sh` pins verbatim, so the value
-   cannot be changed. `scripts/ci/strix_quick_gate.sh` recognized only the
-   underscored `openai_direct/` form, so once NVIDIA NIM rate-limited the
-   primary and first fallback model, the third fallback reached LiteLLM as a
-   literal unrecognized provider string and the scan died with
-   `litellm.BadRequestError: LLM Provider NOT provided`. Reproduced three times
-   deterministically; the same signature is failing LineageWeave's own required
-   `strix` check. Fix in flight as `.github#1213`.
-2. **`pull_request_target` self-reference trap.** `strix.yml` resolves its
-   trusted source via `job.workflow_sha`, which on `pull_request_target`
-   resolves to the **base branch** commit. Every `.github` PR's own `strix`
-   check therefore fetches `strix_quick_gate.sh` from protected `main`,
-   regardless of the PR branch's contents. A PR that fixes that file cannot
-   verify its own fix; only a merge to `main` can. This is why the standalone
-   fix attempt (`.github#1256`) was correctly closed as superseded rather than
-   iterated on.
-
-**What this means for ThreadWeave (2026-08-25 update):** no repository-side action was ever required for PR #32 or PR #34. Both org-level blockers have now cleared — provider access is restored past `.github#624`, and the strix provider-routing defect is fixed on protected `.github` main by PR #1322 (which supersedes #1213). Both PRs proceed through their normal merge gates.
-
-## Open issue inventory (2026-08-23)
+## Open issue inventory (2026-09-30)
 
 | Issue | Title | Blocking dependency | Next action |
 |---|---|---|---|
-| [#17](https://github.com/ContextualWisdomLab/ThreadWeave/issues/17) | Release operations: complete PyPI Trusted Publishing for 0.2.0 | Repository-owned prerequisite (PR #30) is merged. Remaining blockers are both external and cannot be closed by a source change alone: (a) create a GitHub `pypi` deployment environment with protected-branch-only deployment and an independent required reviewer; (b) configure a PyPI Trusted Publisher on the `threadweave` PyPI project for `ContextualWisdomLab/ThreadWeave`, workflow `release.yml`, environment `pypi`. As of 2026-08-23, `GET /repos/ContextualWisdomLab/ThreadWeave/environments` returns `total_count: 0` and PyPI's public `threadweave` project JSON exposes only `0.1.0`. | A repository admin creates the `pypi` environment and an account owner configures the PyPI Trusted Publisher; do not manually upload a distribution or add a long-lived PyPI token as a substitute (explicit non-bypass rule in the issue). |
-| [#31](https://github.com/ContextualWisdomLab/ThreadWeave/issues/31) | `[Fleet incident] Disable orphaned PR 20 repair and hourly-diagnostics workflow identities` | PR #32's real implementation (see above) is the repository-owned detector this issue needs before an authorized operator can safely disable orphan workflow identities | Unblocked with PR #32: both org-level blockers (`.github#624`; strix routing, fixed by `.github` PR #1322 superseding #1213) are cleared, so the detector can be operated against live workflow identities. |
-| [#22](https://github.com/ContextualWisdomLab/ThreadWeave/issues/22) | `[Incident] Hourly Product Development blocks its own GitHub API egress` | Criterion 5 only: needs the PR queue genuinely drained and release policy (issue #17) to permit product development before the bounded OpenCode/NVIDIA path can produce its proof run | Re-check after #17 and the PR queue above both close. The queue (#32, #34) isn't stuck on scheduling — it's the same `.github#624` review-dispatch outage. |
+| [#17](https://github.com/ContextualWisdomLab/ThreadWeave/issues/17) | Release operations: publish and verify ThreadWeave 0.2.0 | The former external Trusted Publisher prerequisite is superseded. The approved organization `PIPY_TOKEN` publisher path is implemented only on Draft PR #35. | Merge #44, refresh and complete #35, then require protected-main CI, deterministic artifacts, SLSA/SPDX evidence, immutable tag/release, public filename/SHA-256 equality, and clean `threadweave==0.2.0` install/THREAD smoke. Never expose credential values. |
+| [#19](https://github.com/ContextualWisdomLab/ThreadWeave/issues/19) | `[Post-0.2.0 Product Gap] Incremental mailbox threading with stable identity handoff` | Implemented on Draft PR #20 but explicitly gated behind issue #17 and the verified 0.2.0 release. | Preserve active-PR maturity. After release, refresh #20 and reacquire parity, hostile-input, concurrency, snapshot, and mailbox-scale evidence. |
+| [#38](https://github.com/ContextualWisdomLab/ThreadWeave/issues/38) | Route hourly workflow through `orchestrator/free` | Draft PR #43 removes direct provider routing but still violates the owner boundary by consuming provider secrets and contextual-orchestrator source/bootstrap in the leaf. | Complete the canonical owner release/reusable caller prerequisite, then reduce ThreadWeave to a thin fail-closed consumer and verify model behavior on the exact head. |
+| [#31](https://github.com/ContextualWisdomLab/ThreadWeave/issues/31) | `[Fleet incident] Disable orphaned PR 20 repair and hourly-diagnostics workflow identities` | Detection shipped through the earlier PR #32 lineage, but the issue still requires authorized live registry mutation and immutable before/after evidence. | Re-fetch the full registry at the exact protected-main SHA, disable only verified active-orphan identities through the authorized operator path, and retain supported CI/hourly/release workflows. |
+| [#22](https://github.com/ContextualWisdomLab/ThreadWeave/issues/22) | `[Incident] Hourly Product Development blocks its own GitHub API egress` | Criteria 1–4 are satisfied. Criterion 5 requires issue #17 closed and the truthful PR queue drained before the bounded model path can execute. | Keep open without manufacturing an empty queue. Record a protected-main bounded proposal/defer run only after the release and queue gates permit it. |
 
 ## Cross-repository gap: LineageWeave evidence consumption (naruon#1437)
 
@@ -85,9 +74,10 @@ not as a transitive step through `naruon#1350`.
 | Gap | Why a host would notice | Current maturity |
 |---|---|---|
 | Incremental mailbox threading (large-mailbox performance) | A host with a large, actively-changing mailbox must currently rebuild the full thread forest on every arrival/expunge/correction; PR #20 removes that cost but is not yet mergeable | proposed/active-PR (ADR-0004), blocked on issue #17 |
-| Published 0.2.0 release | `pip install threadweave` still installs 0.1.0; Python 3.14 support, the documentation graph, and the release-readiness preflight (PR #30) are already on protected main but not yet publicly released | blocked on issue #17 external account-side configuration |
-| Orphaned Actions workflow identities | Does not affect library consumers directly, but leaves 27 live workflow identities against 4 supported sources in the organization's automation surface, which is a governance/audit gap for a repository claiming SOC 2/CSAP-aligned practice | PR #32 GREEN implementation complete (to be recorded as ADR-0010 after merge); pending CI/review/merge |
-| CI protected-ref runner cancellation | `main` push runs currently key concurrency by `github.run_id`, so `cancel-in-progress: true` cannot cancel an older run for the same protected ref. This wastes runner capacity and can leave stale protected-main verification running beside the newest push. The existing workflow regression already fails against protected `main`. | repair in `fix/ci-protected-ref-concurrency`; restore the stable protected-ref key, then require exact-head Python 3.10–3.14/full-suite/workflow-lint/security evidence before merge |
+| Published 0.2.0 release | `pip install threadweave` still installs 0.1.0; Python 3.14 support and the release-readiness foundation exist, but the reviewed organization-token publication path is only on PR #35 | blocked on #44 → #35 → issue #17 public-artifact proof |
+| Orphaned Actions workflow identities | Historical repair workflow records remain a control-plane audit gap even after their source files left protected main | detector lineage implemented; issue #31 remains open for authorized live disablement plus immutable before/after evidence |
+| CI protected-ref runner cancellation | `main` push runs currently key concurrency by `github.run_id`, so `cancel-in-progress: true` cannot cancel an older run for the same protected ref. This wastes runner capacity and causes dependent PRs to inherit a contradictory regression. | PR #44 implementation locally GREEN at exact head; pending authoritative hosted CodeQL/Strix evidence, independent approval, and normal merge |
+| Governed model route | The hourly development workflow still exposes direct-provider/bootstrap responsibility at the leaf boundary | issue #38 / Draft PR #43; blocked on an immutable contextual-orchestrator owner release and reusable central caller contract |
 
 ## Not applicable to this repository
 
